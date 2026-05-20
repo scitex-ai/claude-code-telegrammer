@@ -22,6 +22,9 @@ import {
   PROJECT,
   AGENT_ID,
   BOT_TOKEN_HASH,
+  READ_RECEIPTS_ENABLED,
+  RECEIPT_DELIVERED_EMOJI,
+  RECEIPT_READ_EMOJI,
 } from "../lib/config.js";
 
 describe("config", () => {
@@ -81,5 +84,15 @@ describe("config", () => {
 
   test("BOT_TOKEN_HASH is 8-char hex from token", () => {
     expect(BOT_TOKEN_HASH).toMatch(/^[0-9a-f]{8}$/);
+  });
+
+  test("READ_RECEIPTS_ENABLED defaults to true when env unset", () => {
+    // preload.ts does not set CLAUDE_CODE_TELEGRAMMER_TELEGRAM_READ_RECEIPTS
+    expect(READ_RECEIPTS_ENABLED).toBe(true);
+  });
+
+  test("receipt emojis are ⚡ and 👀", () => {
+    expect(RECEIPT_DELIVERED_EMOJI).toBe("⚡");
+    expect(RECEIPT_READ_EMOJI).toBe("👀");
   });
 });
