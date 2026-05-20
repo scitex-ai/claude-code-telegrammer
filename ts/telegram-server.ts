@@ -21,6 +21,7 @@
  *   CLAUDE_CODE_TELEGRAMMER_TELEGRAM_HOST_NAME     - default: os.hostname()
  *   CLAUDE_CODE_TELEGRAMMER_TELEGRAM_PROJECT       - default: process.cwd()
  *   CLAUDE_CODE_TELEGRAMMER_TELEGRAM_AGENT_ID      - default: 'telegram'
+ *   CLAUDE_CODE_TELEGRAMMER_TELEGRAM_READ_RECEIPTS - ⚡/👀 receipts, default: on
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";

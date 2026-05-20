@@ -14,6 +14,7 @@ import {
   insertAttachment,
 } from "./store.js";
 import { queueDownload } from "./attachments.js";
+import { markDelivered, markRead } from "./receipts.js";
 
 let updateOffset = 0;
 let polling = true;
@@ -286,12 +287,9 @@ async function handleUpdate(mcp: Server, update: any): Promise<void> {
     }
   }
 
-  // Ack: react with "received" after SQLite insert succeeds
-  tgApi("setMessageReaction", {
-    chat_id: chatId,
-    message_id: msg.message_id,
-    reaction: [{ type: "emoji", emoji: "\uD83D\uDCE9" }],
-  }).catch(() => {});
+  // Stage 1 receipt: \u26A1 "delivered" \u2014 the relay received + persisted the
+  // message. Automatic, idempotent, best-effort (failures logged, not thrown).
+  void markDelivered(chatId, String(msg.message_id));
 
   // Fire-and-forget typing indicator
   tgApi("sendChatAction", { chat_id: chatId, action: "typing" }).catch(
@@ -331,6 +329,11 @@ async function handleUpdate(mcp: Server, update: any): Promise<void> {
     .notification({
       method: "notifications/claude/channel",
       params: { content: text, meta },
+    })
+    .then(() => {
+      // Stage 2 receipt: 👀 "read" — the message was surfaced into the Claude
+      // session (notification delivered). Idempotent + best-effort.
+      void markRead(chatId, String(msg.message_id));
     })
     .catch((err) => {
       log("poller", "failed to deliver inbound to Claude", {

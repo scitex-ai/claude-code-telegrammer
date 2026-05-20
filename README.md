@@ -279,6 +279,7 @@ Response throttling: minimum interval between responses, burst limit (10 in 3s w
 | `CLAUDE_CODE_TELEGRAMMER_TELEGRAM_HOST_NAME` | No | `os.hostname()` | Hostname stored with each message |
 | `CLAUDE_CODE_TELEGRAMMER_TELEGRAM_PROJECT` | No | `process.cwd()` | Project path stored with each message |
 | `CLAUDE_CODE_TELEGRAMMER_TELEGRAM_AGENT_ID` | No | `'telegram'` | Agent identifier stored with each message |
+| `CLAUDE_CODE_TELEGRAMMER_TELEGRAM_READ_RECEIPTS` | No | `on` | Two-stage read-receipt reactions: ⚡ on receive, 👀 when surfaced into the session. Set to `0`/`false`/`no`/`off` to disable. |
 
 **Watchdog:**
 
