@@ -46,6 +46,28 @@ export const READ_RECEIPTS_ENABLED: boolean = !["0", "false", "no", "off"].inclu
 export const RECEIPT_DELIVERED_EMOJI = "⚡"; // ⚡
 export const RECEIPT_READ_EMOJI = "👀"; // 👀
 
+// ── Wake-on-push (idle SDK-runner sessions) ─────────────────────────────────
+//
+// Inbound delivery via `notifications/claude/channel` renders a <channel> tag
+// for an ACTIVE turn, but does NOT advance an IDLE session — the standard
+// Claude Code CLI has a live event loop that picks it up, but an SDK-runner
+// session (e.g. a scitex-agent-container apptainer agent) is parked on its
+// inbox queue and never sees the notification.
+//
+// When TURN_URL is set, each qualifying inbound message is additionally
+// POSTed to that endpoint (the agent's own /v1/turn) so the runner enqueues
+// it onto the persistent SDK conversation and drives a turn at once — push
+// behaves like the lead's interactive Telegram channel. Unset (the default)
+// preserves the notification-only path for the interactive CLI.
+//
+// This mirrors scitex-agent-container's `sac mcp channel --turn-url` wake
+// primitive (runtimes/_mcp/_channel_wake.py::_wake_turn).
+export const TURN_URL =
+  process.env.CLAUDE_CODE_TELEGRAMMER_TURN_URL ?? "";
+// Optional bearer for the /v1/turn POST (sent as Authorization: Bearer ...).
+export const TURN_BEARER =
+  process.env.CLAUDE_CODE_TELEGRAMMER_TURN_BEARER ?? "";
+
 // ── Agent identity ─────────────────────────────────────────────────────────
 
 export const HOST_NAME =
