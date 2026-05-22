@@ -15,6 +15,7 @@ import {
 } from "./store.js";
 import { queueDownload } from "./attachments.js";
 import { markDelivered, markRead } from "./receipts.js";
+import { wakeTurn, wakeEnabled } from "./wake.js";
 
 let updateOffset = 0;
 let polling = true;
@@ -325,6 +326,9 @@ async function handleUpdate(mcp: Server, update: any): Promise<void> {
     text: text.slice(0, 50),
     row_id: rowId,
   });
+
+  // Notification path — renders <channel> in an ACTIVE turn (interactive
+  // Claude Code CLI). Does NOT advance an IDLE SDK-runner session.
   mcp
     .notification({
       method: "notifications/claude/channel",
@@ -340,4 +344,16 @@ async function handleUpdate(mcp: Server, update: any): Promise<void> {
         error: String(err),
       });
     });
+
+  // Wake-on-push — when CLAUDE_CODE_TELEGRAMMER_TURN_URL is set (SDK-runner
+  // agents), additionally POST the message to the agent's own /v1/turn so an
+  // IDLE session is woken and drives a turn now (push ≡ Telegram). No-op for
+  // the interactive CLI (TURN_URL unset). markRead is idempotent, so firing
+  // it again on wake success is safe and ensures the 👀 receipt lands even
+  // when the notification path is the one that's inert (idle session).
+  if (wakeEnabled()) {
+    void wakeTurn(text, meta).then((ok) => {
+      if (ok) void markRead(chatId, String(msg.message_id));
+    });
+  }
 }
