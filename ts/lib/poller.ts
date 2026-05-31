@@ -14,7 +14,13 @@ import {
   insertAttachment,
 } from "./store.js";
 import { queueDownload } from "./attachments.js";
-import { markDelivered, markRead } from "./receipts.js";
+import {
+  markDelivered,
+  markReceived,
+  markDone,
+  markFailed,
+  markRead,
+} from "./receipts.js";
 import { wakeTurn, wakeEnabled } from "./wake.js";
 
 let updateOffset = 0;
@@ -335,21 +341,22 @@ async function handleUpdate(mcp: Server, update: any): Promise<void> {
       params: { content: text, meta },
     })
     .then(() => {
-      // Stage 2 receipt: 👀 "agent received it".
+      // Stage 2 receipt: 👀 "agent received".
       //
-      // SDK-runner mode (wakeEnabled, TURN_URL set): MCP-notification
-      // ack does NOT mean the agent received the message — a dead /
-      // stopped agent's MCP server can still ack notifications while
-      // no agent is alive. Defer 👀 to the /v1/turn-2xx path below
-      // (the bridge POSTs to the agent's own /v1/turn; 2xx is the
-      // operator's "agent got it" signal). Not waiting for a reply.
+      // SDK-runner mode (wakeEnabled, TURN_URL set): an MCP-notification
+      // ack does NOT prove the agent received the message — a dead /
+      // stopped agent's MCP server can still ack notifications while no
+      // agent is alive. Defer 👀 to the /v1/turn-2xx path below (the
+      // bridge POSTs to the agent's own /v1/turn; 2xx is the operator's
+      // "agent got it" signal), which also fires ✅ in sequence under
+      // current sac /v1/turn case-B semantics.
       //
       // Interactive-CLI mode (no TURN_URL): there is no /v1/turn to
       // gate against; the MCP notification IS the only "agent
       // received" signal (Claude Code's running event loop receives
       // the <channel> render). Set 👀 here. Idempotent + best-effort.
       if (!wakeEnabled()) {
-        void markRead(chatId, String(msg.message_id));
+        void markReceived(chatId, String(msg.message_id));
       }
     })
     .catch((err) => {
@@ -360,17 +367,31 @@ async function handleUpdate(mcp: Server, update: any): Promise<void> {
 
   // Wake-on-push — when CLAUDE_CODE_TELEGRAMMER_TURN_URL is set
   // (SDK-runner agents), POST the message to the agent's own /v1/turn.
-  // This is the AUTHORITATIVE 👀-trigger in SDK-runner mode: 👀 fires
-  // iff the POST itself returns 2xx — that is, the agent runner
-  // received the message. A dead / stopped agent (connection refused,
-  // timeout, 401, any non-2xx) yields ok=false and 👀 is NOT set; the
-  // operator sees only the ⚡ delivered receipt and can tell the agent
-  // is down. We do NOT wait for the agent to finish the turn or
-  // produce a reply — 👀 is purely the "POST succeeded" signal per
-  // the operator's two-stage spec.
+  // This is the AUTHORITATIVE receipt-trigger in SDK-runner mode:
+  //
+  //   wakeTurn ok=true  → 👀 received (stage 2) + ✅ done (stage 3)
+  //   wakeTurn ok=false → ❌ failed   (stage 4)
+  //
+  // Under current scitex-agent-container, sac /v1/turn is case (B):
+  // the POST returns 2xx only AFTER the turn completes. So ok=true is
+  // simultaneously "agent received" and "agent finished" — we fire 👀
+  // then ✅ in sequence (idempotent setMessageReaction; the visible
+  // Telegram reaction advances ⚡ → 👀 → ✅). This sequence is forward-
+  // compatible if sac ever splits the signals (enqueue-ack vs
+  // completed-turn): the two callsites can then be wired independently.
+  //
+  // A dead / stopped agent (connection refused, timeout, 401, any non-
+  // 2xx) yields ok=false and ❌ is set; the operator sees ⚡ then ❌ and
+  // can tell the agent is down. 👀 is never reached in that case — by
+  // design.
   if (wakeEnabled()) {
     void wakeTurn(text, meta).then((ok) => {
-      if (ok) void markRead(chatId, String(msg.message_id));
+      if (ok) {
+        void markReceived(chatId, String(msg.message_id))
+          .then(() => markDone(chatId, String(msg.message_id)));
+      } else {
+        void markFailed(chatId, String(msg.message_id));
+      }
     });
   }
 }

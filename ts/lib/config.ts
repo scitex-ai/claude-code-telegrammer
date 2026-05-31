@@ -30,12 +30,30 @@ export const ENV_ALLOWED = (
 
 // ── Read receipts ──────────────────────────────────────────────────────────
 //
-// Automatic two-stage read-receipt reactions on inbound operator messages:
-//   ⚡  ("delivered") — set the moment the relay receives + persists the message
-//   👀 ("read")      — set when the message is surfaced into the Claude session
+// Automatic four-stage read-receipt reactions on inbound operator messages.
+// Single reaction per message that ADVANCES through stages (Telegram replaces
+// the bot's reaction on each setMessageReaction call; non-premium bots are
+// capped at 1 reaction/message per the Bot API):
 //
-// Both emojis are on Telegram's fixed reaction whitelist. Telegram keeps only
-// the latest bot reaction, so ⚡→👀 is a visible transition.
+//   Stage 1  ⚡  delivered — bridge received the Telegram message (and POSTed
+//                            it to the agent's /v1/turn if configured)
+//   Stage 2  👀 received   — /v1/turn POST returned 2xx in SDK-runner mode
+//                            (the agent runner accepted the message). In
+//                            interactive-CLI mode (no TURN_URL), set when
+//                            the MCP <channel> notification ack returns.
+//   Stage 3  ✅ done       — agent finished processing the turn / produced
+//                            its reply. Under current scitex-agent-container
+//                            this collapses to the same wakeTurn ok=true
+//                            instant as stage 2 (sac /v1/turn is case B:
+//                            HTTP 200 returns AFTER turn completes). The
+//                            design fires 👀 then ✅ in sequence so it stays
+//                            forward-compatible if sac later splits the
+//                            signals (enqueue-ack vs completed-turn).
+//   Stage 4  ❌ failed     — failure (agent down / 401 / connection refused /
+//                            timeout / non-2xx). Final visible state until
+//                            the operator retries.
+//
+// All four emojis are on Telegram's fixed reaction whitelist.
 //
 // Enabled by default. Set CLAUDE_CODE_TELEGRAMMER_TELEGRAM_READ_RECEIPTS to
 // any of 0/false/no/off (case-insensitive) to disable without a code change.
@@ -43,8 +61,10 @@ export const READ_RECEIPTS_ENABLED: boolean = !["0", "false", "no", "off"].inclu
   (process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_READ_RECEIPTS ?? "").trim().toLowerCase(),
 );
 
-export const RECEIPT_DELIVERED_EMOJI = "⚡"; // ⚡
-export const RECEIPT_READ_EMOJI = "👀"; // 👀
+export const RECEIPT_DELIVERED_EMOJI = "⚡"; // stage 1
+export const RECEIPT_READ_EMOJI = "👀"; // stage 2 (a.k.a. "received")
+export const RECEIPT_DONE_EMOJI = "✅"; // stage 3 (turn completed)
+export const RECEIPT_FAILED_EMOJI = "❌"; // stage 4 (failure)
 
 // ── Wake-on-push (idle SDK-runner sessions) ─────────────────────────────────
 //

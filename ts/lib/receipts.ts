@@ -1,18 +1,29 @@
 /**
- * Automatic two-stage read-receipt reactions on inbound operator messages.
+ * Automatic four-stage read-receipt reactions on inbound operator messages.
  *
- * Driven by the relay daemon itself (not by the agent reacting manually):
- *   ⚡  delivered — set the moment the relay receives the Telegram message
- *                  (and POSTs it to the agent's /v1/turn, if configured)
- *   👀 received  — set when the agent's /v1/turn POST returns 2xx in
- *                  SDK-runner mode (the agent runner accepted the
- *                  message). In interactive-CLI mode (no TURN_URL),
- *                  set when the MCP <channel> notification ack returns.
- *                  We do NOT wait for a reply / turn completion — 👀
- *                  is the 'agent got it' signal, nothing more.
+ * Driven by the relay daemon itself (not by the agent reacting manually).
+ * Single reaction per message that ADVANCES through stages — Telegram
+ * replaces the bot's reaction on each setMessageReaction call (non-premium
+ * bots cap at 1 reaction/message per the Bot API):
  *
- * Telegram keeps only the latest bot reaction, so the ⚡→👀 transition is
- * visible to the operator. Both emojis are on Telegram's fixed whitelist.
+ *   Stage 1  ⚡  delivered — relay received the Telegram message (and POSTed
+ *                            it to the agent's /v1/turn if configured)
+ *   Stage 2  👀 received   — agent's /v1/turn POST returned 2xx in SDK-runner
+ *                            mode (the agent runner accepted the message).
+ *                            In interactive-CLI mode (no TURN_URL), set
+ *                            when the MCP <channel> notification ack returns.
+ *   Stage 3  ✅ done       — agent finished processing the turn / produced
+ *                            its reply. Under current sac, collapses to
+ *                            the same ok=true instant as stage 2 (sac
+ *                            /v1/turn is case B: HTTP 200 returns AFTER the
+ *                            turn completes). The design still fires 👀
+ *                            then ✅ in sequence so it stays forward-
+ *                            compatible if sac later splits the signals.
+ *   Stage 4  ❌ failed     — failure (agent down / 401 / connection refused /
+ *                            timeout / non-2xx). Final visible state until
+ *                            the operator retries.
+ *
+ * All four emojis are on Telegram's fixed reaction whitelist.
  *
  * Reactions are:
  *   - configurable: gated by READ_RECEIPTS_ENABLED (env var, default ON)
@@ -26,10 +37,12 @@ import {
   READ_RECEIPTS_ENABLED,
   RECEIPT_DELIVERED_EMOJI,
   RECEIPT_READ_EMOJI,
+  RECEIPT_DONE_EMOJI,
+  RECEIPT_FAILED_EMOJI,
 } from "./config.js";
 import { log } from "./log.js";
 
-type Stage = "delivered" | "read";
+type Stage = "delivered" | "received" | "done" | "failed";
 
 /**
  * Low-level reaction sender. Reuses the same setMessageReaction code path as
@@ -101,7 +114,48 @@ export function markDelivered(chatId: string, messageId: string): Promise<void> 
   return setReceipt(chatId, messageId, "delivered", RECEIPT_DELIVERED_EMOJI);
 }
 
-/** Stage 2 — 👀 when the message is surfaced into the Claude session. */
+/**
+ * Stage 2 — 👀 the agent runner accepted the message.
+ *
+ * In SDK-runner mode (TURN_URL set), fired when the agent's /v1/turn POST
+ * returns 2xx. In interactive-CLI mode (no TURN_URL), fired when the MCP
+ * <channel> notification ack returns. NOT a "reply produced" signal — that
+ * is stage 3 (markDone).
+ */
+export function markReceived(chatId: string, messageId: string): Promise<void> {
+  return setReceipt(chatId, messageId, "received", RECEIPT_READ_EMOJI);
+}
+
+/**
+ * Stage 3 — ✅ the agent finished processing the turn / produced its reply.
+ *
+ * Under current scitex-agent-container, sac /v1/turn is case (B): the POST
+ * returns 2xx only AFTER the turn completes. So in SDK-runner mode, the
+ * ok=true instant from wakeTurn is simultaneously "agent received" (stage 2)
+ * and "agent finished" (stage 3). The poller fires markReceived then markDone
+ * in sequence; if sac ever splits the signals (enqueue-ack vs completed-turn)
+ * the two arms can be wired independently without changing this API.
+ */
+export function markDone(chatId: string, messageId: string): Promise<void> {
+  return setReceipt(chatId, messageId, "done", RECEIPT_DONE_EMOJI);
+}
+
+/**
+ * Stage 4 — ❌ failure (agent down / 401 / connection refused / timeout /
+ * non-2xx response from /v1/turn). The final visible state until the
+ * operator retries; replaces the ⚡ from stage 1.
+ */
+export function markFailed(chatId: string, messageId: string): Promise<void> {
+  return setReceipt(chatId, messageId, "failed", RECEIPT_FAILED_EMOJI);
+}
+
+/**
+ * @deprecated Backwards-compat alias for {@link markReceived}. The old
+ * two-stage spec called this "read"; the four-stage spec calls it "received"
+ * to disambiguate from stage 3 ("done", a.k.a. reply produced). Internal
+ * callers should use markReceived; this alias is kept so external tests and
+ * any out-of-tree consumers don't break across the rename.
+ */
 export function markRead(chatId: string, messageId: string): Promise<void> {
-  return setReceipt(chatId, messageId, "read", RECEIPT_READ_EMOJI);
+  return markReceived(chatId, messageId);
 }
