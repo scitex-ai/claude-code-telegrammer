@@ -335,9 +335,21 @@ async function handleUpdate(mcp: Server, update: any): Promise<void> {
       params: { content: text, meta },
     })
     .then(() => {
-      // Stage 2 receipt: 👀 "read" — the message was surfaced into the Claude
-      // session (notification delivered). Idempotent + best-effort.
-      void markRead(chatId, String(msg.message_id));
+      // Stage 2 receipt: 👀 "read".
+      //
+      // SDK-runner mode (wakeEnabled, TURN_URL set): an MCP-notification
+      // success does NOT prove the agent actually processed the turn —
+      // a dead/stopped agent's MCP server can still ack notifications
+      // while no agent is alive. Defer 👀 to the wakeTurn-on-2xx path
+      // below, which gates on /v1/turn returning a real turn result.
+      //
+      // Interactive-CLI mode (no TURN_URL): there is no /v1/turn to
+      // confirm; the MCP notification IS the closest surfacing signal
+      // (Claude Code's running event loop receives the <channel>
+      // render). Set 👀 here. Idempotent + best-effort.
+      if (!wakeEnabled()) {
+        void markRead(chatId, String(msg.message_id));
+      }
     })
     .catch((err) => {
       log("poller", "failed to deliver inbound to Claude", {
@@ -345,12 +357,14 @@ async function handleUpdate(mcp: Server, update: any): Promise<void> {
       });
     });
 
-  // Wake-on-push — when CLAUDE_CODE_TELEGRAMMER_TURN_URL is set (SDK-runner
-  // agents), additionally POST the message to the agent's own /v1/turn so an
-  // IDLE session is woken and drives a turn now (push ≡ Telegram). No-op for
-  // the interactive CLI (TURN_URL unset). markRead is idempotent, so firing
-  // it again on wake success is safe and ensures the 👀 receipt lands even
-  // when the notification path is the one that's inert (idle session).
+  // Wake-on-push — when CLAUDE_CODE_TELEGRAMMER_TURN_URL is set
+  // (SDK-runner agents), POST the message to the agent's own /v1/turn
+  // so an IDLE session is woken and drives a turn now (push ≡ Telegram).
+  // This is the AUTHORITATIVE 👀-trigger in SDK-runner mode: 👀 fires
+  // ONLY when /v1/turn returns 2xx. A dead/stopped agent (connection
+  // refused / timeout / 401 / non-2xx) yields ok=false and 👀 is NOT
+  // set — the operator sees only the ⚡ delivered receipt and can tell
+  // the agent is down.
   if (wakeEnabled()) {
     void wakeTurn(text, meta).then((ok) => {
       if (ok) void markRead(chatId, String(msg.message_id));

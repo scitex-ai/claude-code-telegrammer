@@ -85,3 +85,66 @@ describe("read receipts", () => {
     await expect(markDelivered("100", "5")).resolves.toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// 👀 gating against /v1/turn success (fix #14: bug operator confirmed
+// 2026-06-01 — a STOPPED SDK-runner agent's DM was still getting 👀,
+// because the relay was firing markRead on MCP-notification success
+// rather than on a real successful /v1/turn). The two arms of the
+// receipt-trigger in poller.ts::handleUpdate are now:
+//
+//   1. .notification().then() — fires markRead ONLY when !wakeEnabled()
+//      (interactive CLI; no /v1/turn to confirm against).
+//   2. wakeTurn().then((ok) => if (ok) markRead) — the AUTHORITATIVE
+//      trigger in SDK-runner mode (TURN_URL set); fires ONLY on 2xx.
+//
+// These tests model the conditional decisions in isolation so the
+// regression — “dead agent still gets 👀” — can never come back without
+// flipping a clearly-named assert.
+// ---------------------------------------------------------------------------
+
+import { wakeTurn, setTurnPoster } from "../lib/wake.js";
+
+describe("👀 gating against /v1/turn success (poller.ts handleUpdate arms)", () => {
+  beforeEach(() => {
+    calls.length = 0;
+    shouldThrow = false;
+    _resetReceipts();
+  });
+
+  test("dead-agent SDK-runner: wakeTurn ok=false → NO markRead fired", async () => {
+    // Arrange: poster simulates a dead agent — fetch resolves with 502, so
+    // wakeTurn returns ok=false. (The receipt-sender is the same fake
+    // installed by beforeAll above; if markRead were fired we'd see it in
+    // `calls`.)
+    setTurnPoster(async () => 502);
+    // Act: the exact gating pattern from poller.ts::handleUpdate.
+    const ok = await wakeTurn("hello", { chat_id: "100", message_id: "5" });
+    if (ok) await markRead("100", "5"); // never reached when ok=false
+    // Assert
+    expect(calls).toEqual([]);
+  });
+
+  test("live-agent SDK-runner: wakeTurn ok=true → markRead fires", async () => {
+    setTurnPoster(async () => 200);
+    const ok = await wakeTurn("hello", { chat_id: "100", message_id: "5" });
+    if (ok) await markRead("100", "5");
+    expect(calls.length).toBe(1);
+    expect(calls[0].emoji).toBe(RECEIPT_READ_EMOJI);
+  });
+
+  test("wakeTurn returns false on non-2xx (401 dead-agent auth)", async () => {
+    setTurnPoster(async () => 401);
+    const ok = await wakeTurn("hello", { chat_id: "100", message_id: "5" });
+    expect(ok).toBe(false);
+  });
+
+  test("wakeTurn returns false on connection-refused (dead-agent socket)", async () => {
+    setTurnPoster(async () => {
+      throw new Error("connect ECONNREFUSED");
+    });
+    const ok = await wakeTurn("hello", { chat_id: "100", message_id: "5" });
+    expect(ok).toBe(false);
+  });
+});
+
