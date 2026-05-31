@@ -335,18 +335,19 @@ async function handleUpdate(mcp: Server, update: any): Promise<void> {
       params: { content: text, meta },
     })
     .then(() => {
-      // Stage 2 receipt: 👀 "read".
+      // Stage 2 receipt: 👀 "agent received it".
       //
-      // SDK-runner mode (wakeEnabled, TURN_URL set): an MCP-notification
-      // success does NOT prove the agent actually processed the turn —
-      // a dead/stopped agent's MCP server can still ack notifications
-      // while no agent is alive. Defer 👀 to the wakeTurn-on-2xx path
-      // below, which gates on /v1/turn returning a real turn result.
+      // SDK-runner mode (wakeEnabled, TURN_URL set): MCP-notification
+      // ack does NOT mean the agent received the message — a dead /
+      // stopped agent's MCP server can still ack notifications while
+      // no agent is alive. Defer 👀 to the /v1/turn-2xx path below
+      // (the bridge POSTs to the agent's own /v1/turn; 2xx is the
+      // operator's "agent got it" signal). Not waiting for a reply.
       //
       // Interactive-CLI mode (no TURN_URL): there is no /v1/turn to
-      // confirm; the MCP notification IS the closest surfacing signal
-      // (Claude Code's running event loop receives the <channel>
-      // render). Set 👀 here. Idempotent + best-effort.
+      // gate against; the MCP notification IS the only "agent
+      // received" signal (Claude Code's running event loop receives
+      // the <channel> render). Set 👀 here. Idempotent + best-effort.
       if (!wakeEnabled()) {
         void markRead(chatId, String(msg.message_id));
       }
@@ -358,13 +359,15 @@ async function handleUpdate(mcp: Server, update: any): Promise<void> {
     });
 
   // Wake-on-push — when CLAUDE_CODE_TELEGRAMMER_TURN_URL is set
-  // (SDK-runner agents), POST the message to the agent's own /v1/turn
-  // so an IDLE session is woken and drives a turn now (push ≡ Telegram).
+  // (SDK-runner agents), POST the message to the agent's own /v1/turn.
   // This is the AUTHORITATIVE 👀-trigger in SDK-runner mode: 👀 fires
-  // ONLY when /v1/turn returns 2xx. A dead/stopped agent (connection
-  // refused / timeout / 401 / non-2xx) yields ok=false and 👀 is NOT
-  // set — the operator sees only the ⚡ delivered receipt and can tell
-  // the agent is down.
+  // iff the POST itself returns 2xx — that is, the agent runner
+  // received the message. A dead / stopped agent (connection refused,
+  // timeout, 401, any non-2xx) yields ok=false and 👀 is NOT set; the
+  // operator sees only the ⚡ delivered receipt and can tell the agent
+  // is down. We do NOT wait for the agent to finish the turn or
+  // produce a reply — 👀 is purely the "POST succeeded" signal per
+  // the operator's two-stage spec.
   if (wakeEnabled()) {
     void wakeTurn(text, meta).then((ok) => {
       if (ok) void markRead(chatId, String(msg.message_id));

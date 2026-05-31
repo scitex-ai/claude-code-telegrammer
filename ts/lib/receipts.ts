@@ -2,8 +2,14 @@
  * Automatic two-stage read-receipt reactions on inbound operator messages.
  *
  * Driven by the relay daemon itself (not by the agent reacting manually):
- *   ⚡  delivered — set the moment the relay receives + persists the message
- *   👀 read      — set when the message is surfaced into the Claude session
+ *   ⚡  delivered — set the moment the relay receives the Telegram message
+ *                  (and POSTs it to the agent's /v1/turn, if configured)
+ *   👀 received  — set when the agent's /v1/turn POST returns 2xx in
+ *                  SDK-runner mode (the agent runner accepted the
+ *                  message). In interactive-CLI mode (no TURN_URL),
+ *                  set when the MCP <channel> notification ack returns.
+ *                  We do NOT wait for a reply / turn completion — 👀
+ *                  is the 'agent got it' signal, nothing more.
  *
  * Telegram keeps only the latest bot reaction, so the ⚡→👀 transition is
  * visible to the operator. Both emojis are on Telegram's fixed whitelist.

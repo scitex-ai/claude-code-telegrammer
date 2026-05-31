@@ -105,14 +105,14 @@ describe("read receipts", () => {
 
 import { wakeTurn, setTurnPoster } from "../lib/wake.js";
 
-describe("👀 gating against /v1/turn success (poller.ts handleUpdate arms)", () => {
+describe("👀 = /v1/turn POST 2xx (poller.ts handleUpdate gating)", () => {
   beforeEach(() => {
     calls.length = 0;
     shouldThrow = false;
     _resetReceipts();
   });
 
-  test("dead-agent SDK-runner: wakeTurn ok=false → NO markRead fired", async () => {
+  test("dead agent: /v1/turn POST fails (502) → NO 👀 set", async () => {
     // Arrange: poster simulates a dead agent — fetch resolves with 502, so
     // wakeTurn returns ok=false. (The receipt-sender is the same fake
     // installed by beforeAll above; if markRead were fired we'd see it in
@@ -125,7 +125,7 @@ describe("👀 gating against /v1/turn success (poller.ts handleUpdate arms)", (
     expect(calls).toEqual([]);
   });
 
-  test("live-agent SDK-runner: wakeTurn ok=true → markRead fires", async () => {
+  test("live agent: /v1/turn POST 2xx → 👀 set (no waiting for reply)", async () => {
     setTurnPoster(async () => 200);
     const ok = await wakeTurn("hello", { chat_id: "100", message_id: "5" });
     if (ok) await markRead("100", "5");
@@ -133,13 +133,13 @@ describe("👀 gating against /v1/turn success (poller.ts handleUpdate arms)", (
     expect(calls[0].emoji).toBe(RECEIPT_READ_EMOJI);
   });
 
-  test("wakeTurn returns false on non-2xx (401 dead-agent auth)", async () => {
+  test("401 dead-agent auth → /v1/turn POST fails → no 👀", async () => {
     setTurnPoster(async () => 401);
     const ok = await wakeTurn("hello", { chat_id: "100", message_id: "5" });
     expect(ok).toBe(false);
   });
 
-  test("wakeTurn returns false on connection-refused (dead-agent socket)", async () => {
+  test("connection-refused (agent process dead) → /v1/turn POST fails → no 👀", async () => {
     setTurnPoster(async () => {
       throw new Error("connect ECONNREFUSED");
     });
