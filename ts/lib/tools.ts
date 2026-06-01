@@ -8,7 +8,12 @@ import {
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { assertAllowedChat } from "./access.js";
-import { tgApi, sendMessage, sendDocument } from "./telegram-api.js";
+import {
+  tgApi,
+  sendMessage,
+  sendDocument,
+  editMessageText,
+} from "./telegram-api.js";
 import {
   saveOutbound,
   getHistory,
@@ -275,11 +280,12 @@ export function registerTools(mcp: Server): void {
         case "edit_message": {
           const chatId = args.chat_id as string;
           assertAllowedChat(chatId);
-          const result = await tgApi("editMessageText", {
-            chat_id: chatId,
-            message_id: Number(args.message_id),
-            text: args.text as string,
-          });
+          // editMessageText() applies the agent signature (idempotent).
+          const result = await editMessageText(
+            chatId,
+            Number(args.message_id),
+            args.text as string,
+          );
           const id =
             typeof result === "object" ? result.message_id : args.message_id;
           return { content: [{ type: "text", text: `edited (id: ${id})` }] };
