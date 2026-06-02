@@ -100,3 +100,81 @@ export const AGENT_ID =
 export const BOT_TOKEN_HASH: string = TOKEN
   ? new Bun.CryptoHasher("sha256").update(TOKEN).digest("hex").slice(0, 8)
   : "";
+
+// ── Outbound signature toggle + account-quota enrichment ───────────────────
+//
+// The outbound-agent-signature feature (PR #18) unconditionally appends a
+// trailing line `— <agent> (<cwd>@<hostname>)` to every Telegram message so a
+// human (and downstream parsers) can attribute a message to a specific
+// agent/host/checkout. Two follow-ups operator-requested 2026-06-02:
+//
+//   1. Kill-switch — sometimes the operator wants a clean message body (for
+//      example when another layer is also signing, to avoid double-signing).
+//      A single env flag toggles the entire append off. Mirrors the
+//      READ_RECEIPTS_ENABLED pattern.
+//
+//   2. Account + remaining quota — the human-facing line should also show
+//      WHICH Claude account is talking and HOW MUCH 5h / 7d quota that
+//      account has left. Operator's wire example:
+//          — lead (wyusuuke 5h:9 percent 7d:2 percent | /work@ywata-note-win)
+//      Data lives in <quotaCachePath()>/quota-cache.json — a host cron
+//      refreshes the file every 10 min, so we re-read on every send. The
+//      cwd@host suffix from PR #18 is preserved as a `|`-separated tail so
+//      we keep BOTH signals on one line (single append, no double-signing).
+//
+// Both behaviours are runtime-toggleable via env — buildSignature() /
+// appendSignature() consult these getters on every call, not module load,
+// so the operator can flip a flag without restarting the bridge. This is
+// also why the existing module-load constants (AGENT_ID/PROJECT/HOST_NAME)
+// stay as-is: identity is fixed for the lifetime of a bun process, but
+// signature ON/OFF + the quota numbers genuinely change at runtime.
+
+/**
+ * Returns true iff the outbound signature should be appended. Default ON.
+ * Disable by setting CLAUDE_CODE_TELEGRAMMER_TELEGRAM_SIGNATURE to one of
+ * `0|false|no|off` (case-insensitive, trimmed). Any other value (including
+ * unset, empty string, `1`, `on`, `true`, etc.) keeps the signature ON.
+ */
+export function isSignatureEnabled(): boolean {
+  const v = (process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_SIGNATURE ?? "")
+    .trim()
+    .toLowerCase();
+  return !["0", "false", "no", "off"].includes(v);
+}
+
+/**
+ * Path to the host-maintained quota-cache.json. Defaults to the operator-
+ * specified canonical location `/home/ywatanabe/.scitex/quota-cache.json`
+ * (host cron writes there every 10 min). Override with
+ * CLAUDE_CODE_TELEGRAMMER_TELEGRAM_QUOTA_CACHE_PATH — primarily for tests
+ * that point at a fixture file.
+ */
+export function quotaCachePath(): string {
+  return (
+    process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_QUOTA_CACHE_PATH ??
+    "/home/ywatanabe/.scitex/quota-cache.json"
+  );
+}
+
+/**
+ * Account directory-name for THIS bridge (e.g. `wyusuuke-gmail-com`,
+ * `ywatanabe-scitex-ai`). Used to look up the matching entry in
+ * quota-cache.json — we match by the `short` field, which is the email
+ * local-part (first dash-segment of the dirname).
+ *
+ * Resolution order:
+ *   1. CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ACCOUNT — telegrammer-scoped
+ *      override (lead-host use, or tests).
+ *   2. CLAUDE_AGENT_ACCOUNT — injected by SAC into every agent container
+ *      (see scitex-agent-container `config/_loaders.py`).
+ *   3. "" — empty means "no account known"; the signature gracefully
+ *      omits the enriched parenthetical and falls back to the
+ *      `(cwd@host)` form that PR #18 shipped.
+ */
+export function accountDirname(): string {
+  return (
+    process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ACCOUNT ??
+    process.env.CLAUDE_AGENT_ACCOUNT ??
+    ""
+  );
+}
