@@ -60,8 +60,12 @@ describe("message store", () => {
   test("getUnread returns unread inbound messages", () => {
     const unread = getUnread();
     expect(unread.length).toBeGreaterThanOrEqual(1);
-    expect(unread[0].text).toBe("Hello");
-    expect(unread[0].read_at).toBeNull();
+    // bun runs test files in one process and shares the singleton store,
+    // so other *.test.ts files may have inserted rows ahead of "Hello".
+    // Locate it by text rather than positional index.
+    const hello = unread.find((r) => r.text === "Hello");
+    expect(hello).toBeDefined();
+    expect(hello!.read_at).toBeNull();
   });
 
   test("getUnread filters by chat_id", () => {
