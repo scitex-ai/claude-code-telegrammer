@@ -242,12 +242,15 @@ export function registerTools(mcp: Server): void {
         case "reply": {
           const chatId = args.chat_id as string;
           const text = args.text as string;
-          // Hard length cap (operator 2026-06-04): the operator reads on a
+          // Hard length cap (operator 2026-06-04, raised to 512 on
+          // 2026-06-06 per operator request): the operator reads on a
           // phone and cannot scan walls of text. REJECT over-limit messages
           // here at the send boundary instead of letting the API layer auto-
           // chunk them — this forces the caller (lead or any agent) to be
           // brief and split. Counts Unicode code points (CJK == Latin).
-          const TG_LIMIT = Number(process.env.CCT_TG_MAX_CHARS ?? "140");
+          // Read PER CALL (not at module load) so a running process picks
+          // up CCT_TG_MAX_CHARS if it's set in its environment at spawn.
+          const TG_LIMIT = Number(process.env.CCT_TG_MAX_CHARS ?? "512");
           if (
             typeof text === "string" &&
             [...text].length > TG_LIMIT &&
@@ -259,7 +262,7 @@ export function registerTools(mcp: Server): void {
                   type: "text",
                   text:
                     `BLOCKED: message is ${[...text].length} chars > ${TG_LIMIT}-char limit. ` +
-                    `Keep every Telegram message tweet-length (<=${TG_LIMIT} chars). ` +
+                    `Keep every Telegram message short (<=${TG_LIMIT} chars). ` +
                     `1) SPLIT a long update into MULTIPLE short messages, one point each. ` +
                     `2) Write ONLY what the operator must act on — no filler, no trivia, ` +
                     `no process-narration, no markdown bold. ` +
