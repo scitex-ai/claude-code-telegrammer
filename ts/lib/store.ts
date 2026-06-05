@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS messages (
     replied_at TEXT,
     reply_to_message_id TEXT,
     reply_to_row_id INTEGER REFERENCES messages(id),
+    forward_json TEXT,
     host TEXT,
     project TEXT,
     agent_id TEXT,
@@ -89,6 +90,30 @@ CREATE TABLE IF NOT EXISTS attachments (
 CREATE INDEX IF NOT EXISTS idx_att_message ON attachments(message_row_id);
 `;
 
+// ── Migration helpers ──────────────────────────────────────────────────────
+
+/**
+ * Idempotent ALTER TABLE ADD COLUMN.
+ *
+ * SQLite's CREATE TABLE IF NOT EXISTS does NOT update existing tables
+ * when columns are added to the schema. We use this helper to bring
+ * older databases forward without dropping data. Guarded by
+ * PRAGMA table_info so it never throws on a re-run.
+ */
+export function ensureColumn(
+  database: Database,
+  table: string,
+  column: string,
+  decl: string,
+): void {
+  const cols = database.prepare(`PRAGMA table_info(${table})`).all() as Array<{
+    name: string;
+  }>;
+  if (!cols.some((c) => c.name === column)) {
+    database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${decl}`);
+  }
+}
+
 // ── Init ───────────────────────────────────────────────────────────────────
 
 export function initStore(): void {
@@ -100,12 +125,18 @@ export function initStore(): void {
     "INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', '2')",
   ).run();
 
+  // ── Migration: forward_json column (added 2026-06) ──────────────────
+  // CREATE TABLE IF NOT EXISTS does NOT alter existing tables, so older
+  // databases need an explicit ALTER. Guarded by table_info check so
+  // it's idempotent and safe to re-run on every startup.
+  ensureColumn(db, "messages", "forward_json", "TEXT");
+
   // Cache prepared statements
   stmtInsertInbound = db.prepare(`
     INSERT OR IGNORE INTO messages
-      (direction, chat_id, message_id, user_id, username, text, telegram_ts, received_at, reply_to_message_id, host, project, agent_id, bot_token_hash, raw_json)
+      (direction, chat_id, message_id, user_id, username, text, telegram_ts, received_at, reply_to_message_id, forward_json, host, project, agent_id, bot_token_hash, raw_json)
     VALUES
-      ('inbound', ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?)
+      ('inbound', ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?)
   `);
 
   stmtInsertOutbound = db.prepare(`
@@ -178,6 +209,7 @@ export function saveInbound(msg: {
   text: string;
   telegram_ts: string;
   reply_to_message_id?: string;
+  forward_json?: string;
   host: string;
   project: string;
   agent_id: string;
@@ -193,6 +225,7 @@ export function saveInbound(msg: {
     msg.text,
     msg.telegram_ts,
     msg.reply_to_message_id ?? null,
+    msg.forward_json ?? null,
     msg.host,
     msg.project,
     msg.agent_id,

@@ -60,8 +60,12 @@ describe("message store", () => {
   test("getUnread returns unread inbound messages", () => {
     const unread = getUnread();
     expect(unread.length).toBeGreaterThanOrEqual(1);
-    expect(unread[0].text).toBe("Hello");
-    expect(unread[0].read_at).toBeNull();
+    // bun runs test files in one process and shares the singleton store,
+    // so other *.test.ts files may have inserted rows ahead of "Hello".
+    // Locate it by text rather than positional index.
+    const hello = unread.find((r) => r.text === "Hello");
+    expect(hello).toBeDefined();
+    expect(hello!.read_at).toBeNull();
   });
 
   test("getUnread filters by chat_id", () => {
@@ -189,5 +193,53 @@ describe("message store", () => {
     expect(ctx).toContain("Msg A");
     expect(ctx).toContain("Msg B");
     expect(ctx).toContain("(user)");
+  });
+
+  test("saveInbound persists forward_json column round-trip", () => {
+    const forwardJson = JSON.stringify({
+      kind: "channel",
+      from_name: "News Channel",
+      from_id: "-1009876543210",
+      date_iso: "2024-06-05T04:33:20.000Z",
+      original_message_id: "999",
+    });
+    const rowId = saveInbound({
+      chat_id: "400",
+      message_id: "30",
+      user_id: "42",
+      username: "testuser",
+      text: "[forwarded from News Channel, 2024-06-05T04:33:20.000Z]\nbody",
+      telegram_ts: "2026-01-01T00:00:05Z",
+      forward_json: forwardJson,
+      host: "testhost",
+      project: "/test",
+      agent_id: "test",
+      bot_token_hash: "abcd1234",
+      raw_json: "{}",
+    });
+    expect(rowId).not.toBeNull();
+
+    const history = getHistory("400");
+    expect(history.length).toBe(1);
+    expect(history[0].forward_json).toBe(forwardJson);
+  });
+
+  test("saveInbound without forward_json stores null", () => {
+    const rowId = saveInbound({
+      chat_id: "401",
+      message_id: "31",
+      user_id: "42",
+      username: "testuser",
+      text: "plain message",
+      telegram_ts: "2026-01-01T00:00:06Z",
+      host: "testhost",
+      project: "/test",
+      agent_id: "test",
+      bot_token_hash: "abcd1234",
+      raw_json: "{}",
+    });
+    expect(rowId).not.toBeNull();
+    const history = getHistory("401");
+    expect(history[0].forward_json).toBeNull();
   });
 });

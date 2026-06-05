@@ -22,6 +22,7 @@ import {
   markRead,
 } from "./receipts.js";
 import { wakeTurn, wakeEnabled } from "./wake.js";
+import { parseForward, buildInboundText } from "./forward.js";
 
 let updateOffset = 0;
 let polling = true;
@@ -221,18 +222,20 @@ async function handleUpdate(mcp: Server, update: any): Promise<void> {
     return;
   }
 
-  let text = msg.text ?? msg.caption ?? "";
-  if (msg.photo) text = text || "(photo)";
-  if (msg.document)
-    text = text || `(document: ${msg.document.file_name ?? "file"})`;
-  if (msg.voice) text = text || "(voice message)";
-  if (msg.audio) text = text || "(audio)";
-  if (msg.video) text = text || "(video)";
-  if (msg.sticker) {
-    const emoji = msg.sticker.emoji ? ` ${msg.sticker.emoji}` : "";
-    text = text || `(sticker${emoji})`;
-  }
+  // Build the text the agent sees. buildInboundText handles:
+  //   - text vs caption (for media messages with a caption)
+  //   - placeholder strings for media without a caption ("(photo)" etc.)
+  //   - prepending "[forwarded from <whom>, <when>]" when forwarded
+  // Caption + attachment file_id survive together; forward banner sits
+  // on top of any caption/placeholder so provenance is always visible.
+  const text = buildInboundText(msg);
   if (!text) return;
+
+  // Capture forward metadata (Bot API >=7.0 forward_origin OR legacy
+  // forward_from / forward_from_chat / forward_sender_name). null when
+  // the message is not a forward.
+  const forwardInfo = parseForward(msg);
+  const forwardJson = forwardInfo ? JSON.stringify(forwardInfo) : undefined;
 
   const ts = new Date((msg.date ?? 0) * 1000).toISOString();
   const replyToMessageId = msg.reply_to_message
@@ -250,6 +253,7 @@ async function handleUpdate(mcp: Server, update: any): Promise<void> {
       text,
       telegram_ts: ts,
       reply_to_message_id: replyToMessageId,
+      forward_json: forwardJson,
       host: HOST_NAME,
       project: PROJECT,
       agent_id: AGENT_ID,
@@ -315,6 +319,23 @@ async function handleUpdate(mcp: Server, update: any): Promise<void> {
   };
   if (replyToMessageId) {
     meta.reply_to_message_id = replyToMessageId;
+  }
+
+  // Forward provenance — exposed on meta so downstream consumers
+  // (audit, signature, /v1/turn payload) can distinguish a forwarded
+  // message from one the user typed themselves. The banner is already
+  // prepended to text; these fields make the structured metadata
+  // available without re-parsing.
+  if (forwardInfo) {
+    meta.forward_kind = forwardInfo.kind;
+    meta.forward_from = forwardInfo.from_name;
+    meta.forward_date = forwardInfo.date_iso;
+    if (forwardInfo.from_id) meta.forward_from_id = forwardInfo.from_id;
+    if (forwardInfo.from_username)
+      meta.forward_from_username = forwardInfo.from_username;
+    if (forwardInfo.original_message_id)
+      meta.forward_original_message_id = forwardInfo.original_message_id;
+    if (forwardInfo.signature) meta.forward_signature = forwardInfo.signature;
   }
 
   // Add attachment metadata to channel notification
@@ -387,8 +408,9 @@ async function handleUpdate(mcp: Server, update: any): Promise<void> {
   if (wakeEnabled()) {
     void wakeTurn(text, meta).then((ok) => {
       if (ok) {
-        void markReceived(chatId, String(msg.message_id))
-          .then(() => markDone(chatId, String(msg.message_id)));
+        void markReceived(chatId, String(msg.message_id)).then(() =>
+          markDone(chatId, String(msg.message_id)),
+        );
       } else {
         void markFailed(chatId, String(msg.message_id));
       }
