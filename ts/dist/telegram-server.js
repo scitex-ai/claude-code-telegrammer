@@ -14380,13 +14380,13 @@ function registerTools(mcp) {
         case "reply": {
           const chatId = args.chat_id;
           const text = args.text;
-          const TG_LIMIT = Number(process.env.CCT_TG_MAX_CHARS ?? "140");
+          const TG_LIMIT = Number(process.env.CCT_TG_MAX_CHARS ?? "512");
           if (typeof text === "string" && [...text].length > TG_LIMIT && process.env.CCT_TG_ALLOW_LONG !== "1") {
             return {
               content: [
                 {
                   type: "text",
-                  text: `BLOCKED: message is ${[...text].length} chars > ${TG_LIMIT}-char limit. ` + `Keep every Telegram message tweet-length (<=${TG_LIMIT} chars). ` + `1) SPLIT a long update into MULTIPLE short messages, one point each. ` + `2) Write ONLY what the operator must act on — no filler, no trivia, ` + `no process-narration, no markdown bold. ` + `If it is not worth ${TG_LIMIT} chars to the operator, do not send it. ` + `Override (rare): set env CCT_TG_ALLOW_LONG=1.`
+                  text: `BLOCKED: message is ${[...text].length} chars > ${TG_LIMIT}-char limit. ` + `Keep every Telegram message short (<=${TG_LIMIT} chars). ` + `1) SPLIT a long update into MULTIPLE short messages, one point each. ` + `2) Write ONLY what the operator must act on — no filler, no trivia, ` + `no process-narration, no markdown bold. ` + `If it is not worth ${TG_LIMIT} chars to the operator, do not send it. ` + `Override (rare): set env CCT_TG_ALLOW_LONG=1.`
                 }
               ],
               isError: true
