@@ -312,10 +312,15 @@ describe("buildInboundText", () => {
     );
   });
 
-  test("document + caption (no forward): caption surfaces as text", () => {
+  test("document + caption (no forward): placeholder AND caption both survive", () => {
     // Real-world: user attaches a PDF with a caption.
-    // Caption MUST survive — the (document: …) placeholder must NOT
-    // overwrite a real caption.
+    // BOTH the (document: …) placeholder AND the caption MUST appear in
+    // the agent-visible text. Operator-confirmed bug 2026-06-07: the
+    // earlier "caption beats placeholder" behavior dropped the document
+    // hint, so a woken SDK-runner agent (whose /v1/turn body carries
+    // only the text string, not meta.attachment_*) never knew a file
+    // was attached. Fix concatenates them so the agent reads
+    // "(document: report.pdf) see attached PDF".
     const msg = {
       caption: "see attached PDF",
       document: {
@@ -326,7 +331,9 @@ describe("buildInboundText", () => {
         file_size: 12345,
       },
     };
-    expect(buildInboundText(msg)).toBe("see attached PDF");
+    expect(buildInboundText(msg)).toBe(
+      "(document: report.pdf) see attached PDF",
+    );
   });
 
   test("document only (no caption, no forward): placeholder used", () => {
@@ -369,10 +376,17 @@ describe("buildInboundText", () => {
     const text = buildInboundText(msg);
     expect(text).toContain("[forwarded from News Channel,");
     expect(text).toContain("Photo caption text");
+    // (photo) placeholder MUST also appear so the agent sees the
+    // attachment even when carried only by `text` (e.g. wake POST).
+    expect(text).toContain("(photo)");
     // Banner must come FIRST
     expect(text.indexOf("[forwarded")).toBe(0);
     expect(text.indexOf("Photo caption text")).toBeGreaterThan(
       text.indexOf("[forwarded"),
+    );
+    // Placeholder appears before the caption in the body
+    expect(text.indexOf("(photo)")).toBeLessThan(
+      text.indexOf("Photo caption text"),
     );
   });
 
@@ -390,7 +404,7 @@ describe("buildInboundText", () => {
     expect(text).toContain("(photo)");
   });
 
-  test("legacy forwarded document + caption: banner + caption", () => {
+  test("legacy forwarded document + caption: banner + placeholder + caption", () => {
     const msg = {
       caption: "doc caption legacy",
       document: { file_id: "X", file_name: "spec.pdf" },
@@ -399,6 +413,14 @@ describe("buildInboundText", () => {
     };
     const text = buildInboundText(msg);
     expect(text).toContain("[forwarded from Dave,");
+    expect(text).toContain("(document: spec.pdf)");
     expect(text).toContain("doc caption legacy");
+    // Order: banner → placeholder → caption
+    expect(text.indexOf("[forwarded")).toBeLessThan(
+      text.indexOf("(document: spec.pdf)"),
+    );
+    expect(text.indexOf("(document: spec.pdf)")).toBeLessThan(
+      text.indexOf("doc caption legacy"),
+    );
   });
 });
