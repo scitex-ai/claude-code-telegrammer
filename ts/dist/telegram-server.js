@@ -14768,20 +14768,29 @@ function forwardBanner(info) {
   return `[forwarded from ${info.from_name}, ${info.date_iso}]`;
 }
 function buildInboundText(msg) {
-  let text = msg?.text ?? msg?.caption ?? "";
+  const body = msg?.text ?? msg?.caption ?? "";
+  const placeholders = [];
   if (msg?.photo)
-    text = text || "(photo)";
+    placeholders.push("(photo)");
   if (msg?.document)
-    text = text || `(document: ${msg.document.file_name ?? "file"})`;
+    placeholders.push(`(document: ${msg.document.file_name ?? "file"})`);
   if (msg?.voice)
-    text = text || "(voice message)";
+    placeholders.push("(voice message)");
   if (msg?.audio)
-    text = text || "(audio)";
+    placeholders.push("(audio)");
   if (msg?.video)
-    text = text || "(video)";
+    placeholders.push("(video)");
   if (msg?.sticker) {
     const emoji2 = msg.sticker.emoji ? ` ${msg.sticker.emoji}` : "";
-    text = text || `(sticker${emoji2})`;
+    placeholders.push(`(sticker${emoji2})`);
+  }
+  let text;
+  if (placeholders.length && body) {
+    text = `${placeholders.join(" ")} ${body}`;
+  } else if (placeholders.length) {
+    text = placeholders.join(" ");
+  } else {
+    text = body;
   }
   const fwd = parseForward(msg);
   if (fwd) {

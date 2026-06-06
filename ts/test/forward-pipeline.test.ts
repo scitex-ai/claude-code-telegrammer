@@ -73,11 +73,14 @@ describe("inbound pipeline: forward + media + caption survive together", () => {
     const text = buildInboundText(msg);
     const fwd = parseForward(msg);
 
-    // 1) Agent-visible text: banner FIRST, caption AFTER
+    // 1) Agent-visible text: banner FIRST, then (photo) placeholder,
+    //    then caption — so the agent sees ALL three signals even when
+    //    only the rendered text is carried (wake POST).
     expect(text.startsWith("[forwarded from Daily News, ")).toBe(true);
+    expect(text).toContain("(photo)");
     expect(text).toContain("Big story today");
-    // Banner appears before caption
-    expect(text.indexOf("[forwarded")).toBeLessThan(
+    expect(text.indexOf("[forwarded")).toBeLessThan(text.indexOf("(photo)"));
+    expect(text.indexOf("(photo)")).toBeLessThan(
       text.indexOf("Big story today"),
     );
 
@@ -146,7 +149,10 @@ describe("inbound pipeline: forward + media + caption survive together", () => {
 
     const msg = update.message;
     const text = buildInboundText(msg);
-    expect(text).toBe("please review"); // caption beats placeholder
+    // Placeholder AND caption coexist (operator-confirmed bug 2026-06-07:
+    // the old "caption beats placeholder" behavior dropped the document
+    // from the agent's view when a caption was present).
+    expect(text).toBe("(document: spec.pdf) please review");
     expect(parseForward(msg)).toBeNull();
 
     const rowId = saveInbound({
@@ -174,7 +180,7 @@ describe("inbound pipeline: forward + media + caption survive together", () => {
 
     const rows = getHistory(String(msg.chat.id));
     const row = rows.find((r) => r.id === rowId)!;
-    expect(row.text).toBe("please review");
+    expect(row.text).toBe("(document: spec.pdf) please review");
     expect(row.forward_json).toBeNull();
   });
 
@@ -209,7 +215,15 @@ describe("inbound pipeline: forward + media + caption survive together", () => {
     const fwd = parseForward(msg);
 
     expect(text).toContain("[forwarded from Frank Original,");
+    expect(text).toContain("(document: legacy.pdf)");
     expect(text).toContain("shared by Eve");
+    // Order: banner → placeholder → caption
+    expect(text.indexOf("[forwarded")).toBeLessThan(
+      text.indexOf("(document: legacy.pdf)"),
+    );
+    expect(text.indexOf("(document: legacy.pdf)")).toBeLessThan(
+      text.indexOf("shared by Eve"),
+    );
     expect(fwd!.kind).toBe("user");
     expect(fwd!.from_name).toBe("Frank Original");
     expect(fwd!.from_id).toBe("88888");

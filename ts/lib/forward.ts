@@ -236,22 +236,49 @@ export function forwardBanner(info: ForwardInfo): string {
 
 /**
  * Compute the text the agent sees, given a raw Telegram message:
- *   - resolves text vs caption vs attachment-placeholder
- *   - prepends the forward banner when the message is a forward
+ *   - text/caption are the BODY
+ *   - every attached media yields a PLACEHOLDER ("(document: x)", "(photo)", …)
+ *   - placeholder + body coexist when both are present; body alone otherwise
+ *   - forward banner prepended last (always on top when present)
+ *
+ * Why placeholder + body MUST coexist (operator-confirmed bug 2026-06-07):
+ *   Previously `text = text || "(document: …)"` short-circuited: once
+ *   `text` was the caption (truthy) the placeholder was DROPPED. The DB
+ *   row had the caption + the attachments table had the file_id, but the
+ *   agent-visible text never mentioned the document. Worse, the wake-on-
+ *   push /v1/turn body carries only the rendered `text` string (no
+ *   meta.attachment_kind / attachment_file_id), so an IDLE SDK-runner
+ *   agent woken via /v1/turn had NO way to know a file was attached when
+ *   the sender included a caption. Repro: a .md sent ALONE arrived as
+ *   "(document: foo.md)" → agent knew; the SAME .md WITH "please review"
+ *   arrived as just "please review" → document silently dropped from
+ *   agent awareness. Fix: concatenate placeholder THEN body so the agent
+ *   reads e.g. "(document: foo.md) please review".
  *
  * Centralised so poller.ts and tests exercise identical logic.
  */
 export function buildInboundText(msg: any): string {
-  let text: string = msg?.text ?? msg?.caption ?? "";
-  if (msg?.photo) text = text || "(photo)";
+  const body: string = msg?.text ?? msg?.caption ?? "";
+
+  const placeholders: string[] = [];
+  if (msg?.photo) placeholders.push("(photo)");
   if (msg?.document)
-    text = text || `(document: ${msg.document.file_name ?? "file"})`;
-  if (msg?.voice) text = text || "(voice message)";
-  if (msg?.audio) text = text || "(audio)";
-  if (msg?.video) text = text || "(video)";
+    placeholders.push(`(document: ${msg.document.file_name ?? "file"})`);
+  if (msg?.voice) placeholders.push("(voice message)");
+  if (msg?.audio) placeholders.push("(audio)");
+  if (msg?.video) placeholders.push("(video)");
   if (msg?.sticker) {
     const emoji = msg.sticker.emoji ? ` ${msg.sticker.emoji}` : "";
-    text = text || `(sticker${emoji})`;
+    placeholders.push(`(sticker${emoji})`);
+  }
+
+  let text: string;
+  if (placeholders.length && body) {
+    text = `${placeholders.join(" ")} ${body}`;
+  } else if (placeholders.length) {
+    text = placeholders.join(" ");
+  } else {
+    text = body;
   }
 
   const fwd = parseForward(msg);
