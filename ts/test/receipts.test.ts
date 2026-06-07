@@ -126,8 +126,11 @@ describe("👀 = /v1/turn POST 2xx (poller.ts handleUpdate gating)", () => {
     // installed by beforeAll above.)
     setTurnPoster(async () => 502);
     // Act: the exact gating pattern from poller.ts::handleUpdate's wake arm.
-    const ok = await wakeTurn("hello", { chat_id: "100", message_id: "5" });
-    if (ok) {
+    const result = await wakeTurn("hello", {
+      chat_id: "100",
+      message_id: "5",
+    });
+    if (result.ok) {
       await markReceived("100", "5");
       await markDone("100", "5");
     } else {
@@ -144,8 +147,11 @@ describe("👀 = /v1/turn POST 2xx (poller.ts handleUpdate gating)", () => {
     // and "agent finished" (stage 3). The poller fires markReceived then
     // markDone in sequence — the visible Telegram reaction advances 👀→✅.
     setTurnPoster(async () => 200);
-    const ok = await wakeTurn("hello", { chat_id: "100", message_id: "5" });
-    if (ok) {
+    const result = await wakeTurn("hello", {
+      chat_id: "100",
+      message_id: "5",
+    });
+    if (result.ok) {
       await markReceived("100", "5");
       await markDone("100", "5");
     }
@@ -156,19 +162,24 @@ describe("👀 = /v1/turn POST 2xx (poller.ts handleUpdate gating)", () => {
 
   test("401 dead-agent auth → /v1/turn POST fails → no 👀", async () => {
     setTurnPoster(async () => 401);
-    const ok = await wakeTurn("hello", { chat_id: "100", message_id: "5" });
-    expect(ok).toBe(false);
+    const result = await wakeTurn("hello", {
+      chat_id: "100",
+      message_id: "5",
+    });
+    expect(result.ok).toBe(false);
   });
 
   test("connection-refused (agent process dead) → /v1/turn POST fails → no 👀", async () => {
     setTurnPoster(async () => {
       throw new Error("connect ECONNREFUSED");
     });
-    const ok = await wakeTurn("hello", { chat_id: "100", message_id: "5" });
-    expect(ok).toBe(false);
+    const result = await wakeTurn("hello", {
+      chat_id: "100",
+      message_id: "5",
+    });
+    expect(result.ok).toBe(false);
   });
 });
-
 
 // ---------------------------------------------------------------------------
 // 4-stage receipts: ⚡→👀→✅, ❌ on failure (operator-approved 2026-06-01).

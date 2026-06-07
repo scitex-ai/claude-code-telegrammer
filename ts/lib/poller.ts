@@ -23,6 +23,7 @@ import {
 } from "./receipts.js";
 import { wakeTurn, wakeEnabled } from "./wake.js";
 import { parseForward, buildInboundText } from "./forward.js";
+import { sendLoudFailReply } from "./loudfail.js";
 
 let updateOffset = 0;
 let polling = true;
@@ -390,11 +391,11 @@ async function handleUpdate(mcp: Server, update: any): Promise<void> {
   // (SDK-runner agents), POST the message to the agent's own /v1/turn.
   // This is the AUTHORITATIVE receipt-trigger in SDK-runner mode:
   //
-  //   wakeTurn ok=true  → 👀 received (stage 2) + ✅ done (stage 3)
-  //   wakeTurn ok=false → ❌ failed   (stage 4)
+  //   wakeTurn result.ok=true  → 👀 received (stage 2) + ✅ done (stage 3)
+  //   wakeTurn result.ok=false → ❌ failed (stage 4) + LOUD-FAIL REPLY (#14)
   //
-  // Under current scitex-agent-container, sac /v1/turn is case (B):
-  // the POST returns 2xx only AFTER the turn completes. So ok=true is
+  // Under current scitex-agent-container, sac /v1/turn is case (B): the
+  // POST returns 2xx only AFTER the turn completes. So ok=true is
   // simultaneously "agent received" and "agent finished" — we fire 👀
   // then ✅ in sequence (idempotent setMessageReaction; the visible
   // Telegram reaction advances ⚡ → 👀 → ✅). This sequence is forward-
@@ -402,17 +403,28 @@ async function handleUpdate(mcp: Server, update: any): Promise<void> {
   // completed-turn): the two callsites can then be wired independently.
   //
   // A dead / stopped agent (connection refused, timeout, 401, any non-
-  // 2xx) yields ok=false and ❌ is set; the operator sees ⚡ then ❌ and
-  // can tell the agent is down. 👀 is never reached in that case — by
-  // design.
+  // 2xx) yields ok=false; we set ❌ AND post a loud-fail reply to the
+  // operator (#14, 2026-06-07):
+  //
+  //   "⚠️ <agent_id> unavailable: <reason> — retry <when>"
+  //
+  // The wakeTurn return shape carries a categorised reason (HTTP status,
+  // ECONNREFUSED, timeout, …) so the operator knows WHY the agent is
+  // down without sshing into the host. Sent via tgApi("sendMessage")
+  // with reply_parameters pointing back to the inbound message so the
+  // thread stays coherent. Dedup at the loudfail.ts layer guards against
+  // double-send on any future retry path; suppressible via the
+  // CLAUDE_CODE_TELEGRAMMER_TELEGRAM_LOUD_FAIL=0 env kill-switch (the
+  // ❌ reaction still fires regardless — only the text reply is gated).
   if (wakeEnabled()) {
-    void wakeTurn(text, meta).then((ok) => {
-      if (ok) {
+    void wakeTurn(text, meta).then((result) => {
+      if (result.ok) {
         void markReceived(chatId, String(msg.message_id)).then(() =>
           markDone(chatId, String(msg.message_id)),
         );
       } else {
         void markFailed(chatId, String(msg.message_id));
+        void sendLoudFailReply(chatId, Number(msg.message_id), result);
       }
     });
   }

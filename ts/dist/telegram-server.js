@@ -13676,7 +13676,12 @@ var ATTACHMENT_DIR = process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ATTACHMENT_DIR
 var TOKEN = process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN ?? "";
 var API_BASE = `https://api.telegram.org/bot${TOKEN}`;
 var ENV_ALLOWED = (process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ALLOWED_USERS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-var READ_RECEIPTS_ENABLED = !["0", "false", "no", "off"].includes((process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_READ_RECEIPTS ?? "").trim().toLowerCase());
+var READ_RECEIPTS_ENABLED = ![
+  "0",
+  "false",
+  "no",
+  "off"
+].includes((process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_READ_RECEIPTS ?? "").trim().toLowerCase());
 var TURN_URL = process.env.CLAUDE_CODE_TELEGRAMMER_TURN_URL ?? "";
 var TURN_BEARER = process.env.CLAUDE_CODE_TELEGRAMMER_TURN_BEARER ?? "";
 var HOST_NAME = process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_HOST_NAME ?? hostname();
@@ -13717,11 +13722,20 @@ var TOKEN2 = process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN ?? "";
 var API_BASE2 = `https://api.telegram.org/bot${TOKEN2}`;
 var MAX_TEXT = 4096;
 var ENV_ALLOWED2 = (process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ALLOWED_USERS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-var READ_RECEIPTS_ENABLED2 = !["0", "false", "no", "off"].includes((process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_READ_RECEIPTS ?? "").trim().toLowerCase());
+var READ_RECEIPTS_ENABLED2 = ![
+  "0",
+  "false",
+  "no",
+  "off"
+].includes((process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_READ_RECEIPTS ?? "").trim().toLowerCase());
 var RECEIPT_DELIVERED_EMOJI = "⚡";
 var RECEIPT_READ_EMOJI = "\uD83D\uDC40";
 var RECEIPT_DONE_EMOJI = "✅";
 var RECEIPT_FAILED_EMOJI = "❌";
+function isLoudFailEnabled() {
+  const v = (process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_LOUD_FAIL ?? "").trim().toLowerCase();
+  return !["0", "false", "no", "off"].includes(v);
+}
 var TURN_URL2 = process.env.CLAUDE_CODE_TELEGRAMMER_TURN_URL ?? "";
 var TURN_BEARER2 = process.env.CLAUDE_CODE_TELEGRAMMER_TURN_BEARER ?? "";
 var HOST_NAME2 = process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_HOST_NAME ?? hostname2();
@@ -14610,13 +14624,38 @@ function wakeText(text, meta2) {
 ${text}
 </channel>`;
 }
+function categoriseStatus(status) {
+  if (status === 401 || status === 403)
+    return "auth";
+  if (status >= 400 && status < 500)
+    return "client_error";
+  if (status >= 500 && status < 600)
+    return "server_error";
+  return "unknown";
+}
+function categoriseError(err) {
+  const msg = err instanceof Error ? err.message : String(err);
+  const m = msg.toLowerCase();
+  if (m.includes("econnrefused") || m.includes("connection refused")) {
+    return "connection_refused";
+  }
+  if (m.includes("timeout") || m.includes("timed out") || m.includes("aborterror") || m.includes("etimedout")) {
+    return "timeout";
+  }
+  return "unknown";
+}
 async function wakeTurn(text, meta2) {
-  if (!wakeEnabled())
-    return false;
+  if (!wakeEnabled()) {
+    return {
+      ok: false,
+      reason: "wake disabled (no TURN_URL)",
+      category: "unknown"
+    };
+  }
   try {
     const status = await turnPoster(TURN_URL2, { text: wakeText(text, meta2) }, TURN_BEARER2);
     if (status >= 200 && status < 300)
-      return true;
+      return { ok: true, status };
     log2("wake", `WARNING: /v1/turn returned ${status}`, {
       level: "warning",
       turn_url: TURN_URL2,
@@ -14624,16 +14663,26 @@ async function wakeTurn(text, meta2) {
       chat_id: meta2.chat_id,
       message_id: meta2.message_id
     });
-    return false;
+    return {
+      ok: false,
+      status,
+      reason: `HTTP ${status}`,
+      category: categoriseStatus(status)
+    };
   } catch (err) {
+    const errStr = err instanceof Error ? err.message : String(err);
     log2("wake", "WARNING: failed to POST /v1/turn", {
       level: "warning",
       turn_url: TURN_URL2,
       chat_id: meta2.chat_id,
       message_id: meta2.message_id,
-      error: String(err)
+      error: errStr
     });
-    return false;
+    return {
+      ok: false,
+      reason: errStr,
+      category: categoriseError(err)
+    };
   }
 }
 
@@ -14799,6 +14848,59 @@ function buildInboundText(msg) {
 ${text}` : banner;
   }
   return text;
+}
+
+// lib/loudfail.ts
+function retrySuggestion(category) {
+  switch (category) {
+    case "auth":
+      return "after fixing the bot token";
+    case "client_error":
+      return "after fixing the request shape";
+    case "server_error":
+      return "in a few minutes";
+    case "connection_refused":
+      return "after the agent restarts";
+    case "timeout":
+      return "shortly";
+    case "unknown":
+      return "shortly";
+  }
+}
+function buildLoudFailMessage(result, agentId = AGENT_ID2) {
+  return `⚠️ ${agentId} unavailable: ${result.reason} — retry ${retrySuggestion(result.category)}`;
+}
+var loudFailSender = (chatId, text, replyToMessageId) => sendMessage(chatId, text, replyToMessageId);
+var sentLoudFailReplies = new Set;
+function loudFailKey(chatId, messageId) {
+  return `${chatId}:${messageId}`;
+}
+async function sendLoudFailReply(chatId, replyToMessageId, result, agentId = AGENT_ID2) {
+  if (!isLoudFailEnabled())
+    return;
+  const key = loudFailKey(chatId, replyToMessageId);
+  if (sentLoudFailReplies.has(key))
+    return;
+  sentLoudFailReplies.add(key);
+  const text = buildLoudFailMessage(result, agentId);
+  try {
+    await loudFailSender(chatId, text, replyToMessageId);
+    log2("loudfail", "sent loud-fail reply", {
+      chat_id: chatId,
+      message_id: String(replyToMessageId),
+      category: result.category,
+      reason: result.reason
+    });
+  } catch (err) {
+    log2("loudfail", "WARNING: failed to send loud-fail reply", {
+      level: "warning",
+      chat_id: chatId,
+      message_id: String(replyToMessageId),
+      category: result.category,
+      reason: result.reason,
+      error: String(err)
+    });
+  }
 }
 
 // lib/poller.ts
@@ -15060,11 +15162,12 @@ async function handleUpdate(mcp, update) {
     });
   });
   if (wakeEnabled()) {
-    wakeTurn(text, meta2).then((ok) => {
-      if (ok) {
+    wakeTurn(text, meta2).then((result) => {
+      if (result.ok) {
         markReceived(chatId, String(msg.message_id)).then(() => markDone(chatId, String(msg.message_id)));
       } else {
         markFailed(chatId, String(msg.message_id));
+        sendLoudFailReply(chatId, Number(msg.message_id), result);
       }
     });
   }
