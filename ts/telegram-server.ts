@@ -13,6 +13,9 @@
  *   - SQLite message store with dedup, read/replied tracking
  *   - Allowlist-based access control (access.json + env var)
  *   - Single-instance enforcement via PID lock file
+ *   - "Newest wins" per-bot-token takeover (lib/takeover.ts) — a fresh
+ *     poller for the same token preempts an orphaned predecessor instead
+ *     of both 409-looping forever.
  *
  * Env vars:
  *   CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN     - required
@@ -26,12 +29,13 @@
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { TOKEN } from "./lib/config.js";
+import { TOKEN, STATE_DIR, BOT_TOKEN_HASH } from "./lib/config.js";
 import { log } from "./lib/log.js";
 import { acquireLock, releaseLock } from "./lib/lock.js";
 import { registerTools } from "./lib/tools.js";
 import { startPolling, stopPolling } from "./lib/poller.js";
 import { initStore } from "./lib/store.js";
+import { releaseAuthoritative } from "./lib/takeover.js";
 
 // ── Validate token ──────────────────────────────────────────────────────────
 
@@ -108,6 +112,11 @@ function shutdown(): void {
   shuttingDown = true;
   log("server", "shutting down");
   stopPolling();
+  // Release the per-token pidfile only if WE still own it. claimAuthoritative
+  // is idempotent and never tears down a successor's claim — so a SIGTERM
+  // sent by a newer poller racing us through startup will not lose its
+  // record.
+  releaseAuthoritative({ stateDir: STATE_DIR, tokenHash: BOT_TOKEN_HASH });
   releaseLock();
   setTimeout(() => process.exit(0), 2000);
 }
