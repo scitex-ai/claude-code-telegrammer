@@ -13752,31 +13752,71 @@ function log2(component, msg, data) {
 }
 
 // lib/lock.ts
-function acquireLock() {
+var TAKEOVER_POLL_INTERVAL_MS = 50;
+var TAKEOVER_GRACE_TOTAL_MS = 2000;
+function isPidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function sleepSync(ms) {
+  const sab = new SharedArrayBuffer(4);
+  const ia = new Int32Array(sab);
+  Atomics.wait(ia, 0, 0, ms);
+}
+function acquireLock(opts = {}) {
+  const signalOutgoing = opts.signalOutgoing ?? true;
   mkdirSync(STATE_DIR2, { recursive: true });
   if (existsSync(LOCK_FILE2)) {
-    let stale = false;
+    let outgoingPid = null;
     try {
-      const pid = parseInt(readFileSync(LOCK_FILE2, "utf8").trim(), 10);
-      try {
-        process.kill(pid, 0);
-      } catch {
-        stale = true;
+      outgoingPid = parseInt(readFileSync(LOCK_FILE2, "utf8").trim(), 10);
+      if (!Number.isFinite(outgoingPid) || outgoingPid <= 0) {
+        outgoingPid = null;
       }
     } catch {
-      stale = true;
+      outgoingPid = null;
     }
-    if (!stale) {
-      log2("lock", "another instance is running (lock file exists with live PID). Exiting.");
-      process.exit(1);
+    if (outgoingPid === null) {
+      log2("lock", "removing lockfile with unparseable content");
+    } else if (outgoingPid === process.pid) {
+      log2("lock", "lockfile already records our pid — no-op");
+      return;
+    } else if (!isPidAlive(outgoingPid)) {
+      log2("lock", "removing stale lock file", { outgoingPid });
+    } else {
+      log2("lock", "lockfile held by another live PID — taking over (newest wins)", { outgoingPid, ourPid: process.pid, signalOutgoing });
+      if (signalOutgoing) {
+        try {
+          process.kill(outgoingPid, "SIGTERM");
+        } catch {}
+        const deadline = Date.now() + TAKEOVER_GRACE_TOTAL_MS;
+        while (Date.now() < deadline && isPidAlive(outgoingPid)) {
+          sleepSync(TAKEOVER_POLL_INTERVAL_MS);
+        }
+        if (isPidAlive(outgoingPid)) {
+          log2("lock", "outgoing PID still alive after grace — overwriting lockfile anyway", { outgoingPid });
+        } else {
+          log2("lock", "outgoing PID exited cleanly within grace", {
+            outgoingPid
+          });
+        }
+      }
     }
-    log2("lock", "removing stale lock file");
   }
   writeFileSync(LOCK_FILE2, String(process.pid), { mode: 384 });
 }
 function releaseLock() {
   try {
-    unlinkSync(LOCK_FILE2);
+    if (existsSync(LOCK_FILE2)) {
+      const heldBy = parseInt(readFileSync(LOCK_FILE2, "utf8").trim(), 10);
+      if (heldBy === process.pid) {
+        unlinkSync(LOCK_FILE2);
+      }
+    }
   } catch {}
 }
 
@@ -14801,7 +14841,91 @@ ${text}` : banner;
   return text;
 }
 
+// lib/takeover.ts
+import {
+  existsSync as existsSync2,
+  mkdirSync as mkdirSync4,
+  readFileSync as readFileSync5,
+  renameSync,
+  unlinkSync as unlinkSync2,
+  writeFileSync as writeFileSync2
+} from "fs";
+import { join as join6 } from "path";
+function pollerPidfilePath(stateDir, tokenHash) {
+  return join6(stateDir, `poller-${tokenHash}.pid`);
+}
+function readPidfile(path) {
+  if (!existsSync2(path))
+    return null;
+  let raw;
+  try {
+    raw = readFileSync5(path, "utf8");
+  } catch {
+    return null;
+  }
+  const lines = raw.split(/\r?\n/).filter((l) => l.length > 0);
+  if (lines.length < 1)
+    return null;
+  const pid = parseInt(lines[0].trim(), 10);
+  if (!Number.isFinite(pid) || pid <= 0)
+    return null;
+  const startMs = lines[1] !== undefined ? parseInt(lines[1].trim(), 10) : 0;
+  return {
+    pid,
+    startMs: Number.isFinite(startMs) ? startMs : 0
+  };
+}
+function isPidAlive2(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function claimAuthoritative(opts) {
+  const pid = opts.pid ?? process.pid;
+  const startMs = opts.startMs ?? Date.now();
+  const signal = opts.signalOutgoing ?? true;
+  const path = pollerPidfilePath(opts.stateDir, opts.tokenHash);
+  mkdirSync4(opts.stateDir, { recursive: true });
+  const outgoing = readPidfile(path);
+  if (signal && outgoing && outgoing.pid !== pid && isPidAlive2(outgoing.pid)) {
+    try {
+      process.kill(outgoing.pid, "SIGTERM");
+    } catch {}
+  }
+  const tmp = `${path}.tmp.${pid}.${startMs}`;
+  writeFileSync2(tmp, `${pid}
+${startMs}
+`, { mode: 384 });
+  renameSync(tmp, path);
+  return outgoing;
+}
+function isAuthoritative(opts) {
+  const pid = opts.pid ?? process.pid;
+  const path = pollerPidfilePath(opts.stateDir, opts.tokenHash);
+  const snap = readPidfile(path);
+  if (!snap)
+    return false;
+  return snap.pid === pid;
+}
+function releaseAuthoritative(opts) {
+  const pid = opts.pid ?? process.pid;
+  const path = pollerPidfilePath(opts.stateDir, opts.tokenHash);
+  const snap = readPidfile(path);
+  if (!snap)
+    return;
+  if (snap.pid !== pid)
+    return;
+  try {
+    unlinkSync2(path);
+  } catch {}
+}
+
 // lib/poller.ts
+var MAX_CONSECUTIVE_409 = 30;
+var ERROR_BACKOFF_MS = 3000;
 var updateOffset = 0;
 var polling = true;
 function stopPolling() {
@@ -14809,6 +14933,27 @@ function stopPolling() {
 }
 async function startPolling(mcp) {
   log2("poller", "starting getUpdates polling...");
+  try {
+    const outgoing = claimAuthoritative({
+      stateDir: STATE_DIR2,
+      tokenHash: BOT_TOKEN_HASH2
+    });
+    if (outgoing && outgoing.pid !== process.pid) {
+      log2("poller", "preempted previous poller (newest wins) — wrote our PID to pidfile", { outgoingPid: outgoing.pid, ourPid: process.pid });
+    } else {
+      log2("poller", "claimed pidfile (no prior poller recorded)", {
+        ourPid: process.pid
+      });
+    }
+  } catch (err) {
+    log2("poller", `claimAuthoritative failed (proceeding anyway): ${err}`);
+  }
+  try {
+    await tgApi("deleteWebhook", { drop_pending_updates: false });
+    log2("poller", "deleteWebhook ok — no webhook will compete with getUpdates");
+  } catch (err) {
+    log2("poller", `deleteWebhook warning: ${err} (proceeding anyway)`);
+  }
   try {
     updateOffset = loadOffset();
     if (updateOffset > 0) {
@@ -14829,34 +14974,20 @@ async function startPolling(mcp) {
   } catch (err) {
     log2("poller", `getMe failed: ${err}`);
   }
-  log2("poller", "preflight: testing for competing consumers (3s)...");
-  try {
-    await tgApi("getUpdates", { offset: updateOffset, timeout: 3, limit: 1 });
-    log2("poller", "preflight OK — no competing consumers detected");
-  } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    if (errMsg.includes("409")) {
-      const fatalMsg = "FATAL: 409 Conflict on startup — another process is already polling this bot token. " + "Only one getUpdates consumer is allowed per token. " + "Stop the other consumer first, or use a different bot token. " + "Refusing to start.";
-      log2("poller", fatalMsg);
-      mcp.notification({
-        method: "notifications/claude/channel",
-        params: {
-          content: fatalMsg,
-          meta: { source: "telegram", type: "error" }
-        }
-      }).catch(() => {});
+  let consecutive409 = 0;
+  while (polling) {
+    if (!isAuthoritative({ stateDir: STATE_DIR2, tokenHash: BOT_TOKEN_HASH2 })) {
+      log2("poller", "preempted by newer poller (pidfile no longer records our PID) — exiting cleanly", { ourPid: process.pid });
       polling = false;
       return;
     }
-    log2("poller", `preflight warning: ${errMsg} (proceeding anyway)`);
-  }
-  while (polling) {
     try {
       const updates = await tgApi("getUpdates", {
         offset: updateOffset,
         timeout: 30,
         allowed_updates: ["message", "message_reaction"]
       });
+      consecutive409 = 0;
       if (!Array.isArray(updates))
         continue;
       for (const update of updates) {
@@ -14879,20 +15010,29 @@ async function startPolling(mcp) {
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       if (errMsg.includes("409")) {
-        const conflictMsg = "409 Conflict — another process is polling this bot token. " + "Only one getUpdates consumer is allowed per token. " + "Telegram connection is DOWN. Stop the other consumer or use a different bot token.";
-        log2("poller", conflictMsg);
-        mcp.notification({
-          method: "notifications/claude/channel",
-          params: {
-            content: conflictMsg,
-            meta: { source: "telegram", type: "error" }
-          }
-        }).catch(() => {});
-        polling = false;
-        return;
+        consecutive409 += 1;
+        log2("poller", `409 Conflict on getUpdates (${consecutive409}/${MAX_CONSECUTIVE_409}) — backing off ${ERROR_BACKOFF_MS}ms (likely the previous poller is still draining its long-poll; it should exit on its next isAuthoritative() tick)`);
+        if (consecutive409 >= MAX_CONSECUTIVE_409) {
+          const fatalMsg = `FATAL: ${MAX_CONSECUTIVE_409} consecutive 409 Conflicts — another process is polling this bot token and has NOT yielded after backoff. ` + "This is likely a foreign poller (not one of ours — ours obey the pidfile-takeover protocol) or a stuck webhook. " + "Stop the other consumer (or call deleteWebhook) and restart the bridge.";
+          log2("poller", fatalMsg);
+          mcp.notification({
+            method: "notifications/claude/channel",
+            params: {
+              content: fatalMsg,
+              meta: { source: "telegram", type: "error" }
+            }
+          }).catch(() => {});
+          polling = false;
+          releaseAuthoritative({
+            stateDir: STATE_DIR2,
+            tokenHash: BOT_TOKEN_HASH2
+          });
+          return;
+        }
+        await new Promise((r) => setTimeout(r, ERROR_BACKOFF_MS));
       } else {
         log2("poller", `getUpdates error: ${errMsg}. Retrying in 3s...`);
-        await new Promise((r) => setTimeout(r, 3000));
+        await new Promise((r) => setTimeout(r, ERROR_BACKOFF_MS));
       }
     }
   }
@@ -15072,8 +15212,8 @@ async function handleUpdate(mcp, update) {
 
 // lib/store.ts
 import { Database as Database2 } from "bun:sqlite";
-import { join as join6 } from "path";
-var DB_PATH2 = join6(STATE_DIR2, "messages.db");
+import { join as join7 } from "path";
+var DB_PATH2 = join7(STATE_DIR2, "messages.db");
 var db2 = null;
 var stmtInsertInbound2 = null;
 var stmtInsertOutbound2 = null;
@@ -15211,6 +15351,53 @@ function initStore() {
   log2("store", `initialized at ${DB_PATH2} (schema v2)`);
 }
 
+// lib/takeover.ts
+import {
+  existsSync as existsSync3,
+  mkdirSync as mkdirSync5,
+  readFileSync as readFileSync6,
+  renameSync as renameSync2,
+  unlinkSync as unlinkSync3,
+  writeFileSync as writeFileSync3
+} from "fs";
+import { join as join8 } from "path";
+function pollerPidfilePath2(stateDir, tokenHash) {
+  return join8(stateDir, `poller-${tokenHash}.pid`);
+}
+function readPidfile2(path) {
+  if (!existsSync3(path))
+    return null;
+  let raw;
+  try {
+    raw = readFileSync6(path, "utf8");
+  } catch {
+    return null;
+  }
+  const lines = raw.split(/\r?\n/).filter((l) => l.length > 0);
+  if (lines.length < 1)
+    return null;
+  const pid = parseInt(lines[0].trim(), 10);
+  if (!Number.isFinite(pid) || pid <= 0)
+    return null;
+  const startMs = lines[1] !== undefined ? parseInt(lines[1].trim(), 10) : 0;
+  return {
+    pid,
+    startMs: Number.isFinite(startMs) ? startMs : 0
+  };
+}
+function releaseAuthoritative2(opts) {
+  const pid = opts.pid ?? process.pid;
+  const path = pollerPidfilePath2(opts.stateDir, opts.tokenHash);
+  const snap = readPidfile2(path);
+  if (!snap)
+    return;
+  if (snap.pid !== pid)
+    return;
+  try {
+    unlinkSync3(path);
+  } catch {}
+}
+
 // telegram-server.ts
 if (!TOKEN) {
   process.stderr.write(`telegram-mcp: CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN is required.
@@ -15268,6 +15455,7 @@ function shutdown() {
   shuttingDown = true;
   log("server", "shutting down");
   stopPolling();
+  releaseAuthoritative2({ stateDir: STATE_DIR, tokenHash: BOT_TOKEN_HASH });
   releaseLock();
   setTimeout(() => process.exit(0), 2000);
 }
