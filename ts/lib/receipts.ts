@@ -6,22 +6,34 @@
  * replaces the bot's reaction on each setMessageReaction call (non-premium
  * bots cap at 1 reaction/message per the Bot API):
  *
- *   Stage 1  ⚡  delivered — relay received the Telegram message (and POSTed
- *                            it to the agent's /v1/turn if configured)
- *   Stage 2  👀 received   — agent's /v1/turn POST returned 2xx in SDK-runner
- *                            mode (the agent runner accepted the message).
- *                            In interactive-CLI mode (no TURN_URL), set
- *                            when the MCP <channel> notification ack returns.
- *   Stage 3  ✅ done       — agent finished processing the turn / produced
- *                            its reply. Under current sac, collapses to
- *                            the same ok=true instant as stage 2 (sac
- *                            /v1/turn is case B: HTTP 200 returns AFTER the
- *                            turn completes). The design still fires 👀
- *                            then ✅ in sequence so it stays forward-
- *                            compatible if sac later splits the signals.
+ *   Stage 1  ⚡  delivered — relay received the Telegram message and
+ *                            persisted it. Fires UNCONDITIONALLY on every
+ *                            inbound the bridge accepts.
+ *   Stage 2  👀 received   — BRIDGE has accepted ownership and is now
+ *                            driving delivery (MCP notification + wake
+ *                            POST). Fires UNCONDITIONALLY immediately
+ *                            after ⚡, regardless of agent state.
+ *                            Operator-revised semantic (#41, 2026-06-07):
+ *                            "👀 means the bridge has it" not "👀 means
+ *                            the agent has it". This guarantees the
+ *                            operator NEVER sees a stuck-on-⚡ message;
+ *                            silence past ⚡ would mean a bridge crash.
+ *   Stage 3  ✅ done       — agent finished processing the turn. Under
+ *                            sac case-B semantics (/v1/turn returns 2xx
+ *                            AFTER the turn completes), this is the
+ *                            wakeTurn ok=true instant — advance straight
+ *                            to ✅ from 👀.
  *   Stage 4  ❌ failed     — failure (agent down / 401 / connection refused /
  *                            timeout / non-2xx). Final visible state until
- *                            the operator retries.
+ *                            the operator retries. Progression is
+ *                            ⚡ → 👀 → ❌; the operator can still tell
+ *                            "agent down" from "agent live" by the FINAL
+ *                            state, but the intermediate 👀 proves the
+ *                            bridge itself is alive (the original #14
+ *                            "👀 only on agent-live" contract is REPLACED
+ *                            by this revision — the agent-live signal
+ *                            moved up to ✅, freeing 👀 to mean
+ *                            "bridge has it").
  *
  * All four emojis are on Telegram's fixed reaction whitelist.
  *
@@ -110,17 +122,27 @@ async function setReceipt(
 }
 
 /** Stage 1 — ⚡ the moment the relay receives + persists the message. */
-export function markDelivered(chatId: string, messageId: string): Promise<void> {
+export function markDelivered(
+  chatId: string,
+  messageId: string,
+): Promise<void> {
   return setReceipt(chatId, messageId, "delivered", RECEIPT_DELIVERED_EMOJI);
 }
 
 /**
- * Stage 2 — 👀 the agent runner accepted the message.
+ * Stage 2 — 👀 the BRIDGE accepted ownership of the message.
  *
- * In SDK-runner mode (TURN_URL set), fired when the agent's /v1/turn POST
- * returns 2xx. In interactive-CLI mode (no TURN_URL), fired when the MCP
- * <channel> notification ack returns. NOT a "reply produced" signal — that
- * is stage 3 (markDone).
+ * Operator-revised semantic (#41, 2026-06-07): 👀 means the relay has
+ * accepted ownership and is now driving delivery (MCP notification +
+ * wake POST), independent of whether the agent itself is reachable.
+ * Fires UNCONDITIONALLY in poller.ts handleUpdate immediately after
+ * markDelivered. The previous "👀 means agent received" contract from
+ * #14 (2026-06-01) is replaced — that signal now lives at stage 3
+ * (markDone). The motivation: under the old contract, a dead agent
+ * left the operator's message stuck on ⚡ with no advance, which was
+ * indistinguishable from a poller crash / 409 silent-loss. Decoupling
+ * 👀 from agent state means the absence of 👀 now exclusively means
+ * the bridge itself is down — a clean infra signal.
  */
 export function markReceived(chatId: string, messageId: string): Promise<void> {
   return setReceipt(chatId, messageId, "received", RECEIPT_READ_EMOJI);
@@ -131,10 +153,10 @@ export function markReceived(chatId: string, messageId: string): Promise<void> {
  *
  * Under current scitex-agent-container, sac /v1/turn is case (B): the POST
  * returns 2xx only AFTER the turn completes. So in SDK-runner mode, the
- * ok=true instant from wakeTurn is simultaneously "agent received" (stage 2)
- * and "agent finished" (stage 3). The poller fires markReceived then markDone
- * in sequence; if sac ever splits the signals (enqueue-ack vs completed-turn)
- * the two arms can be wired independently without changing this API.
+ * wakeTurn ok=true instant IS "agent finished" — the poller advances
+ * straight from 👀 (already set unconditionally) to ✅. If sac ever
+ * splits enqueue-ack from completed-turn, an explicit "agent received"
+ * stage can be reintroduced between 👀 and ✅ without re-architecting.
  */
 export function markDone(chatId: string, messageId: string): Promise<void> {
   return setReceipt(chatId, messageId, "done", RECEIPT_DONE_EMOJI);
