@@ -298,9 +298,40 @@ async function handleUpdate(mcp: Server, update: any): Promise<void> {
     }
   }
 
-  // Stage 1 receipt: \u26A1 "delivered" \u2014 the relay received + persisted the
-  // message. Automatic, idempotent, best-effort (failures logged, not thrown).
+  // Stage 1 + Stage 2 receipts fire UNCONDITIONALLY here (#41,
+  // operator 2026-06-07):
+  //
+  //   \u26A1 markDelivered \u2014 relay received + persisted the message.
+  //   \uD83D\uDC40 markReceived  \u2014 relay accepted ownership and is now driving
+  //                      delivery (MCP notification + wake POST).
+  //
+  // Previous behaviour gated \uD83D\uDC40 on either MCP-notification ack OR
+  // wakeTurn 2xx. That meant a dead/down agent never reached \uD83D\uDC40 \u2014 the
+  // operator confirmed in 2026-06-07 they prefer "\uD83D\uDC40 means the BRIDGE
+  // has the message" over "\uD83D\uDC40 means the AGENT has the message",
+  // because the absence of \uD83D\uDC40 in the old contract was indistinguishable
+  // from a poller crash / 409 loss / silent drop (the operator's
+  // single most painful failure mode this week).
+  //
+  // The advancing reaction sequence is now:
+  //
+  //     \u26A1 \u2192 \uD83D\uDC40 \u2192 \u2705  (live agent, /v1/turn ok)
+  //     \u26A1 \u2192 \uD83D\uDC40 \u2192 \u274C  (down agent, /v1/turn non-2xx or unreachable)
+  //     \u26A1 \u2192 \uD83D\uDC40       (interactive CLI, no TURN_URL \u2014 no further stages)
+  //
+  // The operator can still tell "agent down" from "agent live": the
+  // FINAL state is \u274C vs \u2705. The intermediate \uD83D\uDC40 reassures them the
+  // bridge itself is alive. The "no reaction" state can now only mean
+  // the poller is dead (no PID claim on the token, can't issue a
+  // setMessageReaction) \u2014 which together with the #37 newest-wins
+  // takeover protocol means "silence == infra problem", never a logic
+  // problem in the bridge.
+  //
+  // Both calls are idempotent (per-(chat, msg, stage) dedupe in
+  // receipts.ts) and best-effort (errors logged at warning, never
+  // thrown). Safe to fire eagerly.
   void markDelivered(chatId, String(msg.message_id));
+  void markReceived(chatId, String(msg.message_id));
 
   // Fire-and-forget typing indicator
   tgApi("sendChatAction", { chat_id: chatId, action: "typing" }).catch(
@@ -355,30 +386,14 @@ async function handleUpdate(mcp: Server, update: any): Promise<void> {
   });
 
   // Notification path — renders <channel> in an ACTIVE turn (interactive
-  // Claude Code CLI). Does NOT advance an IDLE SDK-runner session.
+  // Claude Code CLI). Does NOT advance an IDLE SDK-runner session. The
+  // 👀 receipt has already fired above; the notification ack is no
+  // longer the trigger (it never was a reliable signal in SDK-runner
+  // mode anyway, since a dead agent's MCP server can still ack).
   mcp
     .notification({
       method: "notifications/claude/channel",
       params: { content: text, meta },
-    })
-    .then(() => {
-      // Stage 2 receipt: 👀 "agent received".
-      //
-      // SDK-runner mode (wakeEnabled, TURN_URL set): an MCP-notification
-      // ack does NOT prove the agent received the message — a dead /
-      // stopped agent's MCP server can still ack notifications while no
-      // agent is alive. Defer 👀 to the /v1/turn-2xx path below (the
-      // bridge POSTs to the agent's own /v1/turn; 2xx is the operator's
-      // "agent got it" signal), which also fires ✅ in sequence under
-      // current sac /v1/turn case-B semantics.
-      //
-      // Interactive-CLI mode (no TURN_URL): there is no /v1/turn to
-      // gate against; the MCP notification IS the only "agent
-      // received" signal (Claude Code's running event loop receives
-      // the <channel> render). Set 👀 here. Idempotent + best-effort.
-      if (!wakeEnabled()) {
-        void markReceived(chatId, String(msg.message_id));
-      }
     })
     .catch((err) => {
       log("poller", "failed to deliver inbound to Claude", {
@@ -388,29 +403,27 @@ async function handleUpdate(mcp: Server, update: any): Promise<void> {
 
   // Wake-on-push — when CLAUDE_CODE_TELEGRAMMER_TURN_URL is set
   // (SDK-runner agents), POST the message to the agent's own /v1/turn.
-  // This is the AUTHORITATIVE receipt-trigger in SDK-runner mode:
+  // The outcome advances the reaction past 👀 to the FINAL stage:
   //
-  //   wakeTurn ok=true  → 👀 received (stage 2) + ✅ done (stage 3)
-  //   wakeTurn ok=false → ❌ failed   (stage 4)
+  //   wakeTurn ok=true  → ✅ done   (stage 3)
+  //   wakeTurn ok=false → ❌ failed (stage 4)
   //
   // Under current scitex-agent-container, sac /v1/turn is case (B):
   // the POST returns 2xx only AFTER the turn completes. So ok=true is
-  // simultaneously "agent received" and "agent finished" — we fire 👀
-  // then ✅ in sequence (idempotent setMessageReaction; the visible
-  // Telegram reaction advances ⚡ → 👀 → ✅). This sequence is forward-
-  // compatible if sac ever splits the signals (enqueue-ack vs
-  // completed-turn): the two callsites can then be wired independently.
+  // simultaneously "agent received" and "agent finished" — we advance
+  // straight to ✅. This sequence is forward-compatible if sac ever
+  // splits the signals (enqueue-ack vs completed-turn): the two
+  // callsites can then be wired independently.
   //
   // A dead / stopped agent (connection refused, timeout, 401, any non-
-  // 2xx) yields ok=false and ❌ is set; the operator sees ⚡ then ❌ and
-  // can tell the agent is down. 👀 is never reached in that case — by
-  // design.
+  // 2xx) yields ok=false and ❌ is set; the operator sees ⚡ → 👀 → ❌
+  // and can tell the agent is down by the FINAL state. (Pre-#41 the
+  // operator saw ⚡ → ❌ and never 👀 — now they get 👀 first so the
+  // bridge's aliveness is visible regardless of agent state.)
   if (wakeEnabled()) {
     void wakeTurn(text, meta).then((ok) => {
       if (ok) {
-        void markReceived(chatId, String(msg.message_id)).then(() =>
-          markDone(chatId, String(msg.message_id)),
-        );
+        void markDone(chatId, String(msg.message_id));
       } else {
         void markFailed(chatId, String(msg.message_id));
       }

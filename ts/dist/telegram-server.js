@@ -15006,6 +15006,7 @@ async function handleUpdate(mcp, update) {
     }
   }
   markDelivered(chatId, String(msg.message_id));
+  markReceived(chatId, String(msg.message_id));
   tgApi("sendChatAction", { chat_id: chatId, action: "typing" }).catch(() => {});
   const meta2 = {
     chat_id: chatId,
@@ -15050,10 +15051,6 @@ async function handleUpdate(mcp, update) {
   mcp.notification({
     method: "notifications/claude/channel",
     params: { content: text, meta: meta2 }
-  }).then(() => {
-    if (!wakeEnabled()) {
-      markReceived(chatId, String(msg.message_id));
-    }
   }).catch((err) => {
     log2("poller", "failed to deliver inbound to Claude", {
       error: String(err)
@@ -15062,7 +15059,7 @@ async function handleUpdate(mcp, update) {
   if (wakeEnabled()) {
     wakeTurn(text, meta2).then((ok) => {
       if (ok) {
-        markReceived(chatId, String(msg.message_id)).then(() => markDone(chatId, String(msg.message_id)));
+        markDone(chatId, String(msg.message_id));
       } else {
         markFailed(chatId, String(msg.message_id));
       }
