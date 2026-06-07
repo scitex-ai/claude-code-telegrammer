@@ -95,89 +95,136 @@ describe("read receipts", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 👀 gating against /v1/turn success (fix #14: bug operator confirmed
-// 2026-06-01 — a STOPPED SDK-runner agent's DM was still getting 👀,
-// because the relay was firing markRead on MCP-notification success
-// rather than on a real successful /v1/turn). The two arms of the
-// receipt-trigger in poller.ts::handleUpdate are now:
+// #41 (2026-06-07) — receipt reaction ALWAYS fires.
 //
-//   1. .notification().then() — fires markRead ONLY when !wakeEnabled()
-//      (interactive CLI; no /v1/turn to confirm against).
-//   2. wakeTurn().then((ok) => if (ok) markRead) — the AUTHORITATIVE
-//      trigger in SDK-runner mode (TURN_URL set); fires ONLY on 2xx.
+// The new contract REPLACES the 2026-06-01 "dead-agent → no 👀" gating:
 //
-// These tests model the conditional decisions in isolation so the
-// regression — “dead agent still gets 👀” — can never come back without
-// flipping a clearly-named assert.
+//   ⚡ markDelivered  fires unconditionally as soon as the relay
+//                     persists the inbound message.
+//   👀 markReceived   fires unconditionally IMMEDIATELY AFTER ⚡,
+//                     before the wakeTurn POST and independent of its
+//                     outcome. Operator-revised semantic: "👀 means
+//                     THE BRIDGE has the message" — not "👀 means the
+//                     AGENT has the message".
+//   ✅ markDone       fires only if wakeTurn returns ok=true (sac
+//                     case-B: ok=true is the agent-finished signal).
+//   ❌ markFailed     fires only if wakeTurn returns ok=false.
+//
+// Why the change: under the old contract, a dead agent left the
+// operator's message stuck on ⚡ with no advance, which was
+// indistinguishable from a poller crash / 409 silent-loss (operator's
+// #1 pain 2026-06-07). The new contract guarantees a 👀 advance for
+// every inbound the bridge accepts, so silence past ⚡ now exclusively
+// indicates a bridge-level failure — a clean infra signal.
 // ---------------------------------------------------------------------------
 
 import { wakeTurn, setTurnPoster } from "../lib/wake.js";
 
-describe("👀 = /v1/turn POST 2xx (poller.ts handleUpdate gating)", () => {
+describe("👀 fires unconditionally (#41, post-2026-06-07 contract)", () => {
   beforeEach(() => {
     calls.length = 0;
     shouldThrow = false;
     _resetReceipts();
   });
 
-  test("dead agent: /v1/turn POST fails (502) → ❌ failed (NOT 👀)", async () => {
-    // Arrange: poster simulates a dead agent — fetch resolves with 502, so
-    // wakeTurn returns ok=false. (The receipt-sender is the same fake
-    // installed by beforeAll above.)
-    setTurnPoster(async () => 502);
-    // Act: the exact gating pattern from poller.ts::handleUpdate's wake arm.
+  // The exact gating pattern poller.ts::handleUpdate now follows
+  // post-#41 + post-#14 (rebased onto develop):
+  //
+  //   void markDelivered(...);
+  //   void markReceived(...);          // <-- unconditional, the #41 change
+  //   if (wakeEnabled()) {
+  //     void wakeTurn(text, meta).then((result) => {
+  //       if (result.ok) void markDone(...);
+  //       else {
+  //         void markFailed(...);
+  //         void sendLoudFailReply(...);  // <-- the #14 change
+  //       }
+  //     });
+  //   }
+  //
+  // Each test below models a different wakeTurn outcome and asserts
+  // the RECEIPT-REACTION sequence the operator sees. The loud-fail
+  // reply path is covered separately in loudfail-send.test.ts.
+
+  async function runHandleUpdateGating(): Promise<boolean> {
+    await markDelivered("100", "5");
+    await markReceived("100", "5"); // unconditional per #41
     const result = await wakeTurn("hello", {
       chat_id: "100",
       message_id: "5",
     });
     if (result.ok) {
-      await markReceived("100", "5");
       await markDone("100", "5");
     } else {
       await markFailed("100", "5");
     }
-    // Assert: exactly one call, and it's ❌ — 👀 is never reached.
-    expect(calls.length).toBe(1);
-    expect(calls[0].emoji).toBe(RECEIPT_FAILED_EMOJI);
+    return result.ok;
+  }
+
+  test("dead agent (502): ⚡ → 👀 → ❌ — 👀 IS now reached (the #41 change)", async () => {
+    setTurnPoster(async () => 502);
+    const ok = await runHandleUpdateGating();
+    expect(ok).toBe(false);
+    expect(calls.length).toBe(3);
+    expect(calls.map((c) => c.emoji)).toEqual([
+      RECEIPT_DELIVERED_EMOJI,
+      RECEIPT_READ_EMOJI,
+      RECEIPT_FAILED_EMOJI,
+    ]);
   });
 
-  test("live agent: /v1/turn POST 2xx → 👀 received then ✅ done (2-call advance)", async () => {
-    // Under current sac, /v1/turn is case (B): HTTP 200 returns AFTER the
-    // turn completes. So ok=true is simultaneously "agent received" (stage 2)
-    // and "agent finished" (stage 3). The poller fires markReceived then
-    // markDone in sequence — the visible Telegram reaction advances 👀→✅.
+  test("live agent (200): ⚡ → 👀 → ✅ — 👀 fires BEFORE wake, ✅ after ok=true", async () => {
     setTurnPoster(async () => 200);
-    const result = await wakeTurn("hello", {
-      chat_id: "100",
-      message_id: "5",
-    });
-    if (result.ok) {
-      await markReceived("100", "5");
-      await markDone("100", "5");
-    }
-    expect(calls.length).toBe(2);
-    expect(calls[0].emoji).toBe(RECEIPT_READ_EMOJI);
-    expect(calls[1].emoji).toBe(RECEIPT_DONE_EMOJI);
+    const ok = await runHandleUpdateGating();
+    expect(ok).toBe(true);
+    expect(calls.length).toBe(3);
+    expect(calls.map((c) => c.emoji)).toEqual([
+      RECEIPT_DELIVERED_EMOJI,
+      RECEIPT_READ_EMOJI,
+      RECEIPT_DONE_EMOJI,
+    ]);
   });
 
-  test("401 dead-agent auth → /v1/turn POST fails → no 👀", async () => {
+  test("401 auth failure: ⚡ → 👀 → ❌ — bridge is up, agent rejected POST", async () => {
     setTurnPoster(async () => 401);
-    const result = await wakeTurn("hello", {
-      chat_id: "100",
-      message_id: "5",
-    });
-    expect(result.ok).toBe(false);
+    const ok = await runHandleUpdateGating();
+    expect(ok).toBe(false);
+    expect(calls.length).toBe(3);
+    expect(calls[1].emoji).toBe(RECEIPT_READ_EMOJI); // 👀 still fires
+    expect(calls[2].emoji).toBe(RECEIPT_FAILED_EMOJI);
   });
 
-  test("connection-refused (agent process dead) → /v1/turn POST fails → no 👀", async () => {
+  test("connection-refused (agent process dead): ⚡ → 👀 → ❌", async () => {
     setTurnPoster(async () => {
       throw new Error("connect ECONNREFUSED");
     });
-    const result = await wakeTurn("hello", {
-      chat_id: "100",
-      message_id: "5",
+    const ok = await runHandleUpdateGating();
+    expect(ok).toBe(false);
+    expect(calls.length).toBe(3);
+    expect(calls[1].emoji).toBe(RECEIPT_READ_EMOJI);
+    expect(calls[2].emoji).toBe(RECEIPT_FAILED_EMOJI);
+  });
+
+  test("timeout: ⚡ → 👀 → ❌ — the visible progression for any wake failure", async () => {
+    setTurnPoster(async () => {
+      throw new Error("network timeout");
     });
-    expect(result.ok).toBe(false);
+    const ok = await runHandleUpdateGating();
+    expect(ok).toBe(false);
+    expect(calls[1].emoji).toBe(RECEIPT_READ_EMOJI);
+    expect(calls[2].emoji).toBe(RECEIPT_FAILED_EMOJI);
+  });
+
+  test("👀 visible BEFORE wakeTurn resolves — operator sees 👀 even if wake hangs", async () => {
+    // The critical operator-pain case: wakeTurn never resolves (network
+    // partition / agent stuck mid-turn). 👀 must still appear because
+    // the poller fires it BEFORE awaiting wakeTurn. We model "wakeTurn
+    // hangs" by intentionally not awaiting it.
+    await markDelivered("100", "5");
+    await markReceived("100", "5");
+    expect(calls.length).toBe(2);
+    expect(calls[0].emoji).toBe(RECEIPT_DELIVERED_EMOJI);
+    expect(calls[1].emoji).toBe(RECEIPT_READ_EMOJI);
   });
 });
 
@@ -242,15 +289,23 @@ describe("4-stage receipts: ⚡→👀→✅, ❌ on failure", () => {
     expect(calls[2].emoji).toBe(RECEIPT_DONE_EMOJI);
   });
 
-  test("delivered then failed is a two-call ⚡→❌ progression (dead-agent path)", async () => {
-    // A DM to a dead/stopped agent must NOT reach 👀 — it stays on ⚡
-    // and advances to ❌ when wakeTurn returns ok=false. This is the
-    // exact gating contract the operator confirmed on 2026-06-01.
+  test("delivered → received → failed is a three-call ⚡→👀→❌ (dead-agent path, #41)", async () => {
+    // Under the #41 (2026-06-07) contract, EVERY received message
+    // advances to 👀 before any further outcome — including failure.
+    // A DM to a dead/stopped agent now produces ⚡ → 👀 → ❌. The
+    // operator can still tell agent-down from agent-live by the FINAL
+    // state (❌ vs ✅); the intermediate 👀 proves the bridge itself
+    // is alive (silence past ⚡ now exclusively means bridge crash).
+    //
+    // This REPLACES the older 2026-06-01 contract where 👀 was gated
+    // on /v1/turn 2xx and a dead agent went ⚡ → ❌ skipping 👀.
     await markDelivered("100", "5");
+    await markReceived("100", "5");
     await markFailed("100", "5");
-    expect(calls.length).toBe(2);
+    expect(calls.length).toBe(3);
     expect(calls[0].emoji).toBe(RECEIPT_DELIVERED_EMOJI);
-    expect(calls[1].emoji).toBe(RECEIPT_FAILED_EMOJI);
+    expect(calls[1].emoji).toBe(RECEIPT_READ_EMOJI);
+    expect(calls[2].emoji).toBe(RECEIPT_FAILED_EMOJI);
   });
 
   test("each stage is independently idempotent", async () => {
