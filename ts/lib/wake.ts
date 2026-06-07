@@ -22,6 +22,16 @@
  *   - best-effort: a failed POST is logged loudly at warning, never thrown —
  *                  it must not crash the relay or block delivery
  *   - injectable:  the POST function is overridable in tests (no real network)
+ *
+ * Result shape (#14, 2026-06-07): wakeTurn now returns a WakeResult
+ * discriminated union ({ok:true, status} | {ok:false, status?, reason,
+ * category}) so the caller can distinguish HTTP 401/403 ("auth"),
+ * ECONNREFUSED ("connection_refused"), 5xx ("server_error"), etc. —
+ * lib/loudfail.ts maps the category to a human-readable Telegram reply
+ * the operator sees on inbound failures ("⚠️ <agent> unavailable: <reason>
+ * — retry <when>"). The previous boolean return was lossy: the operator
+ * saw ❌ with no detail and could not tell "agent down" from "auth
+ * misconfigured" from "transient 502".
  */
 
 import { TURN_URL, TURN_BEARER } from "./config.js";
@@ -39,9 +49,58 @@ export interface WakeMeta {
 }
 
 /**
- * Low-level turn poster. Overridable in tests via setTurnPoster() so the wake
- * path can be exercised without a real /v1/turn server. Returns the HTTP
- * status code (callers only branch on ok/not-ok).
+ * Categorised failure modes when wakeTurn cannot deliver to /v1/turn.
+ *
+ *   - timeout            — fetch throws an AbortError / timeout / network
+ *                          stall. Likely cause: agent is mid-turn and over
+ *                          its per-turn deadline, OR network partition.
+ *   - connection_refused — fetch throws ECONNREFUSED. Likely cause: the
+ *                          SDK-runner process is dead and nothing is bound
+ *                          to its /v1/turn port.
+ *   - auth               — HTTP 401 / 403. Likely cause: TURN_BEARER is
+ *                          wrong / expired, or the operator rotated the
+ *                          token.
+ *   - quota_capped       — HTTP 429 (Too Many Requests). The Claude account
+ *                          attached to this agent has hit its 5h or 7d
+ *                          rate-limit ceiling. lib/loudfail.ts looks up
+ *                          the reset time from usage.json and renders it
+ *                          into the operator-facing reply ("retry after
+ *                          14:30") so they know when the wall lifts.
+ *   - client_error       — any other 4xx. Likely cause: the wake body
+ *                          shape changed and the agent doesn't accept it
+ *                          (bridge-side bug — fix the wakeText framing).
+ *   - server_error       — any 5xx. Likely cause: agent runner crashed
+ *                          mid-turn or its dependencies are down.
+ *   - unknown            — anything else (a thrown non-Error, an exotic
+ *                          status). Surface verbatim in logs.
+ */
+export type WakeFailCategory =
+  | "timeout"
+  | "connection_refused"
+  | "auth"
+  | "quota_capped"
+  | "client_error"
+  | "server_error"
+  | "unknown";
+
+/** Discriminated union — callers branch on result.ok then narrow. */
+export type WakeResult =
+  | { ok: true; status: number }
+  | {
+      ok: false;
+      status?: number;
+      reason: string;
+      category: WakeFailCategory;
+    };
+
+/**
+ * Low-level turn poster. Overridable in tests via setTurnPoster() so the
+ * wake path can be exercised without a real /v1/turn server. Returns the
+ * HTTP status code on success OR throws an Error subclass on transport
+ * failure (the caller categorises the thrown error). Tests pass async
+ * functions that either resolve to a number or throw an Error with a
+ * descriptive message ("connect ECONNREFUSED", "network timeout", ...) —
+ * we match on the error message just like the real fetch path would.
  */
 type TurnPoster = (
   url: string,
@@ -91,21 +150,68 @@ export function wakeText(text: string, meta: WakeMeta): string {
 }
 
 /**
+ * Map an HTTP status code returned by /v1/turn to a WakeFailCategory.
+ * Exported so loudfail.ts (and tests) can reuse the same classifier.
+ */
+export function categoriseStatus(status: number): WakeFailCategory {
+  if (status === 401 || status === 403) return "auth";
+  if (status === 429) return "quota_capped";
+  if (status >= 400 && status < 500) return "client_error";
+  if (status >= 500 && status < 600) return "server_error";
+  return "unknown";
+}
+
+/**
+ * Map a thrown Error from the fetch path to a WakeFailCategory. Pattern-
+ * matches well-known node/undici/Bun error messages; falls back to
+ * "unknown" for unrecognised shapes.
+ */
+export function categoriseError(err: unknown): WakeFailCategory {
+  const msg = err instanceof Error ? err.message : String(err);
+  const m = msg.toLowerCase();
+  if (m.includes("econnrefused") || m.includes("connection refused")) {
+    return "connection_refused";
+  }
+  if (
+    m.includes("timeout") ||
+    m.includes("timed out") ||
+    m.includes("aborterror") ||
+    m.includes("etimedout")
+  ) {
+    return "timeout";
+  }
+  return "unknown";
+}
+
+/**
  * POST an inbound message to the agent's own /v1/turn to DRIVE a turn now.
  *
- * No-op when TURN_URL is unset. Returns true when the turn was accepted
- * (2xx), false on any failure (logged loudly, never thrown). The boolean lets
- * the caller decide whether to mark the message read on success.
+ * No-op when TURN_URL is unset (returns {ok:false, category:"unknown",
+ * reason:"wake disabled (no TURN_URL)"}; the loud-fail path is gated on
+ * wakeEnabled() upstream so this branch is unreachable in production).
+ *
+ * Always logs failures loudly at warning; never throws (must not crash the
+ * relay or block delivery). The caller branches on result.ok to advance the
+ * receipt reaction and, on failure, to send the loud-fail reply (#14).
  */
-export async function wakeTurn(text: string, meta: WakeMeta): Promise<boolean> {
-  if (!wakeEnabled()) return false;
+export async function wakeTurn(
+  text: string,
+  meta: WakeMeta,
+): Promise<WakeResult> {
+  if (!wakeEnabled()) {
+    return {
+      ok: false,
+      reason: "wake disabled (no TURN_URL)",
+      category: "unknown",
+    };
+  }
   try {
     const status = await turnPoster(
       TURN_URL,
       { text: wakeText(text, meta) },
       TURN_BEARER,
     );
-    if (status >= 200 && status < 300) return true;
+    if (status >= 200 && status < 300) return { ok: true, status };
     log("wake", `WARNING: /v1/turn returned ${status}`, {
       level: "warning",
       turn_url: TURN_URL,
@@ -113,15 +219,25 @@ export async function wakeTurn(text: string, meta: WakeMeta): Promise<boolean> {
       chat_id: meta.chat_id,
       message_id: meta.message_id,
     });
-    return false;
+    return {
+      ok: false,
+      status,
+      reason: `HTTP ${status}`,
+      category: categoriseStatus(status),
+    };
   } catch (err) {
+    const errStr = err instanceof Error ? err.message : String(err);
     log("wake", "WARNING: failed to POST /v1/turn", {
       level: "warning",
       turn_url: TURN_URL,
       chat_id: meta.chat_id,
       message_id: meta.message_id,
-      error: String(err),
+      error: errStr,
     });
-    return false;
+    return {
+      ok: false,
+      reason: errStr,
+      category: categoriseError(err),
+    };
   }
 }

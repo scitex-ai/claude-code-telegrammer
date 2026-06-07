@@ -34,6 +34,7 @@ import {
   isAuthoritative,
   releaseAuthoritative,
 } from "./takeover.js";
+import { sendLoudFailReply } from "./loudfail.js";
 
 /**
  * Max consecutive 409 Conflict responses we tolerate before declaring
@@ -473,27 +474,45 @@ async function handleUpdate(mcp: Server, update: any): Promise<void> {
   // (SDK-runner agents), POST the message to the agent's own /v1/turn.
   // The outcome advances the reaction past 👀 to the FINAL stage:
   //
-  //   wakeTurn ok=true  → ✅ done   (stage 3)
-  //   wakeTurn ok=false → ❌ failed (stage 4)
+  //   wakeTurn result.ok=true  → ✅ done   (stage 3)
+  //   wakeTurn result.ok=false → ❌ failed (stage 4) + LOUD-FAIL REPLY (#14)
   //
   // Under current scitex-agent-container, sac /v1/turn is case (B):
   // the POST returns 2xx only AFTER the turn completes. So ok=true is
   // simultaneously "agent received" and "agent finished" — we advance
-  // straight to ✅. This sequence is forward-compatible if sac ever
-  // splits the signals (enqueue-ack vs completed-turn): the two
-  // callsites can then be wired independently.
+  // straight from 👀 (already fired unconditionally above per #41) to
+  // ✅. This sequence is forward-compatible if sac ever splits the
+  // signals (enqueue-ack vs completed-turn): an explicit
+  // "agent received" stage can be reintroduced between 👀 and ✅
+  // without re-architecting.
   //
   // A dead / stopped agent (connection refused, timeout, 401, any non-
-  // 2xx) yields ok=false and ❌ is set; the operator sees ⚡ → 👀 → ❌
-  // and can tell the agent is down by the FINAL state. (Pre-#41 the
-  // operator saw ⚡ → ❌ and never 👀 — now they get 👀 first so the
-  // bridge's aliveness is visible regardless of agent state.)
+  // 2xx) yields ok=false; we set ❌ AND post a loud-fail reply to the
+  // operator (#14, 2026-06-07):
+  //
+  //   "⚠️ <agent_id> unavailable: <reason> — retry <when>"
+  //
+  // The wakeTurn return shape carries a categorised reason (HTTP status,
+  // ECONNREFUSED, timeout, quota cap, …) so the operator knows WHY the
+  // agent is down without sshing into the host. Sent via
+  // tgApi("sendMessage") with reply_parameters pointing back to the
+  // inbound message so the thread stays coherent. Dedup at the
+  // loudfail.ts layer guards against double-send on any future retry
+  // path; suppressible via the
+  // CLAUDE_CODE_TELEGRAMMER_TELEGRAM_LOUD_FAIL=0 env kill-switch (the
+  // ❌ reaction still fires regardless — only the text reply is gated).
+  //
+  // The pre-#41 operator saw ⚡ → ❌ and never 👀. Post-#41 they see
+  // ⚡ → 👀 → ❌; the FINAL state ❌ + the loud-fail reply text answer
+  // both "is the bridge alive?" (yes, 👀 fired) and "why didn't the
+  // agent reply?" (the categorised reason).
   if (wakeEnabled()) {
-    void wakeTurn(text, meta).then((ok) => {
-      if (ok) {
+    void wakeTurn(text, meta).then((result) => {
+      if (result.ok) {
         void markDone(chatId, String(msg.message_id));
       } else {
         void markFailed(chatId, String(msg.message_id));
+        void sendLoudFailReply(chatId, Number(msg.message_id), result);
       }
     });
   }

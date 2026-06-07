@@ -127,30 +127,38 @@ describe("👀 fires unconditionally (#41, post-2026-06-07 contract)", () => {
     _resetReceipts();
   });
 
-  // The exact gating pattern poller.ts::handleUpdate now follows:
+  // The exact gating pattern poller.ts::handleUpdate now follows
+  // post-#41 + post-#14 (rebased onto develop):
   //
   //   void markDelivered(...);
   //   void markReceived(...);          // <-- unconditional, the #41 change
   //   if (wakeEnabled()) {
-  //     void wakeTurn(text, meta).then((ok) => {
-  //       if (ok)  void markDone(...);
-  //       else     void markFailed(...);
+  //     void wakeTurn(text, meta).then((result) => {
+  //       if (result.ok) void markDone(...);
+  //       else {
+  //         void markFailed(...);
+  //         void sendLoudFailReply(...);  // <-- the #14 change
+  //       }
   //     });
   //   }
   //
   // Each test below models a different wakeTurn outcome and asserts
-  // the reaction sequence the operator sees on the message.
+  // the RECEIPT-REACTION sequence the operator sees. The loud-fail
+  // reply path is covered separately in loudfail-send.test.ts.
 
   async function runHandleUpdateGating(): Promise<boolean> {
     await markDelivered("100", "5");
-    await markReceived("100", "5"); // unconditional now
-    const ok = await wakeTurn("hello", { chat_id: "100", message_id: "5" });
-    if (ok) {
+    await markReceived("100", "5"); // unconditional per #41
+    const result = await wakeTurn("hello", {
+      chat_id: "100",
+      message_id: "5",
+    });
+    if (result.ok) {
       await markDone("100", "5");
     } else {
       await markFailed("100", "5");
     }
-    return ok;
+    return result.ok;
   }
 
   test("dead agent (502): ⚡ → 👀 → ❌ — 👀 IS now reached (the #41 change)", async () => {

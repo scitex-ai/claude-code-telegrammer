@@ -13676,7 +13676,12 @@ var ATTACHMENT_DIR = process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ATTACHMENT_DIR
 var TOKEN = process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN ?? "";
 var API_BASE = `https://api.telegram.org/bot${TOKEN}`;
 var ENV_ALLOWED = (process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ALLOWED_USERS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-var READ_RECEIPTS_ENABLED = !["0", "false", "no", "off"].includes((process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_READ_RECEIPTS ?? "").trim().toLowerCase());
+var READ_RECEIPTS_ENABLED = ![
+  "0",
+  "false",
+  "no",
+  "off"
+].includes((process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_READ_RECEIPTS ?? "").trim().toLowerCase());
 var TURN_URL = process.env.CLAUDE_CODE_TELEGRAMMER_TURN_URL ?? "";
 var TURN_BEARER = process.env.CLAUDE_CODE_TELEGRAMMER_TURN_BEARER ?? "";
 var HOST_NAME = process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_HOST_NAME ?? hostname();
@@ -13717,11 +13722,20 @@ var TOKEN2 = process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN ?? "";
 var API_BASE2 = `https://api.telegram.org/bot${TOKEN2}`;
 var MAX_TEXT = 4096;
 var ENV_ALLOWED2 = (process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ALLOWED_USERS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-var READ_RECEIPTS_ENABLED2 = !["0", "false", "no", "off"].includes((process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_READ_RECEIPTS ?? "").trim().toLowerCase());
+var READ_RECEIPTS_ENABLED2 = ![
+  "0",
+  "false",
+  "no",
+  "off"
+].includes((process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_READ_RECEIPTS ?? "").trim().toLowerCase());
 var RECEIPT_DELIVERED_EMOJI = "⚡";
 var RECEIPT_READ_EMOJI = "\uD83D\uDC40";
 var RECEIPT_DONE_EMOJI = "✅";
 var RECEIPT_FAILED_EMOJI = "❌";
+function isLoudFailEnabled() {
+  const v = (process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_LOUD_FAIL ?? "").trim().toLowerCase();
+  return !["0", "false", "no", "off"].includes(v);
+}
 var TURN_URL2 = process.env.CLAUDE_CODE_TELEGRAMMER_TURN_URL ?? "";
 var TURN_BEARER2 = process.env.CLAUDE_CODE_TELEGRAMMER_TURN_BEARER ?? "";
 var HOST_NAME2 = process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_HOST_NAME ?? hostname2();
@@ -13734,6 +13748,15 @@ function isSignatureEnabled() {
 }
 function quotaCachePath() {
   return process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_QUOTA_CACHE_PATH ?? "/home/ywatanabe/.scitex/quota-cache.json";
+}
+function usageJsonPath() {
+  const override = process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_USAGE_JSON_PATH;
+  if (override)
+    return override;
+  const acct = accountDirname();
+  if (!acct)
+    return "";
+  return `${homedir2()}/.scitex/agent-container/accounts/${acct}/usage.json`;
 }
 function accountDirname() {
   return process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ACCOUNT ?? process.env.CLAUDE_AGENT_ACCOUNT ?? "";
@@ -14650,13 +14673,40 @@ function wakeText(text, meta2) {
 ${text}
 </channel>`;
 }
+function categoriseStatus(status) {
+  if (status === 401 || status === 403)
+    return "auth";
+  if (status === 429)
+    return "quota_capped";
+  if (status >= 400 && status < 500)
+    return "client_error";
+  if (status >= 500 && status < 600)
+    return "server_error";
+  return "unknown";
+}
+function categoriseError(err) {
+  const msg = err instanceof Error ? err.message : String(err);
+  const m = msg.toLowerCase();
+  if (m.includes("econnrefused") || m.includes("connection refused")) {
+    return "connection_refused";
+  }
+  if (m.includes("timeout") || m.includes("timed out") || m.includes("aborterror") || m.includes("etimedout")) {
+    return "timeout";
+  }
+  return "unknown";
+}
 async function wakeTurn(text, meta2) {
-  if (!wakeEnabled())
-    return false;
+  if (!wakeEnabled()) {
+    return {
+      ok: false,
+      reason: "wake disabled (no TURN_URL)",
+      category: "unknown"
+    };
+  }
   try {
     const status = await turnPoster(TURN_URL2, { text: wakeText(text, meta2) }, TURN_BEARER2);
     if (status >= 200 && status < 300)
-      return true;
+      return { ok: true, status };
     log2("wake", `WARNING: /v1/turn returned ${status}`, {
       level: "warning",
       turn_url: TURN_URL2,
@@ -14664,16 +14714,26 @@ async function wakeTurn(text, meta2) {
       chat_id: meta2.chat_id,
       message_id: meta2.message_id
     });
-    return false;
+    return {
+      ok: false,
+      status,
+      reason: `HTTP ${status}`,
+      category: categoriseStatus(status)
+    };
   } catch (err) {
+    const errStr = err instanceof Error ? err.message : String(err);
     log2("wake", "WARNING: failed to POST /v1/turn", {
       level: "warning",
       turn_url: TURN_URL2,
       chat_id: meta2.chat_id,
       message_id: meta2.message_id,
-      error: String(err)
+      error: errStr
     });
-    return false;
+    return {
+      ok: false,
+      reason: errStr,
+      category: categoriseError(err)
+    };
   }
 }
 
@@ -14921,6 +14981,146 @@ function releaseAuthoritative(opts) {
   try {
     unlinkSync2(path);
   } catch {}
+}
+
+// lib/usage.ts
+import { readFileSync as readFileSync6 } from "fs";
+function parseResetAt(raw) {
+  if (raw == null)
+    return null;
+  if (typeof raw === "number") {
+    if (!Number.isFinite(raw) || raw <= 0)
+      return null;
+    const ms = raw > 1000000000000 ? raw : raw * 1000;
+    const d = new Date(ms);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  if (typeof raw === "string") {
+    const t = Date.parse(raw);
+    if (Number.isNaN(t))
+      return null;
+    return new Date(t);
+  }
+  return null;
+}
+function readQuotaReset() {
+  const path = usageJsonPath();
+  if (!path)
+    return null;
+  let raw;
+  try {
+    raw = readFileSync6(path, "utf-8");
+  } catch {
+    return null;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object")
+    return null;
+  const obj = parsed;
+  const r5 = parseResetAt(obj.reset_at_5h);
+  const r7 = parseResetAt(obj.reset_at_7d);
+  if (r5 === null && r7 === null)
+    return null;
+  if (r5 !== null && r7 === null)
+    return { variant: "5h", resetAt: r5 };
+  if (r5 === null && r7 !== null)
+    return { variant: "7d", resetAt: r7 };
+  return r5.getTime() <= r7.getTime() ? { variant: "5h", resetAt: r5 } : { variant: "7d", resetAt: r7 };
+}
+function formatResetTime(d) {
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+// lib/loudfail.ts
+function resolveFailPhrases(result) {
+  switch (result.category) {
+    case "quota_capped": {
+      const reset = readQuotaReset();
+      if (reset) {
+        return {
+          reason: `${reset.variant} quota cap`,
+          retry: `retry after ${formatResetTime(reset.resetAt)}`
+        };
+      }
+      return {
+        reason: "quota cap",
+        retry: "after the quota resets"
+      };
+    }
+    case "auth":
+      return {
+        reason: "auth refresh needed",
+        retry: "escalating to lead"
+      };
+    case "connection_refused":
+      return {
+        reason: "connection refused",
+        retry: "retry in ~30s"
+      };
+    case "timeout":
+      return {
+        reason: "agent busy",
+        retry: "retry shortly"
+      };
+    case "server_error":
+      return {
+        reason: "agent busy",
+        retry: "retry shortly"
+      };
+    case "client_error":
+      return {
+        reason: result.status != null ? `HTTP ${result.status}` : "client error",
+        retry: "retry shortly"
+      };
+    case "unknown":
+      return {
+        reason: result.reason || "unknown error",
+        retry: "retry shortly"
+      };
+  }
+}
+function buildLoudFailMessage(result, agentId = AGENT_ID2) {
+  const { reason, retry } = resolveFailPhrases(result);
+  return `⚠️ ${agentId} unavailable: ${reason} — ${retry}`;
+}
+var loudFailSender = (chatId, text, replyToMessageId) => sendMessage(chatId, text, replyToMessageId);
+var sentLoudFailReplies = new Set;
+function loudFailKey(chatId, messageId) {
+  return `${chatId}:${messageId}`;
+}
+async function sendLoudFailReply(chatId, replyToMessageId, result, agentId = AGENT_ID2) {
+  if (!isLoudFailEnabled())
+    return;
+  const key = loudFailKey(chatId, replyToMessageId);
+  if (sentLoudFailReplies.has(key))
+    return;
+  sentLoudFailReplies.add(key);
+  const text = buildLoudFailMessage(result, agentId);
+  try {
+    await loudFailSender(chatId, text, replyToMessageId);
+    log2("loudfail", "sent loud-fail reply", {
+      chat_id: chatId,
+      message_id: String(replyToMessageId),
+      category: result.category,
+      reason: result.reason
+    });
+  } catch (err) {
+    log2("loudfail", "WARNING: failed to send loud-fail reply", {
+      level: "warning",
+      chat_id: chatId,
+      message_id: String(replyToMessageId),
+      category: result.category,
+      reason: result.reason,
+      error: String(err)
+    });
+  }
 }
 
 // lib/poller.ts
@@ -15197,11 +15397,12 @@ async function handleUpdate(mcp, update) {
     });
   });
   if (wakeEnabled()) {
-    wakeTurn(text, meta2).then((ok) => {
-      if (ok) {
+    wakeTurn(text, meta2).then((result) => {
+      if (result.ok) {
         markDone(chatId, String(msg.message_id));
       } else {
         markFailed(chatId, String(msg.message_id));
+        sendLoudFailReply(chatId, Number(msg.message_id), result);
       }
     });
   }
@@ -15352,7 +15553,7 @@ function initStore() {
 import {
   existsSync as existsSync3,
   mkdirSync as mkdirSync5,
-  readFileSync as readFileSync6,
+  readFileSync as readFileSync7,
   renameSync as renameSync2,
   unlinkSync as unlinkSync3,
   writeFileSync as writeFileSync3
@@ -15366,7 +15567,7 @@ function readPidfile2(path) {
     return null;
   let raw;
   try {
-    raw = readFileSync6(path, "utf8");
+    raw = readFileSync7(path, "utf8");
   } catch {
     return null;
   }

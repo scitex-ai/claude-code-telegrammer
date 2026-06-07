@@ -57,14 +57,49 @@ export const ENV_ALLOWED = (
 //
 // Enabled by default. Set CLAUDE_CODE_TELEGRAMMER_TELEGRAM_READ_RECEIPTS to
 // any of 0/false/no/off (case-insensitive) to disable without a code change.
-export const READ_RECEIPTS_ENABLED: boolean = !["0", "false", "no", "off"].includes(
-  (process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_READ_RECEIPTS ?? "").trim().toLowerCase(),
+export const READ_RECEIPTS_ENABLED: boolean = ![
+  "0",
+  "false",
+  "no",
+  "off",
+].includes(
+  (process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_READ_RECEIPTS ?? "")
+    .trim()
+    .toLowerCase(),
 );
 
 export const RECEIPT_DELIVERED_EMOJI = "⚡"; // stage 1
 export const RECEIPT_READ_EMOJI = "👀"; // stage 2 (a.k.a. "received")
 export const RECEIPT_DONE_EMOJI = "✅"; // stage 3 (turn completed)
 export const RECEIPT_FAILED_EMOJI = "❌"; // stage 4 (failure)
+
+// ── Loud-fail outbound reply (#14, 2026-06-07) ──────────────────────────────
+//
+// When wakeTurn fails (agent down / 401 / quota-capped / timeout / 5xx),
+// the bridge posts an outbound Telegram reply to the operator explaining
+// the failure, so silence is impossible: every inbound either gets a
+// reply from the agent (success) or a loud-fail reply from the bridge
+// (failure). The reply text is:
+//
+//   "⚠️ <agent_id> unavailable: <reason> — retry <when>"
+//
+// (rendered by lib/loudfail.ts::buildLoudFailMessage with the matching
+// WakeFailCategory). Posted via tgApi("sendMessage") with
+// reply_parameters pointing back to the inbound, so the operator's
+// thread stays coherent. Each inbound (chat_id, message_id) gets at
+// most one loud-fail reply per process lifetime (sentLoudFailReplies
+// dedup set).
+//
+// Enabled by default. Set CLAUDE_CODE_TELEGRAMMER_TELEGRAM_LOUD_FAIL
+// to any of 0/false/no/off (case-insensitive) to suppress the outbound
+// reply without a code change (the ❌ receipt still fires; only the
+// text message is suppressed).
+export function isLoudFailEnabled(): boolean {
+  const v = (process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_LOUD_FAIL ?? "")
+    .trim()
+    .toLowerCase();
+  return !["0", "false", "no", "off"].includes(v);
+}
 
 // ── Wake-on-push (idle SDK-runner sessions) ─────────────────────────────────
 //
@@ -82,8 +117,7 @@ export const RECEIPT_FAILED_EMOJI = "❌"; // stage 4 (failure)
 //
 // This mirrors scitex-agent-container's `sac mcp channel --turn-url` wake
 // primitive (runtimes/_mcp/_channel_wake.py::_wake_turn).
-export const TURN_URL =
-  process.env.CLAUDE_CODE_TELEGRAMMER_TURN_URL ?? "";
+export const TURN_URL = process.env.CLAUDE_CODE_TELEGRAMMER_TURN_URL ?? "";
 // Optional bearer for the /v1/turn POST (sent as Authorization: Bearer ...).
 export const TURN_BEARER =
   process.env.CLAUDE_CODE_TELEGRAMMER_TURN_BEARER ?? "";
@@ -154,6 +188,32 @@ export function quotaCachePath(): string {
     process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_QUOTA_CACHE_PATH ??
     "/home/ywatanabe/.scitex/quota-cache.json"
   );
+}
+
+/**
+ * Path to the per-account usage.json the host writes after each turn
+ * completes. Operator-specified canonical location (2026-06-07):
+ *   ~/.scitex/agent-container/accounts/<acct>/usage.json
+ *
+ * Distinct from quota-cache.json (which is a single host-wide file with
+ * percentages): usage.json carries ABSOLUTE reset timestamps (epoch
+ * seconds OR ISO-8601 strings) under the keys `reset_at_5h` and
+ * `reset_at_7d` — used by lib/loudfail.ts to render
+ * "⚠️ <agent> unavailable: 5h quota cap — retry after HH:MM" so the
+ * operator sees when the quota wall actually lifts.
+ *
+ * Override with CLAUDE_CODE_TELEGRAMMER_TELEGRAM_USAGE_JSON_PATH —
+ * primarily for tests pointing at a fixture file. When the override is
+ * unset, accountDirname() supplies the <acct> segment; an empty
+ * accountDirname yields an empty path → the reader returns null
+ * (loud-fail falls back to "after the quota resets").
+ */
+export function usageJsonPath(): string {
+  const override = process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_USAGE_JSON_PATH;
+  if (override) return override;
+  const acct = accountDirname();
+  if (!acct) return "";
+  return `${homedir()}/.scitex/agent-container/accounts/${acct}/usage.json`;
 }
 
 /**
