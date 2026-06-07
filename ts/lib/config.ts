@@ -191,6 +191,32 @@ export function quotaCachePath(): string {
 }
 
 /**
+ * Path to the per-account usage.json the host writes after each turn
+ * completes. Operator-specified canonical location (2026-06-07):
+ *   ~/.scitex/agent-container/accounts/<acct>/usage.json
+ *
+ * Distinct from quota-cache.json (which is a single host-wide file with
+ * percentages): usage.json carries ABSOLUTE reset timestamps (epoch
+ * seconds OR ISO-8601 strings) under the keys `reset_at_5h` and
+ * `reset_at_7d` — used by lib/loudfail.ts to render
+ * "⚠️ <agent> unavailable: 5h quota cap — retry after HH:MM" so the
+ * operator sees when the quota wall actually lifts.
+ *
+ * Override with CLAUDE_CODE_TELEGRAMMER_TELEGRAM_USAGE_JSON_PATH —
+ * primarily for tests pointing at a fixture file. When the override is
+ * unset, accountDirname() supplies the <acct> segment; an empty
+ * accountDirname yields an empty path → the reader returns null
+ * (loud-fail falls back to "after the quota resets").
+ */
+export function usageJsonPath(): string {
+  const override = process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_USAGE_JSON_PATH;
+  if (override) return override;
+  const acct = accountDirname();
+  if (!acct) return "";
+  return `${homedir()}/.scitex/agent-container/accounts/${acct}/usage.json`;
+}
+
+/**
  * Account directory-name for THIS bridge (e.g. `wyusuuke-gmail-com`,
  * `ywatanabe-scitex-ai`). Used to look up the matching entry in
  * quota-cache.json — we match by the `short` field, which is the email

@@ -13749,6 +13749,15 @@ function isSignatureEnabled() {
 function quotaCachePath() {
   return process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_QUOTA_CACHE_PATH ?? "/home/ywatanabe/.scitex/quota-cache.json";
 }
+function usageJsonPath() {
+  const override = process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_USAGE_JSON_PATH;
+  if (override)
+    return override;
+  const acct = accountDirname();
+  if (!acct)
+    return "";
+  return `${homedir2()}/.scitex/agent-container/accounts/${acct}/usage.json`;
+}
 function accountDirname() {
   return process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ACCOUNT ?? process.env.CLAUDE_AGENT_ACCOUNT ?? "";
 }
@@ -14627,6 +14636,8 @@ ${text}
 function categoriseStatus(status) {
   if (status === 401 || status === 403)
     return "auth";
+  if (status === 429)
+    return "quota_capped";
   if (status >= 400 && status < 500)
     return "client_error";
   if (status >= 500 && status < 600)
@@ -14850,25 +14861,112 @@ ${text}` : banner;
   return text;
 }
 
+// lib/usage.ts
+import { readFileSync as readFileSync5 } from "fs";
+function parseResetAt(raw) {
+  if (raw == null)
+    return null;
+  if (typeof raw === "number") {
+    if (!Number.isFinite(raw) || raw <= 0)
+      return null;
+    const ms = raw > 1000000000000 ? raw : raw * 1000;
+    const d = new Date(ms);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  if (typeof raw === "string") {
+    const t = Date.parse(raw);
+    if (Number.isNaN(t))
+      return null;
+    return new Date(t);
+  }
+  return null;
+}
+function readQuotaReset() {
+  const path = usageJsonPath();
+  if (!path)
+    return null;
+  let raw;
+  try {
+    raw = readFileSync5(path, "utf-8");
+  } catch {
+    return null;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object")
+    return null;
+  const obj = parsed;
+  const r5 = parseResetAt(obj.reset_at_5h);
+  const r7 = parseResetAt(obj.reset_at_7d);
+  if (r5 === null && r7 === null)
+    return null;
+  if (r5 !== null && r7 === null)
+    return { variant: "5h", resetAt: r5 };
+  if (r5 === null && r7 !== null)
+    return { variant: "7d", resetAt: r7 };
+  return r5.getTime() <= r7.getTime() ? { variant: "5h", resetAt: r5 } : { variant: "7d", resetAt: r7 };
+}
+function formatResetTime(d) {
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
 // lib/loudfail.ts
-function retrySuggestion(category) {
-  switch (category) {
+function resolveFailPhrases(result) {
+  switch (result.category) {
+    case "quota_capped": {
+      const reset = readQuotaReset();
+      if (reset) {
+        return {
+          reason: `${reset.variant} quota cap`,
+          retry: `retry after ${formatResetTime(reset.resetAt)}`
+        };
+      }
+      return {
+        reason: "quota cap",
+        retry: "after the quota resets"
+      };
+    }
     case "auth":
-      return "after fixing the bot token";
-    case "client_error":
-      return "after fixing the request shape";
-    case "server_error":
-      return "in a few minutes";
+      return {
+        reason: "auth refresh needed",
+        retry: "escalating to lead"
+      };
     case "connection_refused":
-      return "after the agent restarts";
+      return {
+        reason: "connection refused",
+        retry: "retry in ~30s"
+      };
     case "timeout":
-      return "shortly";
+      return {
+        reason: "agent busy",
+        retry: "retry shortly"
+      };
+    case "server_error":
+      return {
+        reason: "agent busy",
+        retry: "retry shortly"
+      };
+    case "client_error":
+      return {
+        reason: result.status != null ? `HTTP ${result.status}` : "client error",
+        retry: "retry shortly"
+      };
     case "unknown":
-      return "shortly";
+      return {
+        reason: result.reason || "unknown error",
+        retry: "retry shortly"
+      };
   }
 }
 function buildLoudFailMessage(result, agentId = AGENT_ID2) {
-  return `⚠️ ${agentId} unavailable: ${result.reason} — retry ${retrySuggestion(result.category)}`;
+  const { reason, retry } = resolveFailPhrases(result);
+  return `⚠️ ${agentId} unavailable: ${reason} — ${retry}`;
 }
 var loudFailSender = (chatId, text, replyToMessageId) => sendMessage(chatId, text, replyToMessageId);
 var sentLoudFailReplies = new Set;

@@ -60,6 +60,12 @@ export interface WakeMeta {
  *   - auth               — HTTP 401 / 403. Likely cause: TURN_BEARER is
  *                          wrong / expired, or the operator rotated the
  *                          token.
+ *   - quota_capped       — HTTP 429 (Too Many Requests). The Claude account
+ *                          attached to this agent has hit its 5h or 7d
+ *                          rate-limit ceiling. lib/loudfail.ts looks up
+ *                          the reset time from usage.json and renders it
+ *                          into the operator-facing reply ("retry after
+ *                          14:30") so they know when the wall lifts.
  *   - client_error       — any other 4xx. Likely cause: the wake body
  *                          shape changed and the agent doesn't accept it
  *                          (bridge-side bug — fix the wakeText framing).
@@ -72,6 +78,7 @@ export type WakeFailCategory =
   | "timeout"
   | "connection_refused"
   | "auth"
+  | "quota_capped"
   | "client_error"
   | "server_error"
   | "unknown";
@@ -148,6 +155,7 @@ export function wakeText(text: string, meta: WakeMeta): string {
  */
 export function categoriseStatus(status: number): WakeFailCategory {
   if (status === 401 || status === 403) return "auth";
+  if (status === 429) return "quota_capped";
   if (status >= 400 && status < 500) return "client_error";
   if (status >= 500 && status < 600) return "server_error";
   return "unknown";

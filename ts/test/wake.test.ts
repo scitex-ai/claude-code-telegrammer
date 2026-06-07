@@ -86,10 +86,19 @@ describe("WakeFailCategory classification", () => {
     expect(categoriseStatus(403)).toBe("auth");
   });
 
+  test("categoriseStatus: 429 → quota_capped (split from client_error per #14 review)", () => {
+    // HTTP 429 (Too Many Requests) is the SAC runner's signal that the
+    // Claude account attached to this agent has hit a 5h or 7d rate
+    // wall. loudfail.ts renders this with the actual reset time from
+    // usage.json — see test/loudfail.test.ts for the wire-format pin.
+    expect(categoriseStatus(429)).toBe("quota_capped");
+  });
+
   test("categoriseStatus: other 4xx → client_error", () => {
     expect(categoriseStatus(400)).toBe("client_error");
     expect(categoriseStatus(404)).toBe("client_error");
-    expect(categoriseStatus(429)).toBe("client_error");
+    expect(categoriseStatus(409)).toBe("client_error");
+    expect(categoriseStatus(422)).toBe("client_error");
   });
 
   test("categoriseStatus: 5xx → server_error", () => {

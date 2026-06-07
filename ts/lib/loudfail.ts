@@ -1,33 +1,43 @@
 /**
  * Auto-error-reply / loud-fail outbound message (#14, 2026-06-07).
  *
- * When wakeTurn cannot deliver to /v1/turn (agent down / 401 / 5xx /
- * connection refused / timeout / quota-capped / etc.), the bridge sends a
- * Telegram reply to the operator on that bot explaining the failure.
- * Silence becomes impossible: every inbound either gets a reply from
- * the agent (success) or a loud-fail reply from the bridge (failure).
+ * When wakeTurn cannot deliver to /v1/turn (agent down / 401 /
+ * quota-capped / connection refused / timeout / 5xx / etc.), the bridge
+ * sends a Telegram reply to the operator on that bot explaining the
+ * failure. Silence becomes impossible: every inbound either gets a
+ * reply from the agent (success) or a loud-fail reply from the bridge
+ * (failure).
  *
- * Pre-#14 behaviour: a dead-agent inbound got ❌ as its FINAL reaction
- * state and no text message — the operator was left to guess WHY the
- * agent didn't answer. The operator's 2026-06-07 mandate: encode the
- * failure-explanation IN CODE so they don't have to remember "if you
- * see ❌, ssh and check the agent's logs". The reply tells them.
+ * Wire shape (operator's revised spec 2026-06-07):
  *
- * Wire shape: "⚠️ <agent_id> unavailable: <reason> — retry <when>"
+ *     "⚠️ <agent_id> unavailable: <reason_phrase> — <retry_phrase>"
  *
- *   examples:
- *     ⚠️ proj-foo unavailable: HTTP 502 — retry in a few minutes
- *     ⚠️ proj-foo unavailable: HTTP 401 — retry after fixing the bot token
- *     ⚠️ proj-foo unavailable: connect ECONNREFUSED — retry after the agent restarts
- *     ⚠️ proj-foo unavailable: network timeout — retry shortly
+ * The reason_phrase and retry_phrase are CATEGORY-DERIVED — they are
+ * NOT a verbatim echo of the underlying wakeTurn error string. Per
+ * lead's review (msg ab8d86e4 2026-06-07), the operator wants a fixed
+ * actionable vocabulary so they can read failure-classes at a glance
+ * without parsing stack-trace fragments. The raw error message lives
+ * in the WARN log line for diagnostics; the Telegram reply stays
+ * human-tier.
  *
- * The outbound message-poster is injectable (setLoudFailSender) so tests
- * exercise the wiring without real network calls — same pattern as
- * receipts.ts::setReactionSender and wake.ts::setTurnPoster.
+ *   category            reason_phrase           retry_phrase
+ *   ───────────────────────────────────────────────────────────────
+ *   quota_capped        "<variant> quota cap"   "retry after <HH:MM>"  (when usage.json readable)
+ *                       "quota cap"             "after the quota resets" (fallback)
+ *   auth                "auth refresh needed"   "escalating to lead"
+ *   connection_refused  "connection refused"    "retry in ~30s"
+ *   timeout             "agent busy"            "retry shortly"
+ *   server_error        "agent busy"            "retry shortly"
+ *   client_error        "HTTP <status>"         "retry shortly"
+ *   unknown             "<reason from result>"  "retry shortly"
  *
- * Dedup: each (chat_id, message_id) gets at most one loud-fail reply per
- * process lifetime. The poller guarantees handleUpdate runs once per
- * message (saveInbound returns null on dedup), but a transient
+ * The outbound message-poster is injectable (setLoudFailSender) so
+ * tests exercise the wiring without real network calls — same pattern
+ * as receipts.ts::setReactionSender and wake.ts::setTurnPoster.
+ *
+ * Dedup: each (chat_id, message_id) gets at most one loud-fail reply
+ * per process lifetime. The poller guarantees handleUpdate runs once
+ * per message (saveInbound returns null on dedup), but a transient
  * within-process retry path could otherwise produce double-replies.
  *
  * Best-effort: a failed send is logged loudly and never thrown — must
@@ -37,42 +47,102 @@
 import { sendMessage } from "./telegram-api.js";
 import { AGENT_ID, isLoudFailEnabled } from "./config.js";
 import { log } from "./log.js";
+import { formatResetTime, readQuotaReset } from "./usage.js";
 import type { WakeFailCategory, WakeResult } from "./wake.js";
 
 /**
- * Operator-facing retry-suggestion per failure category. Plain English,
- * actionable. No emoji, no jargon — these get rendered into Telegram
- * messages and read by humans.
+ * Pair of strings that compose the loud-fail message body for one
+ * category, before agent-id prefixing. Pure data — buildLoudFailMessage
+ * concatenates them with " — " in the wire format.
  */
-export function retrySuggestion(category: WakeFailCategory): string {
-  switch (category) {
-    case "auth":
-      return "after fixing the bot token";
-    case "client_error":
-      return "after fixing the request shape";
-    case "server_error":
-      return "in a few minutes";
-    case "connection_refused":
-      return "after the agent restarts";
-    case "timeout":
-      return "shortly";
-    case "unknown":
-      return "shortly";
-  }
+export interface FailPhrases {
+  reason: string;
+  retry: string;
 }
 
 /**
- * Render the loud-fail message body. Pure function — no I/O, no env reads
- * beyond the agent identity. Exported so tests can pin the wire-format
+ * Resolve the (reason, retry) pair for a wakeTurn failure. Reads
+ * usage.json for quota_capped (best-effort; falls back to a static
+ * "after the quota resets" string when the file is missing/unreadable).
+ *
+ * Pure-ish: the only side effect is one best-effort fs read for the
+ * quota_capped branch; every other branch is a pure mapping.
+ */
+export function resolveFailPhrases(
+  result: Extract<WakeResult, { ok: false }>,
+): FailPhrases {
+  switch (result.category) {
+    case "quota_capped": {
+      const reset = readQuotaReset();
+      if (reset) {
+        return {
+          reason: `${reset.variant} quota cap`,
+          retry: `retry after ${formatResetTime(reset.resetAt)}`,
+        };
+      }
+      return {
+        reason: "quota cap",
+        retry: "after the quota resets",
+      };
+    }
+    case "auth":
+      return {
+        reason: "auth refresh needed",
+        retry: "escalating to lead",
+      };
+    case "connection_refused":
+      return {
+        reason: "connection refused",
+        retry: "retry in ~30s",
+      };
+    case "timeout":
+      return {
+        reason: "agent busy",
+        retry: "retry shortly",
+      };
+    case "server_error":
+      return {
+        reason: "agent busy",
+        retry: "retry shortly",
+      };
+    case "client_error":
+      return {
+        reason:
+          result.status != null ? `HTTP ${result.status}` : "client error",
+        retry: "retry shortly",
+      };
+    case "unknown":
+      return {
+        reason: result.reason || "unknown error",
+        retry: "retry shortly",
+      };
+  }
+}
+
+/** Back-compat alias (older code may import retrySuggestion directly). */
+export function retrySuggestion(category: WakeFailCategory): string {
+  return resolveFailPhrases({
+    ok: false,
+    reason: "",
+    category,
+  }).retry;
+}
+
+/**
+ * Render the loud-fail message body. Pure function — no I/O beyond the
+ * one best-effort fs read in resolveFailPhrases() for the quota_capped
+ * branch (the read still returns null on any failure, so even there the
+ * function never throws). Exported so tests can pin the wire-format
  * directly without going through the network seam.
+ *
+ *     "⚠️ <agentId> unavailable: <reason> — <retry>"
  */
 export function buildLoudFailMessage(
   result: Extract<WakeResult, { ok: false }>,
   agentId: string = AGENT_ID,
 ): string {
-  return `⚠️ ${agentId} unavailable: ${result.reason} — retry ${retrySuggestion(
-    result.category,
-  )}`;
+  const { reason, retry } = resolveFailPhrases(result);
+  return `⚠️ ${agentId} unavailable: ${reason} — ${retry}`;
 }
 
 /**
