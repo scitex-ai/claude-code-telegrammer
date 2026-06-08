@@ -35,10 +35,12 @@
  *   - PROJECT    = $CLAUDE_CODE_TELEGRAMMER_TELEGRAM_PROJECT    || process.cwd()
  *   - HOST_NAME  = $CLAUDE_CODE_TELEGRAMMER_TELEGRAM_HOST_NAME  || os.hostname()
  *
- * Kill-switch: `appendSignature()` is a no-op when isSignatureEnabled()
- * returns false (env CLAUDE_CODE_TELEGRAMMER_TELEGRAM_SIGNATURE = 0/false/
- * no/off). The toggle is consulted at SEND time, not module load, so a
- * flip takes effect without restarting the bridge.
+ * Opt-IN toggle (task #82): `appendSignature()` is a no-op UNLESS
+ * isSignatureEnabled() returns true (env
+ * CLAUDE_CODE_TELEGRAMMER_TELEGRAM_SIGNATURE = 1/true/yes/on). Default is
+ * OFF — auto text-signature is abolished; /status replaces it and the
+ * audio signature stays. The toggle is consulted at SEND time, not module
+ * load, so a flip takes effect without restarting the bridge.
  *
  * Signing is idempotent: text that already ends with the EXACT current
  * signature is returned unchanged. This protects against:

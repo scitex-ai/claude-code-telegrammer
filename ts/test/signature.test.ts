@@ -66,6 +66,9 @@ beforeEach(() => {
     [ACCOUNT_FALLBACK_ENV]: process.env[ACCOUNT_FALLBACK_ENV],
   };
   clearEnv();
+  // task #82: signature is now OPT-IN (default OFF). Signing-path tests
+  // enable it here; kill-switch cases below override per-case.
+  process.env[SIG_ENV] = "1";
   tmpDir = mkdtempSync(join(tmpdir(), "sig-test-"));
   // By default point at a path that does NOT exist so readQuotaEntry()
   // falls back to null — every "fallback shape" test gets a clean slate
@@ -204,17 +207,25 @@ describe("signature.appendSignature — kill-switch (env CLAUDE_CODE_TELEGRAMMER
     expect(appendSignature(enriched)).toBe(enriched);
   });
 
-  test.each([["1"], ["true"], ["yes"], ["on"], [""], ["anything-else"]])(
-    "env value %p keeps the signature ON",
+  test.each([["1"], ["true"], ["yes"], ["on"], ["ON"], ["  on  "]])(
+    "env value %p turns the signature ON (opt-in)",
     (value) => {
       process.env[SIG_ENV] = value;
       expect(appendSignature("hello")).toBe(`hello\n\n${buildSignature()}`);
     },
   );
 
-  test("env unset = signature ON (default)", () => {
+  test.each([[""], ["anything-else"], ["2"]])(
+    "env value %p leaves the signature OFF (opt-in default)",
+    (value) => {
+      process.env[SIG_ENV] = value;
+      expect(appendSignature("hello")).toBe("hello");
+    },
+  );
+
+  test("env unset = signature OFF (opt-in default, task #82)", () => {
     delete process.env[SIG_ENV];
-    expect(appendSignature("hello")).toBe(`hello\n\n${buildSignature()}`);
+    expect(appendSignature("hello")).toBe("hello");
   });
 });
 

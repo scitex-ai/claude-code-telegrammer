@@ -164,16 +164,18 @@ export const BOT_TOKEN_HASH: string = TOKEN
 // signature ON/OFF + the quota numbers genuinely change at runtime.
 
 /**
- * Returns true iff the outbound signature should be appended. Default ON.
- * Disable by setting CLAUDE_CODE_TELEGRAMMER_TELEGRAM_SIGNATURE to one of
- * `0|false|no|off` (case-insensitive, trimmed). Any other value (including
- * unset, empty string, `1`, `on`, `true`, etc.) keeps the signature ON.
+ * Returns true iff the outbound text signature should be appended. Opt-IN
+ * (task #82): default OFF. Enable by setting
+ * CLAUDE_CODE_TELEGRAMMER_TELEGRAM_SIGNATURE to one of `1|true|yes|on`
+ * (case-insensitive, trimmed). Any other value (including unset, empty
+ * string, `0`, `off`) leaves the signature OFF. The auto text-signature is
+ * abolished in favour of the /status command; the audio signature stays.
  */
 export function isSignatureEnabled(): boolean {
   const v = (process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_SIGNATURE ?? "")
     .trim()
     .toLowerCase();
-  return !["0", "false", "no", "off"].includes(v);
+  return ["1", "true", "yes", "on"].includes(v);
 }
 
 /**
