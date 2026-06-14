@@ -1,0 +1,4 @@
+{
+  "stage": "--title \"refactor: clarify Telegram bot token ownership to prevent 409 conflicts\" \\",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

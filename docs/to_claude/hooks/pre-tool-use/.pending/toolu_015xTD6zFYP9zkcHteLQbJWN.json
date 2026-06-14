@@ -1,0 +1,4 @@
+{
+  "stage": "bridge.*enabled\\",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

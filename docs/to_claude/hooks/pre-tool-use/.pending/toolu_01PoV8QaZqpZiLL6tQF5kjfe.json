@@ -1,0 +1,4 @@
+{
+  "stage": "fix: add token-based WS auth fallback for dashboard",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

@@ -1,0 +1,4 @@
+{
+  "stage": "scp mba:/tmp/dashboard-login-result.png /tmp/dashboard-loop-check.png",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

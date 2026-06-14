@@ -1,0 +1,4 @@
+{
+  "stage": "fix: preflight uses timeout=3 to reliably detect competing pollers",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

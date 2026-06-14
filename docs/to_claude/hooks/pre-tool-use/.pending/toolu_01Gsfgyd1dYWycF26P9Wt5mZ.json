@@ -1,0 +1,4 @@
+{
+  "stage": "npm list -g @anthropic-ai/claude-code 2>/dev/null",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

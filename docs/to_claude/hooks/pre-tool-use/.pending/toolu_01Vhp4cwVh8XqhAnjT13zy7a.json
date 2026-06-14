@@ -1,0 +1,4 @@
+{
+  "stage": "msgs=json.load(sys.stdin)",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

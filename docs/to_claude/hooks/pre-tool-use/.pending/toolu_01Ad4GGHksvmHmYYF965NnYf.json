@@ -1,0 +1,4 @@
+{
+  "stage": "print(settings.SESSION_ENGINE)\"'",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

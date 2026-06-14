@@ -1,0 +1,4 @@
+{
+  "stage": "from hub.models import Workspace, Channel, Message",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

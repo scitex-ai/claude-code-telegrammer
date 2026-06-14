@@ -1,0 +1,4 @@
+{
+  "stage": "rm -f /tmp/orochi-mcp-debug.log",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

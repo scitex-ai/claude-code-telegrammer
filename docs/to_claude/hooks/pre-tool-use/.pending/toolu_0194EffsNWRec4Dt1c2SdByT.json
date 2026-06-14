@@ -1,0 +1,4 @@
+{
+  "stage": "print(secrets.token_urlsafe(32))\"",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

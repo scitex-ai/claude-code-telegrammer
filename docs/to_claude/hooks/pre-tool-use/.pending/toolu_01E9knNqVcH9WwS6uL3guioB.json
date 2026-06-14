@@ -1,0 +1,4 @@
+{
+  "stage": "rm -f config/telegram-master.yaml templates/telegrammer.yaml",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

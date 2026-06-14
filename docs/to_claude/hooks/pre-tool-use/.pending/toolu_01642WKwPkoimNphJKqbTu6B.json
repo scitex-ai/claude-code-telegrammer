@@ -1,0 +1,4 @@
+{
+  "stage": "- Remove broken `src/claude_code_telegrammer/bin` symlink (target `bin/` was deleted)",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

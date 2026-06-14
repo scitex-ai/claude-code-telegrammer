@@ -1,0 +1,4 @@
+{
+  "stage": "bun update @modelcontextprotocol/sdk",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

@@ -1,0 +1,4 @@
+{
+  "stage": "rm -f lib/common.sh lib/lock.sh lib/orochi-relay.sh",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

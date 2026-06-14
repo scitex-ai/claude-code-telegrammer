@@ -1,0 +1,4 @@
+{
+  "stage": "rmdir /home/ywatanabe/proj/scitex-orochi/agents/ 2>/dev/null",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

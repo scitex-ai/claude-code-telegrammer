@@ -1,0 +1,4 @@
+{
+  "stage": "strings /tmp/head-idle-test.txt",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

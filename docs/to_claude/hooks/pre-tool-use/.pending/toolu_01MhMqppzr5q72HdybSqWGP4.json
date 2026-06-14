@@ -1,0 +1,4 @@
+{
+  "stage": "rm -rf scitex-agent-container",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

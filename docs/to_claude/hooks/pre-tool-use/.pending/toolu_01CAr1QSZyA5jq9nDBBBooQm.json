@@ -1,0 +1,4 @@
+{
+  "stage": "screen -S e2e-telegrammer -X stuff $'\\003'",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

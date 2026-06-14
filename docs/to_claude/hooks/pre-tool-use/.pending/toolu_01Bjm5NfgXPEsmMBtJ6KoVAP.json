@@ -1,0 +1,4 @@
+{
+  "stage": "security: add secret token verification to Telegram webhook",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

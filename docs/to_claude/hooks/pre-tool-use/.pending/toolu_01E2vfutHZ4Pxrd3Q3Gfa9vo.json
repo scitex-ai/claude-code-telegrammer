@@ -1,0 +1,4 @@
+{
+  "stage": "- **Restore hook scripts** with `claude-code-telegrammer-` prefix (`bin/claude-code-telegrammer-hook`, `bin/claude-code-telegrammer-init`)",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

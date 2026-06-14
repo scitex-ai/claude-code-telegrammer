@@ -1,0 +1,4 @@
+{
+  "stage": "claude-hud context 2>/dev/null",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

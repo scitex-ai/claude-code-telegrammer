@@ -1,0 +1,4 @@
+{
+  "stage": "import sys, json",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

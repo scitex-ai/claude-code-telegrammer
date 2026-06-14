@@ -1,0 +1,4 @@
+{
+  "stage": "fix: bump service worker cache version to v201 to bust stale JS",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

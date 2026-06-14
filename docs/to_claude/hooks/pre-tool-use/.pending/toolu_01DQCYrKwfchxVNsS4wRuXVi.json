@@ -1,0 +1,4 @@
+{
+  "stage": "screen -ls",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}
