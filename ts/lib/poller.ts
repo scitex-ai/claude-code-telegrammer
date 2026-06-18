@@ -459,16 +459,29 @@ async function handleUpdate(mcp: Server, update: any): Promise<void> {
   // 👀 receipt has already fired above; the notification ack is no
   // longer the trigger (it never was a reliable signal in SDK-runner
   // mode anyway, since a dead agent's MCP server can still ack).
-  mcp
-    .notification({
-      method: "notifications/claude/channel",
-      params: { content: text, meta },
-    })
-    .catch((err) => {
-      log("poller", "failed to deliver inbound to Claude", {
-        error: String(err),
+  //
+  // GATED on !wakeEnabled(): when TURN_URL is set (sac TUI + SDK agents),
+  // the /v1/turn wake POST below is the SINGLE delivery — it advances an
+  // idle session, and once the session is active this channel notification
+  // would ALSO render, DOUBLE-delivering the same message ("← telegram"
+  // from here + "← claude-code-telegrammer" from the wake — the "sent
+  // twice" the operator reported, 2026-06-18). The wake's source label is
+  // also the correct one (the MCP name), so dropping the notification fixes
+  // both the duplication and the spurious "telegram" source. Interactive
+  // CLI (no TURN_URL) keeps the notification — its live event loop surfaces
+  // it, and there is no wake to duplicate.
+  if (!wakeEnabled()) {
+    mcp
+      .notification({
+        method: "notifications/claude/channel",
+        params: { content: text, meta },
+      })
+      .catch((err) => {
+        log("poller", "failed to deliver inbound to Claude", {
+          error: String(err),
+        });
       });
-    });
+  }
 
   // Wake-on-push — when CLAUDE_CODE_TELEGRAMMER_TURN_URL is set
   // (SDK-runner agents), POST the message to the agent's own /v1/turn.
