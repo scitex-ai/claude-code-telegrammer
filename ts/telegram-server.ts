@@ -29,13 +29,38 @@
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { TOKEN, STATE_DIR, BOT_TOKEN_HASH } from "./lib/config.js";
+import {
+  TOKEN,
+  STATE_DIR,
+  BOT_TOKEN_HASH,
+  findUnexpandedEnv,
+} from "./lib/config.js";
 import { log } from "./lib/log.js";
 import { acquireLock, releaseLock } from "./lib/lock.js";
 import { registerTools } from "./lib/tools.js";
 import { startPolling, stopPolling } from "./lib/poller.js";
 import { initStore } from "./lib/store.js";
 import { releaseAuthoritative } from "./lib/takeover.js";
+
+// ── Fail loud on unexpanded env ─────────────────────────────────────────────
+//
+// A literal "${SCITEX_LEAD_TELEGRAM_*}" reaching us means the launcher was
+// started without its backing .env sourced (e.g. a Claude resume that bypassed
+// claude.sh). Starting anyway would mkdir a junk state dir literally named
+// "${...}" under cwd and talk to Telegram with an invalid bot token (a silent
+// outage). Abort BEFORE acquireLock() with an actionable message instead.
+const unexpanded = findUnexpandedEnv();
+if (unexpanded.length > 0) {
+  process.stderr.write(
+    "telegram-mcp: refusing to start — unexpanded ${...} placeholder(s) in env:\n" +
+      unexpanded.map((line) => `    ${line}\n`).join("") +
+      "  The launcher started without its backing .env sourced (e.g. a Claude\n" +
+      "  resume that bypassed claude.sh). Relaunch via claude.sh so the\n" +
+      "  ${SCITEX_..._*} vars resolve, or export CLAUDE_CODE_TELEGRAMMER_TELEGRAM_*\n" +
+      "  directly before starting.\n",
+  );
+  process.exit(1);
+}
 
 // ── Validate token ──────────────────────────────────────────────────────────
 

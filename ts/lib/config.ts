@@ -28,6 +28,31 @@ export const ENV_ALLOWED = (
   .map((s) => s.trim())
   .filter(Boolean);
 
+// ── Unexpanded-env guard ────────────────────────────────────────────────────
+//
+// Detect CLAUDE_CODE_TELEGRAMMER_* env vars whose value still contains a
+// literal "${...}" — i.e. an unexpanded placeholder. The launchers declare the
+// telegrammer env via "${SCITEX_LEAD_TELEGRAM_*}" (lead .mcp.json) and resolve
+// it from the shell at MCP-launch. When the launcher starts without its backing
+// .env sourced — e.g. a Claude resume that bypasses claude.sh — those shell
+// vars are unset, so Claude Code passes the LITERAL "${SCITEX_LEAD_TELEGRAM_*}"
+// string through. Unchecked, STATE_DIR becomes that literal (a relative path)
+// and lib/lock.ts mkdir's a junk dir literally named "${...}" under the poller
+// cwd, while TOKEN becomes a literal → every Telegram Bot API call 404s (a
+// silent comms outage). This detector lets startup fail LOUD instead. Returns
+// the offending "NAME=value" lines (empty array when all good). See the
+// 2026-06-12 incident note for the full failure cascade.
+export function findUnexpandedEnv(): string[] {
+  return Object.entries(process.env)
+    .filter(
+      ([name, value]) =>
+        name.startsWith("CLAUDE_CODE_TELEGRAMMER_") &&
+        typeof value === "string" &&
+        value.includes("${"),
+    )
+    .map(([name, value]) => `${name}=${value}`);
+}
+
 // ── Read receipts ──────────────────────────────────────────────────────────
 //
 // Automatic four-stage read-receipt reactions on inbound operator messages.
