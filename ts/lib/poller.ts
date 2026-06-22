@@ -12,6 +12,7 @@ import {
   AGENT_ID,
   BOT_TOKEN_HASH,
   STATE_DIR,
+  CHANNEL_SOURCE,
 } from "./config.js";
 import {
   saveInbound,
@@ -199,7 +200,7 @@ export async function startPolling(mcp: Server): Promise<void> {
               method: "notifications/claude/channel",
               params: {
                 content: fatalMsg,
-                meta: { source: "telegram", type: "error" },
+                meta: { source: CHANNEL_SOURCE, type: "error" },
               },
             })
             .catch(() => {});
@@ -251,7 +252,7 @@ async function handleReaction(mcp: Server, update: any): Promise<void> {
     user_id: userId,
     user: reaction.user.username ?? userId,
     ts,
-    source: "telegram",
+    source: CHANNEL_SOURCE,
     type: "reaction",
   };
 
@@ -415,7 +416,7 @@ async function handleUpdate(mcp: Server, update: any): Promise<void> {
     user: msg.from.username ?? userId,
     user_id: userId,
     ts,
-    source: "telegram",
+    source: CHANNEL_SOURCE,
   };
   if (replyToMessageId) {
     meta.reply_to_message_id = replyToMessageId;
@@ -463,13 +464,13 @@ async function handleUpdate(mcp: Server, update: any): Promise<void> {
   // GATED on !wakeEnabled(): when TURN_URL is set (sac TUI + SDK agents),
   // the /v1/turn wake POST below is the SINGLE delivery — it advances an
   // idle session, and once the session is active this channel notification
-  // would ALSO render, DOUBLE-delivering the same message ("← telegram"
-  // from here + "← claude-code-telegrammer" from the wake — the "sent
-  // twice" the operator reported, 2026-06-18). The wake's source label is
-  // also the correct one (the MCP name), so dropping the notification fixes
-  // both the duplication and the spurious "telegram" source. Interactive
-  // CLI (no TURN_URL) keeps the notification — its live event loop surfaces
-  // it, and there is no wake to duplicate.
+  // would ALSO render, DOUBLE-delivering the same message (the "sent twice"
+  // the operator reported, 2026-06-18), so the notification is dropped. Both
+  // paths now carry source=CHANNEL_SOURCE ("claude-code-telegrammer"), so the
+  // attribution is identical either way — every inbound stimulus names the
+  // exact channel that delivered it, never the generic platform "telegram".
+  // Interactive CLI (no TURN_URL) keeps the notification — its live event
+  // loop surfaces it, and there is no wake to duplicate.
   if (!wakeEnabled()) {
     mcp
       .notification({

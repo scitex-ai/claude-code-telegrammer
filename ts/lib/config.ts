@@ -11,6 +11,14 @@ export const STATE_DIR =
 
 export const ACCESS_FILE = join(STATE_DIR, "access.json");
 export const LOCK_FILE = join(STATE_DIR, "claude-code-telegrammer-mcp.lock");
+
+// Inbound-message channel source label. MUST equal the MCP server name
+// registered in telegram-server.ts ("claude-code-telegrammer") so the agent's
+// pane attributes every inbound stimulus to the EXACT channel that delivered
+// it (``← claude-code-telegrammer · <user>: …``) and can reply through that
+// same named MCP. The generic platform label "telegram" hid which integration
+// the message arrived through — an attribution/provenance violation.
+export const CHANNEL_SOURCE = "claude-code-telegrammer";
 export const INBOX_DIR = join(STATE_DIR, "inbox");
 export const ATTACHMENT_DIR =
   process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ATTACHMENT_DIR ??
