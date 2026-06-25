@@ -38,6 +38,9 @@ docs = [
     "sphinx-autodoc-typehints>=1.25",
 ]
 
+[project.scripts]
+claude-code-telegrammer = "claude_code_telegrammer._cli:main"
+
 [project.urls]
 Homepage = "https://github.com/ywatanabe1989/claude-code-telegrammer"
 Repository = "https://github.com/ywatanabe1989/claude-code-telegrammer.git"
