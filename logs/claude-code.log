@@ -19695,3 +19695,206 @@ Desc: List worktrees and recent branches
   remotes/origin/feat/auto-read-receipts
   main
 
+========================================================================
+Time: 2026-06-26 00:08:02
+Tool: Bash
+Cmd:  timeout 7 bash -lc 'echo "=== src tree ==="; ls -laR src/claude_code_telegrammer | head -40; echo "=== ts entry head ==="; head -20 ts/telegram-server.ts'
+Desc: Inspect package skeleton and TS entrypoint
+--- stdout ---
+=== src tree ===
+src/claude_code_telegrammer:
+total 20
+drwxr-xr-x 4 agent agent 4096 Apr 11 01:51 .
+drwxr-xr-x 4 agent agent 4096 Apr  8 18:23 ..
+-rwxr-xr-x 1 agent agent  228 Apr 11 01:51 __init__.py
+lrwxrwxrwx 1 agent agent    9 Apr  8 18:23 lib -> ../../lib
+drwxr-xr-x 2 agent agent 4096 Jun 25 10:11 __pycache__
+drwxr-xr-x 3 agent agent 4096 Apr  8 18:23 _skills
+
+src/claude_code_telegrammer/__pycache__:
+total 20
+drwxr-xr-x 2 agent agent 4096 Jun 25 10:11 .
+drwxr-xr-x 4 agent agent 4096 Apr 11 01:51 ..
+-rw-r--r-- 1 agent agent 1671 Apr  8 18:25 cli.cpython-311.pyc
+-rw-r--r-- 1 agent agent  428 Jun 25 10:11 __init__.cpython-310.pyc
+-rw-r--r-- 1 agent agent 1460 Jun  4 16:35 __init__.cpython-311.pyc
+
+src/claude_code_telegrammer/_skills:
+total 12
+drwxr-xr-x 3 agent agent 4096 Apr  8 18:23 .
+drwxr-xr-x 4 agent agent 4096 Apr 11 01:51 ..
+drwxr-xr-x 2 agent agent 4096 Apr 10 21:57 claude-code-telegrammer
+
+src/claude_code_telegrammer/_skills/claude-code-telegrammer:
+total 12
+drwxr-xr-x 2 agent agent 4096 Apr 10 21:57 .
+drwxr-xr-x 3 agent agent 4096 Apr  8 18:23 ..
+-rw-r--r-- 1 agent agent 1596 Apr 10 21:57 SKILL.md
+=== ts entry head ===
+#!/usr/bin/env bun
+/**
+ * Custom Telegram MCP server for claude-code-telegrammer.
+ *
+ * Replaces the broken official plugin:telegram@claude-plugins-official.
+ * Minimal, self-contained — uses raw Bot API via fetch (no grammy).
+ *
+ * Features:
+ *   - MCP server over stdio (StdioServerTransport)
+ *   - Telegram Bot API polling via getUpdates (long polling)
+ *   - Inbound message delivery as channel notifications
+ *   - reply/react/edit_message/get_history/get_unread/mark_read tools
+ *   - SQLite message store with dedup, read/replied tracking
+ *   - Allowlist-based access control (access.json + env var)
+ *   - Single-instance enforcement via PID lock file
+ *   - "Newest wins" per-bot-token takeover (lib/takeover.ts) — a fresh
+ *     poller for the same token preempts an orphaned predecessor instead
+ *     of both 409-looping forever.
+ *
+ * Env vars:
+
+========================================================================
+Time: 2026-06-26 00:08:04
+Tool: Bash
+Cmd:  timeout 7 bash -lc 'echo "=== scitex-todo _cli reference ==="; sed -n "1,60p" /home/ywatanabe/proj/scitex-todo/src/scitex_todo/_cli.py 2>/dev/null; echo "=== its pyproject scripts ==="; rg -A3 "projec
+Desc: Read scitex-todo reference CLI pattern
+--- stdout ---
+=== scitex-todo _cli reference ===
+=== its pyproject scripts ===
+[project.scripts]
+scitex-todo = "scitex_todo._cli:main"
+
+[project.urls]
+
+========================================================================
+Time: 2026-06-26 00:08:25
+Tool: Bash
+Cmd:  timeout 7 bash -lc 'echo "=== scitex-todo cli files ==="; rg --files -g "*cli*.py" /home/ywatanabe/proj/scitex-todo/src; echo "=== old cct cli.py history ==="; git -C /home/ywatanabe/proj/claude-code-
+Desc: Find reference cli and old cct cli history
+--- stdout ---
+=== scitex-todo cli files ===
+=== old cct cli.py history ===
+cab46a9 refactor: comprehensive audit fixes — MCP improvements, docs, tests
+3baf9b4 feat: add telegrammer-hook for agent-container integration
+9b76d98 feat: add Orochi communication relay module
+8410dd0 second commit
+
+========================================================================
+Time: 2026-06-26 00:08:33
+Tool: Bash
+Cmd:  timeout 7 bash -lc 'git -C /home/ywatanabe/proj/claude-code-telegrammer show cab46a9:src/claude_code_telegrammer/cli.py 2>/dev/null | head -120'
+Desc: Show old cli.py content from history
+
+========================================================================
+Time: 2026-06-26 00:08:41
+Tool: Bash
+Cmd:  timeout 7 bash -lc 'for c in cab46a9 3baf9b4 9b76d98 8410dd0; do echo "=== $c ==="; git -C /home/ywatanabe/proj/claude-code-telegrammer show $c:src/claude_code_telegrammer/cli.py 2>&1 | head -80; done
+Desc: Find which commit has cli.py content
+--- stdout ---
+=== cab46a9 ===
+fatal: path 'src/claude_code_telegrammer/cli.py' does not exist in 'cab46a9'
+=== 3baf9b4 ===
+"""Thin CLI wrappers that exec the real bash scripts."""
+
+from __future__ import annotations
+
+import os
+import sys
+
+
+def _exec_script(name: str) -> None:
+    """Find and exec a bash script from the package's bin/ directory."""
+    from . import get_bin_path
+
+    script = get_bin_path(name)
+    os.execv("/bin/bash", ["bash", script] + sys.argv[1:])
+
+
+def telegrammer() -> None:
+    _exec_script("telegrammer")
+
+
+def telegrammer_watchdog() -> None:
+    _exec_script("telegrammer-watchdog")
+
+
+def telegrammer_guard() -> None:
+    _exec_script("telegrammer-guard")
+
+
+def telegrammer_init() -> None:
+    _exec_script("telegrammer-init")
+
+
+def telegrammer_relay() -> None:
+    _exec_script("telegrammer-relay")
+
+
+def telegrammer_hook() -> None:
+    _exec_script("telegrammer-hook")
+=== 9b76d98 ===
+"""Thin CLI wrappers that exec the real bash scripts."""
+
+from __future__ import annotations
+
+import os
+import sys
+
+
+def _exec_script(name: str) -> None:
+    """Find and exec a bash script from the package's bin/ directory."""
+    from . import get_bin_path
+
+    script = get_bin_path(name)
+    os.execv("/bin/bash", ["bash", script] + sys.argv[1:])
+
+
+def telegrammer() -> None:
+    _exec_script("telegrammer")
+
+
+def telegrammer_watchdog() -> None:
+    _exec_script("telegrammer-watchdog")
+
+
+def telegrammer_guard() -> None:
+    _exec_script("telegrammer-guard")
+
+
+def telegrammer_init() -> None:
+    _exec_script("telegrammer-init")
+
+
+def telegrammer_relay() -> None:
+    _exec_script("telegrammer-relay")
+=== 8410dd0 ===
+"""Thin CLI wrappers that exec the real bash scripts."""
+
+from __future__ import annotations
+
+import os
+import sys
+
+
+def _exec_script(name: str) -> None:
+    """Find and exec a bash script from the package's bin/ directory."""
+    from . import get_bin_path
+
+    script = get_bin_path(name)
+    os.execv("/bin/bash", ["bash", script] + sys.argv[1:])
+
+
+def telegrammer() -> None:
+    _exec_script("telegrammer")
+
+
+def telegrammer_watchdog() -> None:
+    _exec_script("telegrammer-watchdog")
+
+
+def telegrammer_guard() -> None:
+    _exec_script("telegrammer-guard")
+
+
+def telegrammer_init() -> None:
+    _exec_script("telegrammer-init")
+
