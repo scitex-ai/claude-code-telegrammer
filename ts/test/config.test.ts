@@ -29,7 +29,7 @@ import {
 
 describe("config", () => {
   test("STATE_DIR reads from env var", () => {
-    // preload.ts sets CLAUDE_CODE_TELEGRAMMER_TELEGRAM_STATE_DIR to a tmp dir
+    // preload.ts sets CLAUDE_CODE_TELEGRAMMER_STATE_DIR to a tmp dir
     expect(STATE_DIR).toContain("cct-test-");
     expect(STATE_DIR.startsWith(tmpdir())).toBe(true);
   });
@@ -51,7 +51,7 @@ describe("config", () => {
   });
 
   test("TOKEN reads from env var", () => {
-    // preload.ts sets CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN = "fake:token"
+    // preload.ts sets CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN = "fake:token"
     expect(TOKEN).toBe("fake:token");
   });
 
@@ -64,7 +64,7 @@ describe("config", () => {
   });
 
   test("ENV_ALLOWED parses comma-separated users", () => {
-    // preload.ts sets CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ALLOWED_USERS = ""
+    // preload.ts sets CLAUDE_CODE_TELEGRAMMER_ALLOWED_USERS = ""
     expect(ENV_ALLOWED).toEqual([]);
   });
 
@@ -87,7 +87,7 @@ describe("config", () => {
   });
 
   test("READ_RECEIPTS_ENABLED defaults to true when env unset", () => {
-    // preload.ts does not set CLAUDE_CODE_TELEGRAMMER_TELEGRAM_READ_RECEIPTS
+    // preload.ts does not set CLAUDE_CODE_TELEGRAMMER_READ_RECEIPTS
     expect(READ_RECEIPTS_ENABLED).toBe(true);
   });
 

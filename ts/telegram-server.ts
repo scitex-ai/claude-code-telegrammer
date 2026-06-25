@@ -18,13 +18,13 @@
  *     of both 409-looping forever.
  *
  * Env vars:
- *   CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN     - required
- *   CLAUDE_CODE_TELEGRAMMER_TELEGRAM_STATE_DIR     - default: ~/.claude-code-telegrammer
- *   CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ALLOWED_USERS - comma-separated user IDs (optional)
- *   CLAUDE_CODE_TELEGRAMMER_TELEGRAM_HOST_NAME     - default: os.hostname()
- *   CLAUDE_CODE_TELEGRAMMER_TELEGRAM_PROJECT       - default: process.cwd()
- *   CLAUDE_CODE_TELEGRAMMER_TELEGRAM_AGENT_ID      - default: 'telegram'
- *   CLAUDE_CODE_TELEGRAMMER_TELEGRAM_READ_RECEIPTS - ⚡/👀 receipts, default: on
+ *   CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN     - required
+ *   CLAUDE_CODE_TELEGRAMMER_STATE_DIR     - default: ~/.claude-code-telegrammer
+ *   CLAUDE_CODE_TELEGRAMMER_ALLOWED_USERS - comma-separated user IDs (optional)
+ *   CLAUDE_CODE_TELEGRAMMER_HOST_NAME     - default: os.hostname()
+ *   CLAUDE_CODE_TELEGRAMMER_PROJECT       - default: process.cwd()
+ *   CLAUDE_CODE_TELEGRAMMER_AGENT_ID      - default: 'telegram'
+ *   CLAUDE_CODE_TELEGRAMMER_READ_RECEIPTS - ⚡/👀 receipts, default: on
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -56,7 +56,7 @@ if (unexpanded.length > 0) {
       unexpanded.map((line) => `    ${line}\n`).join("") +
       "  The launcher started without its backing .env sourced (e.g. a Claude\n" +
       "  resume that bypassed claude.sh). Relaunch via claude.sh so the\n" +
-      "  ${SCITEX_..._*} vars resolve, or export CLAUDE_CODE_TELEGRAMMER_TELEGRAM_*\n" +
+      "  ${SCITEX_..._*} vars resolve, or export CLAUDE_CODE_TELEGRAMMER_*\n" +
       "  directly before starting.\n",
   );
   process.exit(1);
@@ -66,8 +66,8 @@ if (unexpanded.length > 0) {
 
 if (!TOKEN) {
   process.stderr.write(
-    "telegram-mcp: CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN is required.\n" +
-      "  export CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN=123456789:AAH...\n",
+    "telegram-mcp: CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN is required.\n" +
+      "  export CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN=123456789:AAH...\n",
   );
   process.exit(1);
 }

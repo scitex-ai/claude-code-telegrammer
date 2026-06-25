@@ -70,12 +70,12 @@ export function loadAccess(): Access {
         if (defaults.allowFrom.length === 0) {
           log(
             "access",
-            `WARNING: no access.json and CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ALLOWED_USERS is empty — all messages will be rejected`,
+            `WARNING: no access.json and CLAUDE_CODE_TELEGRAMMER_ALLOWED_USERS is empty — all messages will be rejected`,
           );
         } else {
           log(
             "access",
-            `access.json not found, using CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ALLOWED_USERS`,
+            `access.json not found, using CLAUDE_CODE_TELEGRAMMER_ALLOWED_USERS`,
             { allowed: defaults.allowFrom },
           );
         }

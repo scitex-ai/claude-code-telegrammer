@@ -36,9 +36,9 @@ import { AGENT_ID, PROJECT, HOST_NAME } from "../lib/config.js";
 // is independent and the default dev environment (where the operator's
 // /home/ywatanabe/.scitex/quota-cache.json may genuinely exist) doesn't
 // leak into the fallback-shape assertions below.
-const SIG_ENV = "CLAUDE_CODE_TELEGRAMMER_TELEGRAM_SIGNATURE";
-const QUOTA_PATH_ENV = "CLAUDE_CODE_TELEGRAMMER_TELEGRAM_QUOTA_CACHE_PATH";
-const ACCOUNT_ENV = "CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ACCOUNT";
+const SIG_ENV = "CLAUDE_CODE_TELEGRAMMER_SIGNATURE";
+const QUOTA_PATH_ENV = "CLAUDE_CODE_TELEGRAMMER_QUOTA_CACHE_PATH";
+const ACCOUNT_ENV = "CLAUDE_CODE_TELEGRAMMER_ACCOUNT";
 const ACCOUNT_FALLBACK_ENV = "CLAUDE_AGENT_ACCOUNT";
 
 let snapshot: Record<string, string | undefined>;
@@ -187,7 +187,7 @@ describe("signature integration — chunked sendMessage", () => {
 // #16 PART 1 — kill-switch toggle
 // ---------------------------------------------------------------------------
 
-describe("signature.appendSignature — kill-switch (env CLAUDE_CODE_TELEGRAMMER_TELEGRAM_SIGNATURE)", () => {
+describe("signature.appendSignature — kill-switch (env CLAUDE_CODE_TELEGRAMMER_SIGNATURE)", () => {
   test.each([
     ["0"],
     ["false"],
@@ -292,7 +292,7 @@ describe("signature.readQuotaEntry — quota-cache.json lookup", () => {
     expect(entry!.short).toBe("wyusuuke");
   });
 
-  test("CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ACCOUNT wins over CLAUDE_AGENT_ACCOUNT", () => {
+  test("CLAUDE_CODE_TELEGRAMMER_ACCOUNT wins over CLAUDE_AGENT_ACCOUNT", () => {
     process.env[QUOTA_PATH_ENV] = writeFixtureCache(SAMPLE_CACHE);
     process.env[ACCOUNT_ENV] = "ywatanabe-scitex-ai";
     process.env[ACCOUNT_FALLBACK_ENV] = "wyusuuke-gmail-com";

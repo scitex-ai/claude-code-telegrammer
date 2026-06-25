@@ -1,0 +1,4 @@
+{
+  "stage": "TMPD=$(mktemp -d)",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

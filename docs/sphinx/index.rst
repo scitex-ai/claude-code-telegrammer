@@ -84,7 +84,7 @@ Key Features
   TUI state (permission prompts, idle), and sends keystrokes to keep the
   agent running.
 - **Configurable State Directory** -- all state (DB, lock, access config)
-  lives under ``CLAUDE_CODE_TELEGRAMMER_TELEGRAM_STATE_DIR``, not
+  lives under ``CLAUDE_CODE_TELEGRAMMER_STATE_DIR``, not
   hardcoded paths.
 
 Quick Example

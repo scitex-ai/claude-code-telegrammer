@@ -4,10 +4,10 @@
 
 import { homedir, hostname } from "os";
 import { join } from "path";
+import { getenv, READ_PREFIXES } from "./env.js";
 
 export const STATE_DIR =
-  process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_STATE_DIR ??
-  join(homedir(), ".claude-code-telegrammer");
+  getenv("STATE_DIR") ?? join(homedir(), ".claude-code-telegrammer");
 
 export const ACCESS_FILE = join(STATE_DIR, "access.json");
 export const LOCK_FILE = join(STATE_DIR, "claude-code-telegrammer-mcp.lock");
@@ -21,17 +21,13 @@ export const LOCK_FILE = join(STATE_DIR, "claude-code-telegrammer-mcp.lock");
 export const CHANNEL_SOURCE = "claude-code-telegrammer";
 export const INBOX_DIR = join(STATE_DIR, "inbox");
 export const ATTACHMENT_DIR =
-  process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ATTACHMENT_DIR ??
-  join(STATE_DIR, "attachments");
+  getenv("ATTACHMENT_DIR") ?? join(STATE_DIR, "attachments");
 
-export const TOKEN =
-  process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN ?? "";
+export const TOKEN = getenv("BOT_TOKEN") ?? "";
 export const API_BASE = `https://api.telegram.org/bot${TOKEN}`;
 export const MAX_TEXT = 4096;
 
-export const ENV_ALLOWED = (
-  process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ALLOWED_USERS ?? ""
-)
+export const ENV_ALLOWED = (getenv("ALLOWED_USERS") ?? "")
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
@@ -54,7 +50,7 @@ export function findUnexpandedEnv(): string[] {
   return Object.entries(process.env)
     .filter(
       ([name, value]) =>
-        name.startsWith("CLAUDE_CODE_TELEGRAMMER_") &&
+        READ_PREFIXES.some((prefix) => name.startsWith(prefix)) &&
         typeof value === "string" &&
         value.includes("${"),
     )
@@ -88,18 +84,14 @@ export function findUnexpandedEnv(): string[] {
 //
 // All four emojis are on Telegram's fixed reaction whitelist.
 //
-// Enabled by default. Set CLAUDE_CODE_TELEGRAMMER_TELEGRAM_READ_RECEIPTS to
+// Enabled by default. Set CLAUDE_CODE_TELEGRAMMER_READ_RECEIPTS to
 // any of 0/false/no/off (case-insensitive) to disable without a code change.
 export const READ_RECEIPTS_ENABLED: boolean = ![
   "0",
   "false",
   "no",
   "off",
-].includes(
-  (process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_READ_RECEIPTS ?? "")
-    .trim()
-    .toLowerCase(),
-);
+].includes((getenv("READ_RECEIPTS") ?? "").trim().toLowerCase());
 
 export const RECEIPT_DELIVERED_EMOJI = "⚡"; // stage 1
 export const RECEIPT_READ_EMOJI = "👀"; // stage 2 (a.k.a. "received")
@@ -123,14 +115,12 @@ export const RECEIPT_FAILED_EMOJI = "❌"; // stage 4 (failure)
 // most one loud-fail reply per process lifetime (sentLoudFailReplies
 // dedup set).
 //
-// Enabled by default. Set CLAUDE_CODE_TELEGRAMMER_TELEGRAM_LOUD_FAIL
+// Enabled by default. Set CLAUDE_CODE_TELEGRAMMER_LOUD_FAIL
 // to any of 0/false/no/off (case-insensitive) to suppress the outbound
 // reply without a code change (the ❌ receipt still fires; only the
 // text message is suppressed).
 export function isLoudFailEnabled(): boolean {
-  const v = (process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_LOUD_FAIL ?? "")
-    .trim()
-    .toLowerCase();
+  const v = (getenv("LOUD_FAIL") ?? "").trim().toLowerCase();
   return !["0", "false", "no", "off"].includes(v);
 }
 
@@ -150,19 +140,15 @@ export function isLoudFailEnabled(): boolean {
 //
 // This mirrors scitex-agent-container's `sac mcp channel --turn-url` wake
 // primitive (runtimes/_mcp/_channel_wake.py::_wake_turn).
-export const TURN_URL = process.env.CLAUDE_CODE_TELEGRAMMER_TURN_URL ?? "";
+export const TURN_URL = getenv("TURN_URL") ?? "";
 // Optional bearer for the /v1/turn POST (sent as Authorization: Bearer ...).
-export const TURN_BEARER =
-  process.env.CLAUDE_CODE_TELEGRAMMER_TURN_BEARER ?? "";
+export const TURN_BEARER = getenv("TURN_BEARER") ?? "";
 
 // ── Agent identity ─────────────────────────────────────────────────────────
 
-export const HOST_NAME =
-  process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_HOST_NAME ?? hostname();
-export const PROJECT =
-  process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_PROJECT ?? process.cwd();
-export const AGENT_ID =
-  process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_AGENT_ID ?? "telegram";
+export const HOST_NAME = getenv("HOST_NAME") ?? hostname();
+export const PROJECT = getenv("PROJECT") ?? process.cwd();
+export const AGENT_ID = getenv("AGENT_ID") ?? "telegram";
 
 export const BOT_TOKEN_HASH: string = TOKEN
   ? new Bun.CryptoHasher("sha256").update(TOKEN).digest("hex").slice(0, 8)
@@ -199,15 +185,13 @@ export const BOT_TOKEN_HASH: string = TOKEN
 /**
  * Returns true iff the outbound text signature should be appended. Opt-IN
  * (task #82): default OFF. Enable by setting
- * CLAUDE_CODE_TELEGRAMMER_TELEGRAM_SIGNATURE to one of `1|true|yes|on`
+ * CLAUDE_CODE_TELEGRAMMER_SIGNATURE to one of `1|true|yes|on`
  * (case-insensitive, trimmed). Any other value (including unset, empty
  * string, `0`, `off`) leaves the signature OFF. The auto text-signature is
  * abolished in favour of the /status command; the audio signature stays.
  */
 export function isSignatureEnabled(): boolean {
-  const v = (process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_SIGNATURE ?? "")
-    .trim()
-    .toLowerCase();
+  const v = (getenv("SIGNATURE") ?? "").trim().toLowerCase();
   return ["1", "true", "yes", "on"].includes(v);
 }
 
@@ -215,13 +199,12 @@ export function isSignatureEnabled(): boolean {
  * Path to the host-maintained quota-cache.json. Defaults to the operator-
  * specified canonical location `/home/ywatanabe/.scitex/quota-cache.json`
  * (host cron writes there every 10 min). Override with
- * CLAUDE_CODE_TELEGRAMMER_TELEGRAM_QUOTA_CACHE_PATH — primarily for tests
+ * CLAUDE_CODE_TELEGRAMMER_QUOTA_CACHE_PATH — primarily for tests
  * that point at a fixture file.
  */
 export function quotaCachePath(): string {
   return (
-    process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_QUOTA_CACHE_PATH ??
-    "/home/ywatanabe/.scitex/quota-cache.json"
+    getenv("QUOTA_CACHE_PATH") ?? "/home/ywatanabe/.scitex/quota-cache.json"
   );
 }
 
@@ -237,14 +220,14 @@ export function quotaCachePath(): string {
  * "⚠️ <agent> unavailable: 5h quota cap — retry after HH:MM" so the
  * operator sees when the quota wall actually lifts.
  *
- * Override with CLAUDE_CODE_TELEGRAMMER_TELEGRAM_USAGE_JSON_PATH —
+ * Override with CLAUDE_CODE_TELEGRAMMER_USAGE_JSON_PATH —
  * primarily for tests pointing at a fixture file. When the override is
  * unset, accountDirname() supplies the <acct> segment; an empty
  * accountDirname yields an empty path → the reader returns null
  * (loud-fail falls back to "after the quota resets").
  */
 export function usageJsonPath(): string {
-  const override = process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_USAGE_JSON_PATH;
+  const override = getenv("USAGE_JSON_PATH");
   if (override) return override;
   const acct = accountDirname();
   if (!acct) return "";
@@ -258,7 +241,7 @@ export function usageJsonPath(): string {
  * local-part (first dash-segment of the dirname).
  *
  * Resolution order:
- *   1. CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ACCOUNT — telegrammer-scoped
+ *   1. CLAUDE_CODE_TELEGRAMMER_ACCOUNT — telegrammer-scoped
  *      override (lead-host use, or tests).
  *   2. CLAUDE_AGENT_ACCOUNT — injected by SAC into every agent container
  *      (see scitex-agent-container `config/_loaders.py`).
@@ -267,9 +250,5 @@ export function usageJsonPath(): string {
  *      `(cwd@host)` form that PR #18 shipped.
  */
 export function accountDirname(): string {
-  return (
-    process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ACCOUNT ??
-    process.env.CLAUDE_AGENT_ACCOUNT ??
-    ""
-  );
+  return getenv("ACCOUNT") ?? process.env.CLAUDE_AGENT_ACCOUNT ?? "";
 }

@@ -40,7 +40,7 @@
 <tr valign="top">
   <td align="center">1</td>
   <td><h4>Hardcoded paths</h4>The official plugin hardcodes <code>~/.claude/</code> as its state directory (<a href="https://github.com/anthropics/claude-code/issues/851">#851</a>), making it impossible to run multiple bots or customize where access.json lives.</td>
-  <td><h4>Configurable state directory</h4>All state (DB, lock, access config) lives under <code>CLAUDE_CODE_TELEGRAMMER_TELEGRAM_STATE_DIR</code>. Run as many bots as you want, each with its own isolated state.</td>
+  <td><h4>Configurable state directory</h4>All state (DB, lock, access config) lives under <code>CLAUDE_CODE_TELEGRAMMER_STATE_DIR</code>. Run as many bots as you want, each with its own isolated state.</td>
 </tr>
 <tr valign="top">
   <td align="center">2</td>
@@ -167,9 +167,9 @@ Copy the example and fill in your values (`.mcp.json` is gitignored):
       "command": "bun",
       "args": ["run", "/path/to/claude-code-telegrammer/ts/telegram-server.ts"],
       "env": {
-        "CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN": "123456789:AAH...",
-        "CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ALLOWED_USERS": "YOUR_TELEGRAM_USER_ID",
-        "CLAUDE_CODE_TELEGRAMMER_TELEGRAM_STATE_DIR": "~/.claude-code-telegrammer"
+        "CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN": "123456789:AAH...",
+        "CLAUDE_CODE_TELEGRAMMER_ALLOWED_USERS": "YOUR_TELEGRAM_USER_ID",
+        "CLAUDE_CODE_TELEGRAMMER_STATE_DIR": "~/.claude-code-telegrammer"
       }
     }
   }
@@ -273,13 +273,13 @@ Response throttling: minimum interval between responses, burst limit (10 in 3s w
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN` | Yes | -- | Telegram Bot API token |
-| `CLAUDE_CODE_TELEGRAMMER_TELEGRAM_STATE_DIR` | No | `~/.claude-code-telegrammer` | Directory for SQLite DB, access.json, lock file |
-| `CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ALLOWED_USERS` | No | -- | Comma-separated Telegram user IDs for DM allowlist |
-| `CLAUDE_CODE_TELEGRAMMER_TELEGRAM_HOST_NAME` | No | `os.hostname()` | Hostname stored with each message |
-| `CLAUDE_CODE_TELEGRAMMER_TELEGRAM_PROJECT` | No | `process.cwd()` | Project path stored with each message |
-| `CLAUDE_CODE_TELEGRAMMER_TELEGRAM_AGENT_ID` | No | `'telegram'` | Agent identifier stored with each message |
-| `CLAUDE_CODE_TELEGRAMMER_TELEGRAM_READ_RECEIPTS` | No | `on` | Two-stage read-receipt reactions: ⚡ on receive, 👀 when surfaced into the session. Set to `0`/`false`/`no`/`off` to disable. |
+| `CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN` | Yes | -- | Telegram Bot API token |
+| `CLAUDE_CODE_TELEGRAMMER_STATE_DIR` | No | `~/.claude-code-telegrammer` | Directory for SQLite DB, access.json, lock file |
+| `CLAUDE_CODE_TELEGRAMMER_ALLOWED_USERS` | No | -- | Comma-separated Telegram user IDs for DM allowlist |
+| `CLAUDE_CODE_TELEGRAMMER_HOST_NAME` | No | `os.hostname()` | Hostname stored with each message |
+| `CLAUDE_CODE_TELEGRAMMER_PROJECT` | No | `process.cwd()` | Project path stored with each message |
+| `CLAUDE_CODE_TELEGRAMMER_AGENT_ID` | No | `'telegram'` | Agent identifier stored with each message |
+| `CLAUDE_CODE_TELEGRAMMER_READ_RECEIPTS` | No | `on` | Two-stage read-receipt reactions: ⚡ on receive, 👀 when surfaced into the session. Set to `0`/`false`/`no`/`off` to disable. |
 
 **Watchdog:**
 
@@ -296,7 +296,7 @@ Response throttling: minimum interval between responses, burst limit (10 in 3s w
 <details>
 <summary><strong>SQLite Schema (v2)</strong></summary>
 
-All messages persisted in `$CLAUDE_CODE_TELEGRAMMER_TELEGRAM_STATE_DIR/messages.db` using WAL mode.
+All messages persisted in `$CLAUDE_CODE_TELEGRAMMER_STATE_DIR/messages.db` using WAL mode.
 
 **messages table:** direction, chat_id, message_id, user_id, username, text, timestamps (telegram_ts, received_at, read_at, replied_at), threading (reply_to_message_id, reply_to_row_id), identity (host, project, agent_id, bot_token_hash), raw_json.
 
@@ -316,7 +316,7 @@ For YAML-based agent orchestration (screen sessions, watchdog lifecycle, restart
 <details>
 <summary><strong>Access Control</strong></summary>
 
-Managed via `access.json` in `$CLAUDE_CODE_TELEGRAMMER_TELEGRAM_STATE_DIR`:
+Managed via `access.json` in `$CLAUDE_CODE_TELEGRAMMER_STATE_DIR`:
 
 ```json
 {
@@ -331,7 +331,7 @@ Managed via `access.json` in `$CLAUDE_CODE_TELEGRAMMER_TELEGRAM_STATE_DIR`:
 }
 ```
 
-Merged with `CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ALLOWED_USERS` env var at runtime. Mtime-based caching means edits take effect without restart.
+Merged with `CLAUDE_CODE_TELEGRAMMER_ALLOWED_USERS` env var at runtime. Mtime-based caching means edits take effect without restart.
 
 </details>
 

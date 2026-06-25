@@ -23,7 +23,7 @@
  * the host cron refreshes quota-cache.json every 10 min):
  *   - accountDirname()  resolves to the account dir-name (e.g.
  *                       `wyusuuke-gmail-com`), via
- *                       CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ACCOUNT then
+ *                       CLAUDE_CODE_TELEGRAMMER_ACCOUNT then
  *                       CLAUDE_AGENT_ACCOUNT.
  *   - quotaCachePath()  default `/home/ywatanabe/.scitex/quota-cache.json`.
  *   - The lookup matches by the `short` field == first dash-segment of
@@ -31,13 +31,13 @@
  *     hyphen-to-dot heuristics on the domain side.
  *
  * Identity inputs (resolved at module-load time in config.ts):
- *   - AGENT_ID   = $CLAUDE_CODE_TELEGRAMMER_TELEGRAM_AGENT_ID   || "telegram"
- *   - PROJECT    = $CLAUDE_CODE_TELEGRAMMER_TELEGRAM_PROJECT    || process.cwd()
- *   - HOST_NAME  = $CLAUDE_CODE_TELEGRAMMER_TELEGRAM_HOST_NAME  || os.hostname()
+ *   - AGENT_ID   = $CLAUDE_CODE_TELEGRAMMER_AGENT_ID   || "telegram"
+ *   - PROJECT    = $CLAUDE_CODE_TELEGRAMMER_PROJECT    || process.cwd()
+ *   - HOST_NAME  = $CLAUDE_CODE_TELEGRAMMER_HOST_NAME  || os.hostname()
  *
  * Opt-IN toggle (task #82): `appendSignature()` is a no-op UNLESS
  * isSignatureEnabled() returns true (env
- * CLAUDE_CODE_TELEGRAMMER_TELEGRAM_SIGNATURE = 1/true/yes/on). Default is
+ * CLAUDE_CODE_TELEGRAMMER_SIGNATURE = 1/true/yes/on). Default is
  * OFF — auto text-signature is abolished; /status replaces it and the
  * audio signature stays. The toggle is consulted at SEND time, not module
  * load, so a flip takes effect without restarting the bridge.

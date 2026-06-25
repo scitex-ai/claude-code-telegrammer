@@ -119,7 +119,7 @@ export async function startPolling(mcp: Server): Promise<void> {
   ) {
     log(
       "poller",
-      "ERROR: allowlist is empty — all messages will be rejected. Set CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ALLOWED_USERS or create access.json in CLAUDE_CODE_TELEGRAMMER_TELEGRAM_STATE_DIR",
+      "ERROR: allowlist is empty — all messages will be rejected. Set CLAUDE_CODE_TELEGRAMMER_ALLOWED_USERS or create access.json in CLAUDE_CODE_TELEGRAMMER_STATE_DIR",
     );
   }
 
@@ -286,7 +286,7 @@ async function handleUpdate(mcp: Server, update: any): Promise<void> {
   if (!isAllowed(userId, chatId, chatType)) {
     log(
       "poller",
-      `REJECTED: message from user ${userId} in chat ${chatId} (type=${chatType}) — not in allowlist. Set CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ALLOWED_USERS or create access.json`,
+      `REJECTED: message from user ${userId} in chat ${chatId} (type=${chatType}) — not in allowlist. Set CLAUDE_CODE_TELEGRAMMER_ALLOWED_USERS or create access.json`,
       { userId, chatId, chatType },
     );
     return;
@@ -513,7 +513,7 @@ async function handleUpdate(mcp: Server, update: any): Promise<void> {
   // inbound message so the thread stays coherent. Dedup at the
   // loudfail.ts layer guards against double-send on any future retry
   // path; suppressible via the
-  // CLAUDE_CODE_TELEGRAMMER_TELEGRAM_LOUD_FAIL=0 env kill-switch (the
+  // CLAUDE_CODE_TELEGRAMMER_LOUD_FAIL=0 env kill-switch (the
   // ❌ reaction still fires regardless — only the text reply is gated).
   //
   // The pre-#41 operator saw ⚡ → ❌ and never 👀. Post-#41 they see

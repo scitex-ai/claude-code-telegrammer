@@ -25,22 +25,22 @@ case "$cmd" in
       exit 0
     fi
 
-    # 1. Map bot_token_env → CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN
+    # 1. Map bot_token_env → CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN
     BOT_TOKEN_ENV=$(yaml_get "$AGENT_CONFIG_PATH" "spec.telegram.bot_token_env" "")
-    if [[ -n "$BOT_TOKEN_ENV" && "$BOT_TOKEN_ENV" != "CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN" ]]; then
+    if [[ -n "$BOT_TOKEN_ENV" && "$BOT_TOKEN_ENV" != "CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN" ]]; then
       TOKEN_VAL="${!BOT_TOKEN_ENV:-}"
       if [[ -n "$TOKEN_VAL" ]]; then
-        export CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN="$TOKEN_VAL"
+        export CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN="$TOKEN_VAL"
       fi
     fi
 
     # 2. Write access.json
     AUTO_CONNECT=$(yaml_get "$AGENT_CONFIG_PATH" "spec.telegram.auto_connect" "true")
-    STATE_DIR="${CLAUDE_CODE_TELEGRAMMER_TELEGRAM_STATE_DIR:-$HOME/.scitex/agent-container/telegram}"
+    STATE_DIR="${CLAUDE_CODE_TELEGRAMMER_STATE_DIR:-$HOME/.scitex/agent-container/telegram}"
 
     # Resolve bot_id from token for state dir
-    if [[ -n "${CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN:-}" ]]; then
-      BOT_ID="${CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN%%:*}"
+    if [[ -n "${CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN:-}" ]]; then
+      BOT_ID="${CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN%%:*}"
       STATE_DIR="$HOME/.scitex/agent-container/telegram/$BOT_ID"
     fi
     mkdir -p "$STATE_DIR"
@@ -62,7 +62,7 @@ print('Wrote access.json with', len(users), 'allowed users to $STATE_DIR')
     fi
 
     # 3. Write .env for the MCP server
-    echo "CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN=${CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN:-}" > "$STATE_DIR/.env"
+    echo "CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN=${CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN:-}" > "$STATE_DIR/.env"
     chmod 600 "$STATE_DIR/.env"
     log_info "Wrote .env to $STATE_DIR"
 
@@ -100,9 +100,9 @@ config = {
             'command': 'bun',
             'args': ['run', '$TS_SERVER'],
             'env': {
-                'CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN': os.environ.get('CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN', ''),
-                'CLAUDE_CODE_TELEGRAMMER_TELEGRAM_STATE_DIR': '$STATE_DIR',
-                'CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ALLOWED_USERS': users_str
+                'CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN': os.environ.get('CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN', ''),
+                'CLAUDE_CODE_TELEGRAMMER_STATE_DIR': '$STATE_DIR',
+                'CLAUDE_CODE_TELEGRAMMER_ALLOWED_USERS': users_str
             }
         }
     }

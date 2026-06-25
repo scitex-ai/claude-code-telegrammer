@@ -6,7 +6,7 @@
  *     replyToMessageId)
  *   - dedup is keyed strictly per (chat_id, message_id) per process
  *     lifetime — different chats / msgs are independent
- *   - the CLAUDE_CODE_TELEGRAMMER_TELEGRAM_LOUD_FAIL env kill-switch
+ *   - the CLAUDE_CODE_TELEGRAMMER_LOUD_FAIL env kill-switch
  *     suppresses the send on the documented vocab (0/false/no/off,
  *     case-insensitive)
  *   - any other env value (including "", "1", "on", "yes", "true",
@@ -49,11 +49,11 @@ beforeEach(() => {
   sent.length = 0;
   throwOnSend = false;
   _resetLoudFail();
-  delete process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_LOUD_FAIL;
+  delete process.env.CLAUDE_CODE_TELEGRAMMER_LOUD_FAIL;
 });
 
 afterEach(() => {
-  delete process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_LOUD_FAIL;
+  delete process.env.CLAUDE_CODE_TELEGRAMMER_LOUD_FAIL;
 });
 
 describe("sendLoudFailReply: wiring", () => {
@@ -100,7 +100,7 @@ describe("sendLoudFailReply: wiring", () => {
 
 describe("sendLoudFailReply: env kill-switch", () => {
   test("LOUD_FAIL=0 suppresses the send", async () => {
-    process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_LOUD_FAIL = "0";
+    process.env.CLAUDE_CODE_TELEGRAMMER_LOUD_FAIL = "0";
     const result: WakeResult = {
       ok: false,
       reason: "HTTP 502",
@@ -120,7 +120,7 @@ describe("sendLoudFailReply: env kill-switch", () => {
     for (let i = 0; i < variants.length; i++) {
       _resetLoudFail();
       sent.length = 0;
-      process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_LOUD_FAIL = variants[i];
+      process.env.CLAUDE_CODE_TELEGRAMMER_LOUD_FAIL = variants[i];
       await sendLoudFailReply(`${i}`, 5, result, "proj-foo");
       expect(sent.length).toBe(0);
     }
@@ -136,7 +136,7 @@ describe("sendLoudFailReply: env kill-switch", () => {
     for (let i = 0; i < truthy.length; i++) {
       _resetLoudFail();
       sent.length = 0;
-      process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_LOUD_FAIL = truthy[i];
+      process.env.CLAUDE_CODE_TELEGRAMMER_LOUD_FAIL = truthy[i];
       await sendLoudFailReply(`${i}`, 5, result, "proj-foo");
       expect(sent.length).toBe(1);
     }

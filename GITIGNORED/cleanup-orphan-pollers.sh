@@ -11,7 +11,7 @@
 # actually send SIGTERM.
 #
 # Classification rules (revised 2026-06-07 per lead review):
-#   - A process counts as a POLLER iff CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN
+#   - A process counts as a POLLER iff CCT_BOT_TOKEN
 #     is readable from /proc/<pid>/environ. Launcher-parents (bun fork+exec
 #     parents that hand off to the real poller-child) carry NO env on the
 #     parent — the env lives on the child. These are NOT pollers and are
@@ -87,9 +87,9 @@ for pid in "${PIDS[@]}"; do
 
   # read /proc/<pid>/environ (null-delimited) for AGENT_ID and TOKEN
   agent_id=$(tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null \
-    | awk -F= '$1=="CLAUDE_CODE_TELEGRAMMER_TELEGRAM_AGENT_ID"{print $2; exit}')
+    | awk -F= '$1=="CCT_AGENT_ID"{print $2; exit}')
   token=$(tr '\0' '\n' < "/proc/$pid/environ" 2>/dev/null \
-    | awk -F= '$1=="CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN"{print $2; exit}')
+    | awk -F= '$1=="CCT_BOT_TOKEN"{print $2; exit}')
 
   # CLASSIFY: must have a readable token to count as a poller.
   # Launcher-parents have no env on the parent (env lives on the child);

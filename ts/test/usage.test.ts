@@ -94,22 +94,22 @@ describe("readQuotaReset: integration via fixture file", () => {
   beforeEach(() => {
     usageDir = mkdtempSync(join(tmpdir(), "cct-usage-unit-"));
     usagePath = join(usageDir, "usage.json");
-    process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_USAGE_JSON_PATH = usagePath;
+    process.env.CLAUDE_CODE_TELEGRAMMER_USAGE_JSON_PATH = usagePath;
   });
 
   afterEach(() => {
     rmSync(usageDir, { recursive: true, force: true });
-    delete process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_USAGE_JSON_PATH;
+    delete process.env.CLAUDE_CODE_TELEGRAMMER_USAGE_JSON_PATH;
   });
 
   test("returns null when path is empty (no env + no account)", () => {
-    delete process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_USAGE_JSON_PATH;
+    delete process.env.CLAUDE_CODE_TELEGRAMMER_USAGE_JSON_PATH;
     // preload sets no account → usageJsonPath() returns "" → null.
     expect(readQuotaReset()).toBeNull();
   });
 
   test("returns null when file missing", () => {
-    process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_USAGE_JSON_PATH =
+    process.env.CLAUDE_CODE_TELEGRAMMER_USAGE_JSON_PATH =
       "/nope/usage.json";
     expect(readQuotaReset()).toBeNull();
   });

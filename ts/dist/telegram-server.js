@@ -13668,25 +13668,25 @@ class StdioServerTransport {
 // lib/config.ts
 import { homedir, hostname } from "os";
 import { join } from "path";
-var STATE_DIR = process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_STATE_DIR ?? join(homedir(), ".claude-code-telegrammer");
+var STATE_DIR = process.env.CCT_STATE_DIR ?? join(homedir(), ".claude-code-telegrammer");
 var ACCESS_FILE = join(STATE_DIR, "access.json");
 var LOCK_FILE = join(STATE_DIR, "claude-code-telegrammer-mcp.lock");
 var INBOX_DIR = join(STATE_DIR, "inbox");
-var ATTACHMENT_DIR = process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ATTACHMENT_DIR ?? join(STATE_DIR, "attachments");
-var TOKEN = process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN ?? "";
+var ATTACHMENT_DIR = process.env.CCT_ATTACHMENT_DIR ?? join(STATE_DIR, "attachments");
+var TOKEN = process.env.CCT_BOT_TOKEN ?? "";
 var API_BASE = `https://api.telegram.org/bot${TOKEN}`;
-var ENV_ALLOWED = (process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ALLOWED_USERS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+var ENV_ALLOWED = (process.env.CCT_ALLOWED_USERS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 var READ_RECEIPTS_ENABLED = ![
   "0",
   "false",
   "no",
   "off"
-].includes((process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_READ_RECEIPTS ?? "").trim().toLowerCase());
+].includes((process.env.CCT_READ_RECEIPTS ?? "").trim().toLowerCase());
 var TURN_URL = process.env.CLAUDE_CODE_TELEGRAMMER_TURN_URL ?? "";
 var TURN_BEARER = process.env.CLAUDE_CODE_TELEGRAMMER_TURN_BEARER ?? "";
-var HOST_NAME = process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_HOST_NAME ?? hostname();
-var PROJECT = process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_PROJECT ?? process.cwd();
-var AGENT_ID = process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_AGENT_ID ?? "telegram";
+var HOST_NAME = process.env.CCT_HOST_NAME ?? hostname();
+var PROJECT = process.env.CCT_PROJECT ?? process.cwd();
+var AGENT_ID = process.env.CCT_AGENT_ID ?? "telegram";
 var BOT_TOKEN_HASH = TOKEN ? new Bun.CryptoHasher("sha256").update(TOKEN).digest("hex").slice(0, 8) : "";
 
 // lib/log.ts
@@ -13713,44 +13713,44 @@ import {
 // lib/config.ts
 import { homedir as homedir2, hostname as hostname2 } from "os";
 import { join as join2 } from "path";
-var STATE_DIR2 = process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_STATE_DIR ?? join2(homedir2(), ".claude-code-telegrammer");
+var STATE_DIR2 = process.env.CCT_STATE_DIR ?? join2(homedir2(), ".claude-code-telegrammer");
 var ACCESS_FILE2 = join2(STATE_DIR2, "access.json");
 var LOCK_FILE2 = join2(STATE_DIR2, "claude-code-telegrammer-mcp.lock");
 var INBOX_DIR2 = join2(STATE_DIR2, "inbox");
-var ATTACHMENT_DIR2 = process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ATTACHMENT_DIR ?? join2(STATE_DIR2, "attachments");
-var TOKEN2 = process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN ?? "";
+var ATTACHMENT_DIR2 = process.env.CCT_ATTACHMENT_DIR ?? join2(STATE_DIR2, "attachments");
+var TOKEN2 = process.env.CCT_BOT_TOKEN ?? "";
 var API_BASE2 = `https://api.telegram.org/bot${TOKEN2}`;
 var MAX_TEXT = 4096;
-var ENV_ALLOWED2 = (process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ALLOWED_USERS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+var ENV_ALLOWED2 = (process.env.CCT_ALLOWED_USERS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 var READ_RECEIPTS_ENABLED2 = ![
   "0",
   "false",
   "no",
   "off"
-].includes((process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_READ_RECEIPTS ?? "").trim().toLowerCase());
+].includes((process.env.CCT_READ_RECEIPTS ?? "").trim().toLowerCase());
 var RECEIPT_DELIVERED_EMOJI = "⚡";
 var RECEIPT_READ_EMOJI = "\uD83D\uDC40";
 var RECEIPT_DONE_EMOJI = "✅";
 var RECEIPT_FAILED_EMOJI = "❌";
 function isLoudFailEnabled() {
-  const v = (process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_LOUD_FAIL ?? "").trim().toLowerCase();
+  const v = (process.env.CCT_LOUD_FAIL ?? "").trim().toLowerCase();
   return !["0", "false", "no", "off"].includes(v);
 }
 var TURN_URL2 = process.env.CLAUDE_CODE_TELEGRAMMER_TURN_URL ?? "";
 var TURN_BEARER2 = process.env.CLAUDE_CODE_TELEGRAMMER_TURN_BEARER ?? "";
-var HOST_NAME2 = process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_HOST_NAME ?? hostname2();
-var PROJECT2 = process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_PROJECT ?? process.cwd();
-var AGENT_ID2 = process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_AGENT_ID ?? "telegram";
+var HOST_NAME2 = process.env.CCT_HOST_NAME ?? hostname2();
+var PROJECT2 = process.env.CCT_PROJECT ?? process.cwd();
+var AGENT_ID2 = process.env.CCT_AGENT_ID ?? "telegram";
 var BOT_TOKEN_HASH2 = TOKEN2 ? new Bun.CryptoHasher("sha256").update(TOKEN2).digest("hex").slice(0, 8) : "";
 function isSignatureEnabled() {
-  const v = (process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_SIGNATURE ?? "").trim().toLowerCase();
+  const v = (process.env.CCT_SIGNATURE ?? "").trim().toLowerCase();
   return !["0", "false", "no", "off"].includes(v);
 }
 function quotaCachePath() {
-  return process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_QUOTA_CACHE_PATH ?? "/home/ywatanabe/.scitex/quota-cache.json";
+  return process.env.CCT_QUOTA_CACHE_PATH ?? "/home/ywatanabe/.scitex/quota-cache.json";
 }
 function usageJsonPath() {
-  const override = process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_USAGE_JSON_PATH;
+  const override = process.env.CCT_USAGE_JSON_PATH;
   if (override)
     return override;
   const acct = accountDirname();
@@ -13759,7 +13759,7 @@ function usageJsonPath() {
   return `${homedir2()}/.scitex/agent-container/accounts/${acct}/usage.json`;
 }
 function accountDirname() {
-  return process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ACCOUNT ?? process.env.CLAUDE_AGENT_ACCOUNT ?? "";
+  return process.env.CCT_ACCOUNT ?? process.env.CLAUDE_AGENT_ACCOUNT ?? "";
 }
 
 // lib/log.ts
@@ -13884,9 +13884,9 @@ function loadAccess() {
       const defaults = getDefaults();
       if (cachedMtimeMs !== -1) {
         if (defaults.allowFrom.length === 0) {
-          log2("access", `WARNING: no access.json and CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ALLOWED_USERS is empty — all messages will be rejected`);
+          log2("access", `WARNING: no access.json and CCT_ALLOWED_USERS is empty — all messages will be rejected`);
         } else {
-          log2("access", `access.json not found, using CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ALLOWED_USERS`, { allowed: defaults.allowFrom });
+          log2("access", `access.json not found, using CCT_ALLOWED_USERS`, { allowed: defaults.allowFrom });
         }
       }
       cachedAccess = defaults;
@@ -15166,7 +15166,7 @@ async function startPolling(mcp) {
   }
   const access = loadAccess();
   if (access.allowFrom.length === 0 && Object.keys(access.groups).length === 0) {
-    log2("poller", "ERROR: allowlist is empty — all messages will be rejected. Set CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ALLOWED_USERS or create access.json in CLAUDE_CODE_TELEGRAMMER_TELEGRAM_STATE_DIR");
+    log2("poller", "ERROR: allowlist is empty — all messages will be rejected. Set CCT_ALLOWED_USERS or create access.json in CCT_STATE_DIR");
   }
   try {
     const me = await tgApi("getMe");
@@ -15284,7 +15284,7 @@ async function handleUpdate(mcp, update) {
   const chatId = String(msg.chat.id);
   const chatType = msg.chat.type;
   if (!isAllowed(userId, chatId, chatType)) {
-    log2("poller", `REJECTED: message from user ${userId} in chat ${chatId} (type=${chatType}) — not in allowlist. Set CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ALLOWED_USERS or create access.json`, { userId, chatId, chatType });
+    log2("poller", `REJECTED: message from user ${userId} in chat ${chatId} (type=${chatType}) — not in allowlist. Set CCT_ALLOWED_USERS or create access.json`, { userId, chatId, chatType });
     return;
   }
   const text = buildInboundText(msg);
@@ -15598,8 +15598,8 @@ function releaseAuthoritative2(opts) {
 
 // telegram-server.ts
 if (!TOKEN) {
-  process.stderr.write(`telegram-mcp: CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN is required.
-` + `  export CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN=123456789:AAH...
+  process.stderr.write(`telegram-mcp: CCT_BOT_TOKEN is required.
+` + `  export CCT_BOT_TOKEN=123456789:AAH...
 `);
   process.exit(1);
 }

@@ -46,27 +46,27 @@ MCP Server
      - Required
      - Default
      - Description
-   * - ``CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN``
+   * - ``CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN``
      - Yes
      - --
      - Telegram Bot API token from BotFather.
-   * - ``CLAUDE_CODE_TELEGRAMMER_TELEGRAM_STATE_DIR``
+   * - ``CLAUDE_CODE_TELEGRAMMER_STATE_DIR``
      - No
      - ``~/.claude-code-telegrammer``
      - Directory for SQLite DB, access.json, and lock file.
-   * - ``CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ALLOWED_USERS``
+   * - ``CLAUDE_CODE_TELEGRAMMER_ALLOWED_USERS``
      - No
      - --
      - Comma-separated Telegram user IDs for the DM allowlist.
-   * - ``CLAUDE_CODE_TELEGRAMMER_TELEGRAM_HOST_NAME``
+   * - ``CLAUDE_CODE_TELEGRAMMER_HOST_NAME``
      - No
      - ``os.hostname()``
      - Hostname stored with each message.
-   * - ``CLAUDE_CODE_TELEGRAMMER_TELEGRAM_PROJECT``
+   * - ``CLAUDE_CODE_TELEGRAMMER_PROJECT``
      - No
      - ``process.cwd()``
      - Project path stored with each message.
-   * - ``CLAUDE_CODE_TELEGRAMMER_TELEGRAM_AGENT_ID``
+   * - ``CLAUDE_CODE_TELEGRAMMER_AGENT_ID``
      - No
      - ``telegram``
      - Agent identifier stored with each message.

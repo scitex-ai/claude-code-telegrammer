@@ -13,7 +13,7 @@ const TEST_DIR = (globalThis as any).__CCT_TEST_DIR as string;
 describe("access control", () => {
   beforeEach(() => {
     _resetCache();
-    delete process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ALLOWED_USERS;
+    delete process.env.CLAUDE_CODE_TELEGRAMMER_ALLOWED_USERS;
     try {
       unlinkSync(ACCESS_FILE);
     } catch {}

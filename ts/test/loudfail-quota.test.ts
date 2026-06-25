@@ -9,7 +9,7 @@
  *   - graceful degradation on malformed JSON / missing file / missing fields
  *
  * Uses a real temp directory + real fs writes — no mocks of the fs
- * layer. The CLAUDE_CODE_TELEGRAMMER_TELEGRAM_USAGE_JSON_PATH env
+ * layer. The CLAUDE_CODE_TELEGRAMMER_USAGE_JSON_PATH env
  * override (declared in config.ts usageJsonPath()) points at the
  * fixture file so tests don't touch the host's actual usage.json.
  */
@@ -51,11 +51,11 @@ function quotaResult(): Extract<WakeResult, { ok: false }> {
 
 describe("quota_capped: fallback wire when usage.json unreadable", () => {
   beforeEach(() => {
-    delete process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_USAGE_JSON_PATH;
+    delete process.env.CLAUDE_CODE_TELEGRAMMER_USAGE_JSON_PATH;
   });
 
   afterEach(() => {
-    delete process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_USAGE_JSON_PATH;
+    delete process.env.CLAUDE_CODE_TELEGRAMMER_USAGE_JSON_PATH;
   });
 
   test("no override + preload sets no account → 'quota cap — after the quota resets'", () => {
@@ -65,7 +65,7 @@ describe("quota_capped: fallback wire when usage.json unreadable", () => {
   });
 
   test("override points at nonexistent path → silent fallback", () => {
-    process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_USAGE_JSON_PATH =
+    process.env.CLAUDE_CODE_TELEGRAMMER_USAGE_JSON_PATH =
       "/nonexistent/path/usage.json";
     expect(buildLoudFailMessage(quotaResult(), "proj-foo")).toBe(
       "⚠️ proj-foo unavailable: quota cap — after the quota resets",
@@ -80,12 +80,12 @@ describe("quota_capped: usage.json parsing (real on-disk fixtures)", () => {
   beforeEach(() => {
     usageDir = mkdtempSync(join(tmpdir(), "cct-usage-"));
     usagePath = join(usageDir, "usage.json");
-    process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_USAGE_JSON_PATH = usagePath;
+    process.env.CLAUDE_CODE_TELEGRAMMER_USAGE_JSON_PATH = usagePath;
   });
 
   afterEach(() => {
     rmSync(usageDir, { recursive: true, force: true });
-    delete process.env.CLAUDE_CODE_TELEGRAMMER_TELEGRAM_USAGE_JSON_PATH;
+    delete process.env.CLAUDE_CODE_TELEGRAMMER_USAGE_JSON_PATH;
   });
 
   function writeUsage(payload: unknown): void {
