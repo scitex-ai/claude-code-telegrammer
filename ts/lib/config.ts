@@ -6,8 +6,47 @@ import { homedir, hostname } from "os";
 import { join } from "path";
 import { getenv, READ_PREFIXES } from "./env.js";
 
-export const STATE_DIR =
-  getenv("STATE_DIR") ?? join(homedir(), ".claude-code-telegrammer");
+/**
+ * Resolve the state directory (pidfiles, messages.db, access.json, inbox…).
+ *
+ * Multiple agents each run their own telegrammer poller. If they all share one
+ * STATE_DIR their pidfiles + messages.db collide and the newest-wins lock
+ * takeover leaves only one agent connected. So when an agent id is known and no
+ * explicit state dir was given, we DEFAULT to a per-agent directory derived
+ * from that id — distinct agents get distinct dirs automatically.
+ *
+ * Precedence:
+ *   1. Explicit state dir env (CCT_STATE_DIR / CLAUDE_CODE_TELEGRAMMER_STATE_DIR
+ *      / legacy *_TELEGRAM_STATE_DIR, via getenv("STATE_DIR")) — operator
+ *      override always wins, used verbatim.
+ *   2. ELSE an explicitly-set agent id (RAW getenv("AGENT_ID") — NOT the
+ *      module's AGENT_ID constant, which defaults to "telegram"; that default
+ *      would make every un-ID'd agent collide on "-telegram") →
+ *      ~/.claude-code-telegrammer-<safe-agent-id>, where unsafe chars
+ *      (anything outside [A-Za-z0-9._-]) are replaced by "_" to prevent path
+ *      traversal / separators.
+ *   3. ELSE the legacy ~/.claude-code-telegrammer (no regression for setups
+ *      without an agent id).
+ *
+ * `env` is injectable for tests. getenv may throw TelegrammerEnvConflict if the
+ * short/long spellings disagree — existing behaviour, left as-is.
+ */
+export function resolveStateDir(
+  env: Record<string, string | undefined> = process.env,
+): string {
+  const explicit = getenv("STATE_DIR", undefined, env);
+  if (explicit !== undefined) return explicit;
+
+  const agentId = getenv("AGENT_ID", undefined, env);
+  if (agentId !== undefined && agentId !== "") {
+    const safe = agentId.replace(/[^A-Za-z0-9._-]/g, "_");
+    return join(homedir(), ".claude-code-telegrammer-" + safe);
+  }
+
+  return join(homedir(), ".claude-code-telegrammer");
+}
+
+export const STATE_DIR = resolveStateDir();
 
 export const ACCESS_FILE = join(STATE_DIR, "access.json");
 export const LOCK_FILE = join(STATE_DIR, "claude-code-telegrammer-mcp.lock");

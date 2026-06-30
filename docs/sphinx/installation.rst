@@ -53,7 +53,10 @@ MCP Server
    * - ``CLAUDE_CODE_TELEGRAMMER_STATE_DIR``
      - No
      - ``~/.claude-code-telegrammer``
-     - Directory for SQLite DB, access.json, and lock file.
+     - Directory for SQLite DB, access.json, and lock file. When unset and
+       ``CCT_AGENT_ID`` is given, defaults to
+       ``~/.claude-code-telegrammer-<agent_id>`` so each agent's poller gets
+       its own state dir; an explicit value here always wins.
    * - ``CLAUDE_CODE_TELEGRAMMER_ALLOWED_USERS``
      - No
      - --

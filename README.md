@@ -274,7 +274,7 @@ Response throttling: minimum interval between responses, burst limit (10 in 3s w
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN` | Yes | -- | Telegram Bot API token |
-| `CLAUDE_CODE_TELEGRAMMER_STATE_DIR` | No | `~/.claude-code-telegrammer` | Directory for SQLite DB, access.json, lock file |
+| `CLAUDE_CODE_TELEGRAMMER_STATE_DIR` | No | `~/.claude-code-telegrammer` | Directory for SQLite DB, access.json, lock file. When unset and `CCT_AGENT_ID` is given, defaults to `~/.claude-code-telegrammer-<agent_id>` so each agent's poller gets its own state dir (no pidfile/DB collision); an explicit value here always wins. |
 | `CLAUDE_CODE_TELEGRAMMER_ALLOWED_USERS` | No | -- | Comma-separated Telegram user IDs for DM allowlist |
 | `CLAUDE_CODE_TELEGRAMMER_HOST_NAME` | No | `os.hostname()` | Hostname stored with each message |
 | `CLAUDE_CODE_TELEGRAMMER_PROJECT` | No | `process.cwd()` | Project path stored with each message |
