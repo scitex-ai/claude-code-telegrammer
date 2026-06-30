@@ -77,6 +77,79 @@ describe("getenv alias resolution", () => {
   });
 });
 
+describe("empty-string env vars are treated as ABSENT", () => {
+  // Root cause of the dead-poller fleet outage: a folded but unresolved
+  // per-agent secret exports CCT_BOT_TOKEN="" while the real value lives in the
+  // legacy/canonical spelling. An empty short form must never shadow it.
+  test("empty short + real legacy → returns the legacy value", () => {
+    const env = {
+      CCT_BOT_TOKEN: "",
+      CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN: "legacy",
+    };
+    expect(getenv("BOT_TOKEN", undefined, env)).toBe("legacy");
+  });
+
+  test("empty short + real long → returns long, does NOT throw a conflict", () => {
+    const env = {
+      CCT_BOT_TOKEN: "",
+      CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN: "canon",
+    };
+    expect(getenv("BOT_TOKEN", undefined, env)).toBe("canon");
+  });
+
+  test("empty short + empty long + real legacy → returns the legacy value", () => {
+    const env = {
+      CCT_BOT_TOKEN: "",
+      CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN: "",
+      CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN: "legacy",
+    };
+    expect(getenv("BOT_TOKEN", undefined, env)).toBe("legacy");
+  });
+
+  test("all empty → returns the fallback", () => {
+    const env = {
+      CCT_BOT_TOKEN: "",
+      CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN: "",
+      CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN: "",
+    };
+    expect(getenv("BOT_TOKEN", "fallback", env)).toBe("fallback");
+  });
+
+  test("a real conflict (non-empty short ≠ non-empty long) STILL throws", () => {
+    const env = {
+      CCT_BOT_TOKEN: "short",
+      CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN: "canon",
+    };
+    expect(() => getenv("BOT_TOKEN", undefined, env)).toThrow(
+      TelegrammerEnvConflict,
+    );
+  });
+
+  test("equal non-empty short and long → returns it (no conflict)", () => {
+    const env = {
+      CCT_BOT_TOKEN: "same",
+      CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN: "same",
+    };
+    expect(getenv("BOT_TOKEN", undefined, env)).toBe("same");
+  });
+
+  test("empty short + non-empty long → returns long, no throw", () => {
+    const env = {
+      CCT_BOT_TOKEN: "",
+      CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN: "canon",
+    };
+    expect(() => getenv("BOT_TOKEN", undefined, env)).not.toThrow();
+    expect(getenv("BOT_TOKEN", undefined, env)).toBe("canon");
+  });
+
+  test("does NOT warn for an EMPTY legacy var", () => {
+    const warnings: string[] = [];
+    const env = { CLAUDE_CODE_TELEGRAMMER_TELEGRAM_DEP_EMPTY: "" };
+    getenv("DEP_EMPTY", undefined, env, (m) => warnings.push(m));
+    expect(warnings).toHaveLength(0);
+  });
+});
+
 describe("prefixes and aliases()", () => {
   test("prefix constants have the expected values", () => {
     expect(SHORT_PREFIX).toBe("CCT_");

@@ -59,6 +59,13 @@ const _warnedLegacy = new Set<string>();
  * Throws `TelegrammerEnvConflict` if two forms are set with different values.
  * Using the legacy spelling logs a one-time deprecation warning.
  *
+ * An EMPTY-string value (`""`) for ANY spelling is treated as ABSENT (same as
+ * unset) — a per-agent `.envrc` that folds an unresolved secret may export
+ * `CCT_BOT_TOKEN=""`, and an empty short form must never SHADOW a real value in
+ * the canonical or legacy spelling (root cause of a fleet-wide dead-poller
+ * outage). Empty short + real long is therefore NOT a conflict, and an empty
+ * legacy var fires no deprecation warning.
+ *
  * @param suffix  Variable name WITHOUT prefix, e.g. `"BOT_TOKEN"`.
  * @param fallback Returned when no form is set (default `undefined`).
  * @param env     Environment to read (defaults to `process.env`; injectable
@@ -75,9 +82,14 @@ export function getenv(
   const shortName = SHORT_PREFIX + suffix;
   const longName = LONG_PREFIX + suffix;
   const legacyName = LEGACY_PREFIX + suffix;
-  const shortVal = env[shortName];
-  const longVal = env[longName];
-  const legacyVal = env[legacyName];
+  // An empty string is treated as ABSENT for every spelling: a folded but
+  // unresolved per-agent secret can export `CCT_<KEY>=""`, and that empty value
+  // must never shadow a real value in another spelling, nor count as a conflict.
+  const absent = (v: string | undefined): string | undefined =>
+    v === "" ? undefined : v;
+  const shortVal = absent(env[shortName]);
+  const longVal = absent(env[longName]);
+  const legacyVal = absent(env[legacyName]);
 
   // The two CURRENT spellings (CCT_ short ↔ CLAUDE_CODE_TELEGRAMMER_ canonical)
   // are aliases of one setting; if both are set and DISAGREE that is a
