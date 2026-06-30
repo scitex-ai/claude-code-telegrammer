@@ -29,6 +29,9 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
 ]
 
+[project.scripts]
+claude-code-telegrammer = "claude_code_telegrammer._cli:main"
+
 [project.optional-dependencies]
 docs = [
     "sphinx>=7.0",
@@ -37,9 +40,6 @@ docs = [
     "sphinx-copybutton>=0.5",
     "sphinx-autodoc-typehints>=1.25",
 ]
-
-[project.scripts]
-claude-code-telegrammer = "claude_code_telegrammer._cli:main"
 
 [project.urls]
 Homepage = "https://github.com/ywatanabe1989/claude-code-telegrammer"

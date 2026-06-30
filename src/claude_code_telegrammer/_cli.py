@@ -1,9 +1,29 @@
 #!/usr/bin/env python3
-"""Console entry point launching the TypeScript Telegram MCP server."""
+"""Command-line entry point for claude-code-telegrammer.
+
+This Python CLI is a thin launcher that forwards to the canonical TypeScript
+server (``ts/telegram-server.ts``). All real logic — env-var precedence,
+BOT_TOKEN_HASH, STATE_DIR/AGENT_ID/CHANNEL_SOURCE/TURN_URL resolution, the MCP
+server, and the Telegram poller — lives in TS. The single source of truth is
+the TS server; Python never reimplements env/hash logic, it only ``execv``s
+``bun``.
+
+Subcommands::
+
+    claude-code-telegrammer mcp [start]   Start the MCP server + poller (default).
+    claude-code-telegrammer config [...]   Print the resolved config as JSON and
+                                           exit, WITHOUT starting the server.
+    claude-code-telegrammer --version      Print the package version and exit.
+
+The ``config`` subcommand exists so scitex-agent-container (sac) can preflight a
+per-agent bot — assert a token maps to the expected agent identity and detect
+two agents resolving to the SAME bot — without starting a poller. Extra args
+are passed through, so ``claude-code-telegrammer config --check`` reaches the
+TS ``config --check`` mode (single getMe call; never prints the raw token).
+"""
 
 from __future__ import annotations
 
-import argparse
 import os
 import shutil
 import sys
@@ -11,12 +31,27 @@ from pathlib import Path
 
 from claude_code_telegrammer import __version__
 
-# <root>/src/claude_code_telegrammer/_cli.py -> <root>
-_ROOT = Path(__file__).resolve().parents[2]
-_SERVER = _ROOT / "ts" / "telegram-server.ts"
+# ts/telegram-server.ts relative to the installed package: the repo layout is
+#   <repo>/src/claude_code_telegrammer/_cli.py
+#   <repo>/ts/telegram-server.ts
+# so walk up from this file: _cli.py → claude_code_telegrammer → src → <repo>.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_SERVER = _REPO_ROOT / "ts" / "telegram-server.ts"
+
+_USAGE = (
+    "usage: claude-code-telegrammer <command> [args]\n"
+    "\n"
+    "commands:\n"
+    "  mcp [start]       start the Telegram MCP server + poller (default)\n"
+    "  config [--check]  print the resolved config as JSON and exit, WITHOUT\n"
+    "                    starting the server. --check adds a single getMe call\n"
+    "                    (bot_username/bot_id). The raw token is never printed.\n"
+    "  --version         print the package version and exit\n"
+)
 
 
-def _resolve_bun() -> str | None:
+def _resolve_bun() -> str:
+    """Return the path to the ``bun`` executable, or exit with a clear error."""
     candidates = [
         os.environ.get("BUN_BIN"),
         shutil.which("bun"),
@@ -25,51 +60,60 @@ def _resolve_bun() -> str | None:
     for candidate in candidates:
         if candidate and os.path.exists(candidate):
             return candidate
-    return None
-
-
-def _launch(passthrough: list[str]) -> None:
-    bun = _resolve_bun()
-    if not bun:
-        sys.exit("error: 'bun' not found; set $BUN_BIN or install bun")
-    if not _SERVER.exists():
-        sys.exit(f"error: TS MCP server not found at {_SERVER}")
-    os.execv(bun, [bun, "run", str(_SERVER), *passthrough])
-
-
-def main(argv: list[str] | None = None) -> None:
-    argv = list(sys.argv[1:] if argv is None else argv)
-
-    parser = argparse.ArgumentParser(
-        prog="claude-code-telegrammer",
-        description="Launch the Telegram MCP server (bun run ts/telegram-server.ts).",
-        add_help=True,
-    )
-    parser.add_argument("--version", action="store_true", help="print version and exit")
-
-    args, rest = parser.parse_known_args(argv)
-
-    if args.version:
-        print(__version__)
-        return
-
-    if not rest:
-        _launch([])
-        return
-
-    command, *tail = rest
-    if command == "mcp":
-        if tail and tail[0] == "start":
-            tail = tail[1:]
-        _launch(tail)
-        return
-
     sys.stderr.write(
-        f"usage: claude-code-telegrammer [--version] [mcp [start]]\n"
-        f"unknown subcommand: {command}\n"
+        "claude-code-telegrammer: `bun` was not found.\n"
+        "  Set $BUN_BIN or install bun (https://bun.sh) — the server runs on bun.\n"
     )
-    sys.exit(2)
+    raise SystemExit(127)
+
+
+def _require_server() -> str:
+    """Return the absolute path to telegram-server.ts, or exit with an error."""
+    if not _SERVER.is_file():
+        sys.stderr.write(
+            f"claude-code-telegrammer: server entry not found at {_SERVER}.\n"
+            "  Expected ts/telegram-server.ts alongside the installed package.\n"
+        )
+        raise SystemExit(2)
+    return str(_SERVER)
+
+
+def _exec_server(*server_args: str) -> int:
+    """``execv`` bun on the TS server with the given args (does not return)."""
+    bun = _resolve_bun()
+    server = _require_server()
+    os.execv(bun, [bun, "run", server, *server_args])
+    # os.execv replaces the process image; unreachable on success.
+    return 0
+
+
+def main(argv: "list[str] | None" = None) -> int:
+    args = list(sys.argv[1:] if argv is None else argv)
+
+    if args and args[0] in ("--version", "-V"):
+        print(__version__)
+        return 0
+
+    if args and args[0] in ("-h", "--help", "help"):
+        sys.stdout.write(_USAGE)
+        return 0
+
+    if not args or args[0] == "mcp":
+        # `mcp` / `mcp start` (and the bare invocation) start the server.
+        passthrough = args[1:] if args else []
+        if passthrough and passthrough[0] == "start":
+            passthrough = passthrough[1:]
+        return _exec_server(*passthrough)
+
+    if args[0] == "config":
+        # Forward to the TS `config` mode, passing through any extra flags
+        # (e.g. --check) so `claude-code-telegrammer config --check` works.
+        return _exec_server("config", *args[1:])
+
+    sys.stderr.write(f"claude-code-telegrammer: unknown command {args[0]!r}\n\n")
+    sys.stderr.write(_USAGE)
+    return 2
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

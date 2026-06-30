@@ -41,6 +41,8 @@ import { registerTools } from "./lib/tools.js";
 import { startPolling, stopPolling } from "./lib/poller.js";
 import { initStore } from "./lib/store.js";
 import { releaseAuthoritative } from "./lib/takeover.js";
+import { resolveConfigProbe, wantsGetMe } from "./lib/config-probe.js";
+import { tgApi } from "./lib/telegram-api.js";
 
 // ── Fail loud on unexpanded env ─────────────────────────────────────────────
 //
@@ -60,6 +62,26 @@ if (unexpanded.length > 0) {
       "  directly before starting.\n",
   );
   process.exit(1);
+}
+
+// ── Config identity probe (no server, no poller) ────────────────────────────
+//
+// `bun run ts/telegram-server.ts config [--check]` resolves the telegrammer
+// config and prints it as JSON to STDOUT, then exits 0 — WITHOUT constructing
+// the MCP stdio transport or starting the poller. sac uses this to preflight a
+// per-agent bot: assert token→agent identity and detect two agents resolving
+// to the SAME bot (incident cct-multiagent-telegram-shared-token-409). This
+// branch lives BEFORE the token validation below so the probe works even when
+// no token is set (bot_token_present:false is a valid, expected result). The
+// raw token is never printed; `--check`/`--getme` opts into a single getMe
+// call to fetch @username/bot_id (errors fold into getme_error, exit stays 0).
+if (process.argv.slice(2).includes("config")) {
+  const probe = await resolveConfigProbe(
+    wantsGetMe(process.argv.slice(2)),
+    () => tgApi("getMe"),
+  );
+  process.stdout.write(JSON.stringify(probe, null, 2) + "\n");
+  process.exit(0);
 }
 
 // ── Validate token ──────────────────────────────────────────────────────────
