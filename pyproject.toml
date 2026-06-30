@@ -29,6 +29,9 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
 ]
 
+[project.scripts]
+claude-code-telegrammer = "claude_code_telegrammer._cli:main"
+
 [project.optional-dependencies]
 docs = [
     "sphinx>=7.0",
