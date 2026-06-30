@@ -6,9 +6,10 @@
  */
 
 import { describe, test, expect } from "bun:test";
-import { tmpdir, hostname } from "os";
+import { tmpdir, hostname, homedir } from "os";
 import { join } from "path";
 import {
+  resolveStateDir,
   STATE_DIR,
   ACCESS_FILE,
   LOCK_FILE,
@@ -94,5 +95,42 @@ describe("config", () => {
   test("receipt emojis are ⚡ and 👀", () => {
     expect(RECEIPT_DELIVERED_EMOJI).toBe("⚡");
     expect(RECEIPT_READ_EMOJI).toBe("👀");
+  });
+});
+
+describe("resolveStateDir", () => {
+  const base = join(homedir(), ".claude-code-telegrammer");
+
+  test("explicit STATE_DIR is honoured verbatim", () => {
+    expect(resolveStateDir({ CCT_STATE_DIR: "/tmp/explicit" })).toBe(
+      "/tmp/explicit",
+    );
+  });
+
+  test("explicit STATE_DIR wins over AGENT_ID", () => {
+    expect(
+      resolveStateDir({
+        CCT_STATE_DIR: "/tmp/explicit",
+        CCT_AGENT_ID: "neurovista",
+      }),
+    ).toBe("/tmp/explicit");
+  });
+
+  test("derives per-agent dir from AGENT_ID when STATE_DIR unset", () => {
+    expect(resolveStateDir({ CCT_AGENT_ID: "neurovista" })).toBe(
+      `${base}-neurovista`,
+    );
+  });
+
+  test("falls back to shared base when AGENT_ID unset", () => {
+    expect(resolveStateDir({})).toBe(base);
+  });
+
+  test("treats the default AGENT_ID 'telegram' as the shared base", () => {
+    expect(resolveStateDir({ CCT_AGENT_ID: "telegram" })).toBe(base);
+  });
+
+  test("sanitizes path separators out of an exotic AGENT_ID", () => {
+    expect(resolveStateDir({ CCT_AGENT_ID: "../evil" })).toBe(`${base}-..-evil`);
   });
 });
