@@ -13,6 +13,7 @@ Subcommands::
     claude-code-telegrammer mcp [start]   Start the MCP server + poller (default).
     claude-code-telegrammer config [...]   Print the resolved config as JSON and
                                            exit, WITHOUT starting the server.
+    claude-code-telegrammer --version      Print the package version and exit.
 
 The ``config`` subcommand exists so scitex-agent-container (sac) can preflight a
 per-agent bot — assert a token maps to the expected agent identity and detect
@@ -28,11 +29,13 @@ import shutil
 import sys
 from pathlib import Path
 
+from claude_code_telegrammer import __version__
+
 # ts/telegram-server.ts relative to the installed package: the repo layout is
 #   <repo>/src/claude_code_telegrammer/_cli.py
 #   <repo>/ts/telegram-server.ts
 # so walk up from this file: _cli.py → claude_code_telegrammer → src → <repo>.
-_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+_REPO_ROOT = Path(__file__).resolve().parents[2]
 _SERVER = _REPO_ROOT / "ts" / "telegram-server.ts"
 
 _USAGE = (
@@ -43,19 +46,25 @@ _USAGE = (
     "  config [--check]  print the resolved config as JSON and exit, WITHOUT\n"
     "                    starting the server. --check adds a single getMe call\n"
     "                    (bot_username/bot_id). The raw token is never printed.\n"
+    "  --version         print the package version and exit\n"
 )
 
 
 def _resolve_bun() -> str:
     """Return the path to the ``bun`` executable, or exit with a clear error."""
-    bun = shutil.which("bun")
-    if not bun:
-        sys.stderr.write(
-            "claude-code-telegrammer: `bun` was not found on PATH.\n"
-            "  Install bun (https://bun.sh) — the server runs on the bun runtime.\n"
-        )
-        raise SystemExit(127)
-    return bun
+    candidates = [
+        os.environ.get("BUN_BIN"),
+        shutil.which("bun"),
+        os.path.expanduser("~/.bun/bin/bun"),
+    ]
+    for candidate in candidates:
+        if candidate and os.path.exists(candidate):
+            return candidate
+    sys.stderr.write(
+        "claude-code-telegrammer: `bun` was not found.\n"
+        "  Set $BUN_BIN or install bun (https://bun.sh) — the server runs on bun.\n"
+    )
+    raise SystemExit(127)
 
 
 def _require_server() -> str:
@@ -69,7 +78,7 @@ def _require_server() -> str:
     return str(_SERVER)
 
 
-def _exec_server(*server_args: str) -> "int":
+def _exec_server(*server_args: str) -> int:
     """``execv`` bun on the TS server with the given args (does not return)."""
     bun = _resolve_bun()
     server = _require_server()
@@ -81,19 +90,25 @@ def _exec_server(*server_args: str) -> "int":
 def main(argv: "list[str] | None" = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
 
-    if not args or args[0] in ("mcp",):
+    if args and args[0] in ("--version", "-V"):
+        print(__version__)
+        return 0
+
+    if args and args[0] in ("-h", "--help", "help"):
+        sys.stdout.write(_USAGE)
+        return 0
+
+    if not args or args[0] == "mcp":
         # `mcp` / `mcp start` (and the bare invocation) start the server.
         passthrough = args[1:] if args else []
+        if passthrough and passthrough[0] == "start":
+            passthrough = passthrough[1:]
         return _exec_server(*passthrough)
 
     if args[0] == "config":
         # Forward to the TS `config` mode, passing through any extra flags
         # (e.g. --check) so `claude-code-telegrammer config --check` works.
         return _exec_server("config", *args[1:])
-
-    if args[0] in ("-h", "--help", "help"):
-        sys.stdout.write(_USAGE)
-        return 0
 
     sys.stderr.write(f"claude-code-telegrammer: unknown command {args[0]!r}\n\n")
     sys.stderr.write(_USAGE)

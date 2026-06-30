@@ -36,6 +36,7 @@ import {
   releaseAuthoritative,
 } from "./takeover.js";
 import { sendLoudFailReply } from "./loudfail.js";
+import { getenv } from "./env.js";
 
 /**
  * Max consecutive 409 Conflict responses we tolerate before declaring
@@ -125,7 +126,14 @@ export async function startPolling(mcp: Server): Promise<void> {
 
   try {
     const me = await tgApi("getMe");
-    log("poller", `polling as @${me.username}`);
+    // Identity triple on the startup line: two agents sharing ONE bot
+    // token + state dir will print the SAME token hash + state_dir here,
+    // making the collision spottable at a glance across agent logs.
+    const agentId = getenv("AGENT_ID") ?? "-";
+    log(
+      "poller",
+      `polling as @${me.username} (token=${BOT_TOKEN_HASH} state_dir=${STATE_DIR} agent=${agentId})`,
+    );
   } catch (err) {
     log("poller", `getMe failed: ${err}`);
   }
@@ -140,7 +148,7 @@ export async function startPolling(mcp: Server): Promise<void> {
     if (!isAuthoritative({ stateDir: STATE_DIR, tokenHash: BOT_TOKEN_HASH })) {
       log(
         "poller",
-        "preempted by newer poller (pidfile no longer records our PID) — exiting cleanly",
+        `preempted by newer poller (pidfile no longer records our PID) — exiting cleanly (token=${BOT_TOKEN_HASH} state_dir=${STATE_DIR})`,
         { ourPid: process.pid },
       );
       polling = false;
@@ -193,6 +201,7 @@ export async function startPolling(mcp: Server): Promise<void> {
           const fatalMsg =
             `FATAL: ${MAX_CONSECUTIVE_409} consecutive 409 Conflicts — another process is polling this bot token and has NOT yielded after backoff. ` +
             "This is likely a foreign poller (not one of ours — ours obey the pidfile-takeover protocol) or a stuck webhook. " +
+            `Another consumer holds THIS bot token (hash=${BOT_TOKEN_HASH}, state_dir=${STATE_DIR}) — commonly multiple agents sharing one bot token. Each agent needs its OWN bot token + CCT_STATE_DIR. ` +
             "Stop the other consumer (or call deleteWebhook) and restart the bridge.";
           log("poller", fatalMsg);
           mcp
