@@ -19898,3 +19898,282 @@ def telegrammer_guard() -> None:
 def telegrammer_init() -> None:
     _exec_script("telegrammer-init")
 
+========================================================================
+Time: 2026-06-26 00:12:09
+Tool: Bash
+Cmd:  timeout 7 ls -la /home/ywatanabe/proj/claude-code-telegrammer/.worktrees/agent-a1eb7ab398642bf3c
+Desc: List worktree contents
+--- stdout ---
+total 148
+drwxr-xr-x 16 agent agent  4096 Jun 26 00:11 .
+drwxr-xr-x 10 agent agent  4096 Jun 26 00:11 ..
+drwxr-xr-x  2 agent agent  4096 Jun 26 00:11 bin
+drwxr-xr-x  6 agent agent  4096 Jun 26 00:11 .claude
+drwxr-xr-x  2 agent agent  4096 Jun 26 00:11 dist
+drwxr-xr-x  4 agent agent  4096 Jun 26 00:11 docs
+-rw-r--r--  1 agent agent  2269 Jun 26 00:11 .env.example
+-rw-r--r--  1 agent agent    92 Jun 26 00:11 .git
+drwxr-xr-x  3 agent agent  4096 Jun 26 00:11 .github
+-rw-r--r--  1 agent agent    10 Jun 26 00:11 .gitignore
+drwxr-xr-x  2 agent agent  4096 Jun 26 00:11 GITIGNORED
+drwxr-xr-x  2 agent agent  4096 Jun 26 00:11 hooks
+drwxr-xr-x  2 agent agent  4096 Jun 26 00:11 lib
+-rw-r--r--  1 agent agent 34523 Jun 26 00:11 LICENSE
+drwxr-xr-x  2 agent agent  4096 Jun 26 00:11 logs
+-rw-r--r--  1 agent agent   576 Jun 26 00:11 .mcp.json.example
+-rw-r--r--  1 agent agent  1567 Jun 26 00:11 pyproject.toml
+-rw-r--r--  1 agent agent 21324 Jun 26 00:11 README.md
+-rw-r--r--  1 agent agent   739 Jun 26 00:11 .readthedocs.yaml
+drwxr-xr-x  4 agent agent  4096 Jun 26 00:11 src
+drwxr-xr-x  2 agent agent  4096 Jun 26 00:11 tests
+drwxr-xr-x  5 agent agent  4096 Jun 26 00:11 ts
+drwxr-xr-x  4 agent agent  4096 Jun 26 00:11 .venv
+drwxr-xr-x  9 agent agent  4096 Jun 26 00:11 .worktrees
+
+========================================================================
+Time: 2026-06-26 00:12:18
+Tool: Bash
+Cmd:  timeout 7 ls -la /home/ywatanabe/proj/claude-code-telegrammer/.worktrees/agent-a1eb7ab398642bf3c/src/claude_code_telegrammer
+Desc: List package dir
+--- stdout ---
+total 20
+drwxr-xr-x 4 agent agent 4096 Jun 26 00:11 .
+drwxr-xr-x 4 agent agent 4096 Jun 26 00:11 ..
+-rwxr-xr-x 1 agent agent  228 Jun 26 00:11 __init__.py
+lrwxrwxrwx 1 agent agent    9 Jun 26 00:11 lib -> ../../lib
+drwxr-xr-x 2 agent agent 4096 Jun 26 00:11 __pycache__
+drwxr-xr-x 3 agent agent 4096 Jun 26 00:11 _skills
+
+========================================================================
+Time: 2026-06-26 00:12:30
+Tool: Bash
+Cmd:  timeout 7 ls /home/ywatanabe/proj/claude-code-telegrammer/.worktrees/agent-a1eb7ab398642bf3c/ts/
+Desc: List ts dir
+--- stdout ---
+bunfig.toml
+bun.lock
+dist
+lib
+package.json
+telegram-server.ts
+test
+
+========================================================================
+Time: 2026-06-26 00:12:54
+Tool: Bash
+Cmd:  timeout 7 ls /home/ywatanabe/proj/scitex-todo/src/scitex_todo/ 2>/dev/null; timeout 7 ls /home/ywatanabe/.scitex/ 2>/dev/null | head
+Desc: Locate scitex-todo source
+--- stdout ---
+_adapters
+_cli
+_diagram
+_django
+docs
+examples
+_git_link.py
+_groups.py
+_help_wait.py
+_hooks.py
+_index.py
+__init__.py
+_jobs_provider.py
+__main__.py
+_mcp_server.py
+_mcp_skills.py
+_migration
+_model.py
+_next.py
+_org.py
+_paths.py
+_ports.py
+_push.py
+__pycache__
+_runnable.py
+_skills
+_sphinx_html
+_store.py
+_throughput.py
+_wake_watcher.py
+agent-container
+app
+audio
+audit
+auth-heal.cron.log
+auth-heal.log
+auth-heal.py
+auth-heal-state.json
+browser
+cache
+
+========================================================================
+Time: 2026-06-26 00:13:10
+Tool: Write
+File: /home/ywatanabe/proj/claude-code-telegrammer/.worktrees/agent-a1eb7ab398642bf3c/src/claude_code_telegrammer/_cli.py
+
+========================================================================
+Time: 2026-06-26 00:13:18
+Tool: Edit
+File: /home/ywatanabe/proj/claude-code-telegrammer/.worktrees/agent-a1eb7ab398642bf3c/pyproject.toml
+Old:  [project.urls]
+New:  [project.scripts]\nclaude-code-telegrammer = "claude_code_telegrammer._cli:main"\n
+
+========================================================================
+Time: 2026-06-26 00:13:24
+Tool: Bash
+Cmd:  timeout 7 chmod +x /home/ywatanabe/proj/claude-code-telegrammer/.worktrees/agent-a1eb7ab398642bf3c/src/claude_code_telegrammer/_cli.py
+Desc: Add exec bit to _cli.py
+
+========================================================================
+Time: 2026-06-26 00:13:29
+Tool: Bash
+Cmd:  timeout 7 ls /home/ywatanabe/proj/claude-code-telegrammer/.venv/bin/python
+Desc: Check project venv python
+--- stdout ---
+/home/ywatanabe/proj/claude-code-telegrammer/.venv/bin/python
+
+========================================================================
+Time: 2026-06-26 00:13:38
+Tool: Bash
+Cmd:  timeout 120 /home/ywatanabe/proj/claude-code-telegrammer/.venv/bin/pip install -e /home/ywatanabe/proj/claude-code-telegrammer/.worktrees/agent-a1eb7ab398642bf3c
+Desc: Editable install into project venv
+
+========================================================================
+Time: 2026-06-26 00:13:50
+Tool: Bash
+Cmd:  timeout 7 ls /home/ywatanabe/proj/claude-code-telegrammer/.venv/bin/
+Desc: List venv bin
+--- stdout ---
+activate
+activate.csh
+activate.fish
+Activate.ps1
+pip
+pip3
+pip3.10
+python
+python3
+python3.10
+
+========================================================================
+Time: 2026-06-26 00:14:04
+Tool: Bash
+Cmd:  timeout 7 readlink -f /home/ywatanabe/proj/claude-code-telegrammer/.venv/bin/python; timeout 7 which python3
+Desc: Inspect broken symlink target and system python
+--- stdout ---
+/usr/bin/python
+/opt/venv-sac/bin/python3
+
+========================================================================
+Time: 2026-06-26 00:14:10
+Tool: Bash
+Cmd:  timeout 60 python3 -m venv /home/ywatanabe/proj/claude-code-telegrammer/.worktrees/agent-a1eb7ab398642bf3c/.venv-cli
+Desc: Create fresh venv in worktree
+
+========================================================================
+Time: 2026-06-26 00:14:17
+Tool: Bash
+Cmd:  timeout 7 ls /home/ywatanabe/proj/claude-code-telegrammer/.worktrees/agent-a1eb7ab398642bf3c/.venv-cli/bin/python 2>&1
+Desc: Check new venv ready
+--- stdout ---
+/home/ywatanabe/proj/claude-code-telegrammer/.worktrees/agent-a1eb7ab398642bf3c/.venv-cli/bin/python
+
+========================================================================
+Time: 2026-06-26 00:14:27
+Tool: Bash
+Cmd:  timeout 180 /home/ywatanabe/proj/claude-code-telegrammer/.worktrees/agent-a1eb7ab398642bf3c/.venv-cli/bin/python -m pip install -e /home/ywatanabe/proj/claude-code-telegrammer/.worktrees/agent-a1eb7ab
+Desc: Editable install into fresh worktree venv
+
+========================================================================
+Time: 2026-06-26 00:14:38
+Tool: Bash
+Cmd:  timeout 7 /home/ywatanabe/proj/claude-code-telegrammer/.worktrees/agent-a1eb7ab398642bf3c/.venv-cli/bin/pip --version 2>&1 | head -1
+Desc: Check pip exists in new venv
+--- stdout ---
+pip 24.0 from /home/ywatanabe/proj/claude-code-telegrammer/.worktrees/agent-a1eb7ab398642bf3c/.venv-cli/lib/python3.12/site-packages/pip (python 3.12)
+
+========================================================================
+Time: 2026-06-26 00:14:47
+Tool: Bash
+Cmd:  timeout 7 /home/ywatanabe/proj/claude-code-telegrammer/.worktrees/agent-a1eb7ab398642bf3c/.venv-cli/bin/claude-code-telegrammer --version 2>&1
+Desc: Run --version
+--- stdout ---
+0.5.0
+
+========================================================================
+Time: 2026-06-26 00:14:59
+Tool: Bash
+Cmd:  timeout 7 bash -c '/home/ywatanabe/proj/claude-code-telegrammer/.worktrees/agent-a1eb7ab398642bf3c/.venv-cli/bin/claude-code-telegrammer mcp start </dev/null' 2>&1 | head -30; echo "EXIT=${PIPESTATUS[
+Desc: Probe mcp start over stdio
+--- stdout ---
+telegram-mcp: CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN is required.
+  export CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN=123456789:AAH...
+EXIT=1
+
+========================================================================
+Time: 2026-06-26 00:15:06
+Tool: Bash
+Cmd:  timeout 7 ls /home/ywatanabe/proj/claude-code-telegrammer/.worktrees/agent-a1eb7ab398642bf3c/tests/
+Desc: List tests dir
+--- stdout ---
+test-state-detection.sh
+
+========================================================================
+Time: 2026-06-26 00:15:12
+Tool: Bash
+Cmd:  timeout 7 git -C /home/ywatanabe/proj/claude-code-telegrammer/.worktrees/agent-a1eb7ab398642bf3c status -s
+Desc: Git status
+--- stdout ---
+ M logs/claude-code.log
+ M pyproject.toml
+?? .venv-cli/
+?? src/claude_code_telegrammer/__pycache__/__init__.cpython-312.pyc
+?? src/claude_code_telegrammer/__pycache__/_cli.cpython-312.pyc
+?? src/claude_code_telegrammer/_cli.py
+
+========================================================================
+Time: 2026-06-26 00:15:17
+Tool: Bash
+Cmd:  timeout 7 git -C /home/ywatanabe/proj/claude-code-telegrammer/.worktrees/agent-a1eb7ab398642bf3c add src/claude_code_telegrammer/_cli.py pyproject.toml
+Desc: Stage cli and pyproject
+
+========================================================================
+Time: 2026-06-26 00:15:23
+Tool: Bash
+Cmd:  timeout 7 git -C /home/ywatanabe/proj/claude-code-telegrammer/.worktrees/agent-a1eb7ab398642bf3c diff --cached --stat
+Desc: Confirm staged files
+--- stdout ---
+ pyproject.toml                      |  3 ++
+ src/claude_code_telegrammer/_cli.py | 75 +++++++++++++++++++++++++++++++++++++
+ 2 files changed, 78 insertions(+)
+
+========================================================================
+Time: 2026-06-26 00:15:29
+Tool: Bash
+Cmd:  timeout 7 git -C /home/ywatanabe/proj/claude-code-telegrammer/.worktrees/agent-a1eb7ab398642bf3c branch --show-current
+Desc: Show current branch
+--- stdout ---
+claude/agent-a1eb7ab398642bf3c
+
+========================================================================
+Time: 2026-06-26 00:15:43
+Tool: Bash
+Cmd:  timeout 7 git -C /home/ywatanabe/proj/claude-code-telegrammer/.worktrees/agent-a1eb7ab398642bf3c commit -m "feat(cli): add pip-installable claude-code-telegrammer command wrapping the TS MCP server"
+Desc: Commit the change
+--- stdout ---
+No files have conflicts
+[claude/agent-a1eb7ab398642bf3c 9533998] feat(cli): add pip-installable claude-code-telegrammer command wrapping the TS MCP server
+ 2 files changed, 78 insertions(+)
+ create mode 100755 src/claude_code_telegrammer/_cli.py
+
+========================================================================
+Time: 2026-06-26 00:15:48
+Tool: Bash
+Cmd:  timeout 60 git -C /home/ywatanabe/proj/claude-code-telegrammer/.worktrees/agent-a1eb7ab398642bf3c push -u origin claude/agent-a1eb7ab398642bf3c
+Desc: Push topic branch
+
+========================================================================
+Time: 2026-06-26 00:16:11
+Tool: Bash
+Cmd:  timeout 60 gh pr create --repo ywatanabe1989/claude-code-telegrammer --base develop --head claude/agent-a1eb7ab398642bf3c --title "feat(cli): add pip-installable claude-code-telegrammer console comman
+Desc: Create PR against develop
+
