@@ -26,7 +26,7 @@ Why Not the Official Plugin?
      - claude-code-telegrammer
    * - Hardcoded paths (`#851 <https://github.com/anthropics/claude-code/issues/851>`_)
      - Config path ``~/.claude/`` only
-     - Configurable ``STATE_DIR`` env var
+     - Configurable ``AGENT_STATE_DIR`` env var
    * - 409 Conflict on multi-bot (`#1075 <https://github.com/anthropics/claude-code/issues/1075>`_)
      - No single-instance guard
      - PID-based lock file prevents duplicates
@@ -84,7 +84,7 @@ Key Features
   TUI state (permission prompts, idle), and sends keystrokes to keep the
   agent running.
 - **Configurable State Directory** -- all state (DB, lock, access config)
-  lives under ``CLAUDE_CODE_TELEGRAMMER_STATE_DIR``, not
+  lives under ``CLAUDE_CODE_TELEGRAMMER_AGENT_STATE_DIR``, not
   hardcoded paths.
 
 Quick Example
