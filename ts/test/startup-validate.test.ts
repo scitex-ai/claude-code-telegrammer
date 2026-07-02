@@ -17,6 +17,7 @@ import { describe, test, expect } from "bun:test";
 import {
   validateBotToken,
   describeAccessGating,
+  buildDisabledWarning,
   type RawTgResponse,
 } from "../lib/startup-validate.js";
 
@@ -145,5 +146,19 @@ describe("describeAccessGating", () => {
       dmPolicy: "disabled",
     });
     expect(res.level).toBe("info");
+  });
+});
+
+describe("buildDisabledWarning (tokenless = warn + disable, not fail)", () => {
+  // Empty CCT_BOT_TOKEN is an intentional "no bot yet" state for the universal
+  // channel, not a misconfig — it must produce a LOUD, actionable, VISIBLE warn
+  // (no silent fallback), naming the agent + the exact var + secrets file + fix.
+  test("is a loud [WARN] that names the agent, the var, and the fix", () => {
+    const msg = buildDisabledWarning("neurovista");
+    expect(msg).toContain("[WARN]");
+    expect(msg).toContain("neurovista");
+    expect(msg).toContain("CCT_BOT_TOKEN");
+    expect(msg).toContain("CCT_BOT_TOKEN_<NAME>");
+    expect(msg).toContain("restart");
   });
 });

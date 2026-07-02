@@ -37,6 +37,7 @@ import {
   BOT_TOKEN_HASH,
   ACCESS_FILE,
   ENV_ALLOWED,
+  AGENT_ID,
   findUnexpandedEnv,
   findRenamedEnv,
 } from "./lib/config.js";
@@ -52,6 +53,7 @@ import { tgApi, getMeRaw } from "./lib/telegram-api.js";
 import {
   validateBotToken,
   describeAccessGating,
+  buildDisabledWarning,
 } from "./lib/startup-validate.js";
 import { existsSync } from "fs";
 
@@ -115,45 +117,40 @@ if (renamed.length > 0) {
   process.exit(1);
 }
 
-// ── Validate token ──────────────────────────────────────────────────────────
-
-if (!TOKEN) {
-  process.stderr.write(
-    "telegram-mcp: CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN is required.\n" +
-      "  export CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN=123456789:AAH...\n",
-  );
-  process.exit(1);
-}
-
-// ── Validate token against Telegram (getMe) ─────────────────────────────────
+// ── Token: enabled · disabled (warn) · invalid (fail) ───────────────────────
 //
-// A PRESENT-but-invalid/revoked token passes the !TOKEN check above, then
-// silently 404s every Bot API call — the poller runs, the operator sees only
-// "✘ failed" receipts, and the real cause (a bad token) stays buried. That was
-// a real incident (a long debugging session lost to a hidden bad token). So we
-// call getMe here — BEFORE acquireLock() (don't take the single-instance lock
-// with a known-bad token) and before the poller starts — and classify:
-//   - invalid_token (401/404) → FATAL: loud, actionable stderr + exit(1). sac's
-//     boot preflight relays our stderr, so this surfaces up front.
-//   - transient (network throw / 429 / 5xx) → WARN and CONTINUE: a Telegram
-//     outage must NOT permanently kill an otherwise-valid poller.
-//   - ok → info line with the resolved @username (a useful positive signal).
-// getMeRaw() (not tgApi) is used because tgApi throws a generic Error that
-// loses the error_code, making 401-vs-transient indistinguishable.
-const tokenCheck = await validateBotToken(getMeRaw);
-if (tokenCheck.ok) {
-  log("server", "bot token validated", {
-    username: tokenCheck.username ? `@${tokenCheck.username}` : undefined,
-    bot_id: tokenCheck.id,
-  });
-} else if (tokenCheck.kind === "invalid_token") {
-  process.stderr.write(
-    `telegram-mcp: refusing to start — ${tokenCheck.message}\n`,
-  );
-  process.exit(1);
+// server:claude-code-telegrammer is a UNIVERSAL channel in every agent spec, so
+// a tokenless agent must load as connected-but-DISABLED (honest status), NOT a
+// hard "✘ failed". Distinguish:
+//   - EMPTY/absent CCT_BOT_TOKEN → telegram DISABLED. Emit a LOUD, actionable
+//     WARN (buildDisabledWarning) prominently to stderr every startup — never a
+//     silent "connected-and-fine" — then skip getMe + the poller (below). The
+//     MCP still connects, so status is honestly "connected, disabled".
+//   - PRESENT but invalid/revoked token → a real misconfig. getMe classifies
+//     401/404 as FATAL (loud stderr + exit 1; sac's boot preflight relays it)
+//     vs. transient network/429/5xx (WARN + continue; a Telegram outage must not
+//     permanently kill an otherwise-valid poller). getMeRaw() (not tgApi) is
+//     used because tgApi throws a generic Error that loses the error_code.
+// getMe runs BEFORE acquireLock() so a known-bad token never takes the lock.
+const TELEGRAM_ENABLED = TOKEN.length > 0;
+if (!TELEGRAM_ENABLED) {
+  process.stderr.write(buildDisabledWarning(AGENT_ID) + "\n");
 } else {
-  // transient — log a WARN and keep going.
-  log("server", `WARNING: ${tokenCheck.message}`);
+  const tokenCheck = await validateBotToken(getMeRaw);
+  if (tokenCheck.ok) {
+    log("server", "bot token validated", {
+      username: tokenCheck.username ? `@${tokenCheck.username}` : undefined,
+      bot_id: tokenCheck.id,
+    });
+  } else if (tokenCheck.kind === "invalid_token") {
+    process.stderr.write(
+      `telegram-mcp: refusing to start — ${tokenCheck.message}\n`,
+    );
+    process.exit(1);
+  } else {
+    // transient — log a WARN and keep going.
+    log("server", `WARNING: ${tokenCheck.message}`);
+  }
 }
 
 // ── Safety nets ─────────────────────────────────────────────────────────────
@@ -249,19 +246,32 @@ initStore();
 // CCT_ALLOWED_USERS contribute + the resolved dmPolicy) and log it up front. The
 // DEFAULT (allowlist + empty list) is fail-CLOSED: every DM rejected, bot looks
 // dead — describeAccessGating() emits a WARN naming CCT_ALLOWED_USERS + the fix.
-const gating = describeAccessGating({
-  accessFileExists: existsSync(ACCESS_FILE),
-  envAllowedCount: ENV_ALLOWED.length,
-  dmPolicy: loadAccess().dmPolicy,
-  accessFilePath: ACCESS_FILE,
-});
-log(
-  "access",
-  gating.level === "warn" ? `WARNING: ${gating.message}` : gating.message,
-);
+// Skipped when telegram is DISABLED (no bot → no DMs → the fail-closed warning
+// would be misleading noise; buildDisabledWarning already covers that state).
+if (TELEGRAM_ENABLED) {
+  const gating = describeAccessGating({
+    accessFileExists: existsSync(ACCESS_FILE),
+    envAllowedCount: ENV_ALLOWED.length,
+    dmPolicy: loadAccess().dmPolicy,
+    accessFilePath: ACCESS_FILE,
+  });
+  log(
+    "access",
+    gating.level === "warn" ? `WARNING: ${gating.message}` : gating.message,
+  );
+}
 
 await mcp.connect(new StdioServerTransport());
 log("server", "MCP server connected via stdio");
 
-// Start polling in background (don't await — MCP must keep processing)
-void startPolling(mcp);
+// Start polling in background (don't await — MCP must keep processing). When
+// telegram is DISABLED (no token) we DON'T poll — the MCP stays connected but
+// idle-disabled, matching the loud WARN emitted above (honest status, no crash).
+if (TELEGRAM_ENABLED) {
+  void startPolling(mcp);
+} else {
+  log(
+    "server",
+    "telegram disabled (CCT_BOT_TOKEN empty) — MCP connected, poller not started",
+  );
+}

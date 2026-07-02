@@ -41,13 +41,22 @@ every failure names the exact env var and the fix:
 1. **Unexpanded `${…}` placeholder** in any telegrammer env var — the launcher
    started without its `.env` sourced, so a literal `${VAR}` came through. Abort
    before touching state.
-2. **Missing bot token** (`CCT_BOT_TOKEN` unset/empty).
-3. **Invalid/revoked token** — a `getMe` call at startup classifies `401`/`404`
+2. **Invalid/revoked token** — a `getMe` call at startup classifies `401`/`404`
    as fatal (re-issue via @BotFather) vs. a transient network/`429`/`5xx` error
    (warn + continue; a Telegram outage must not permanently kill a valid poller).
-4. **Renamed env var still set** — the old `CCT_STATE_DIR` /
+3. **Renamed env var still set** — the old `CCT_STATE_DIR` /
    `CLAUDE_CODE_TELEGRAMMER_STATE_DIR` name is rejected; use
    `CCT_AGENT_STATE_DIR` (see [configuration](configuration.md)).
+
+Every failure message names the exact env var and the fix — the failed status is
+itself the hint (no generic errors).
+
+**Missing/empty token is NOT a failure.** `server:claude-code-telegrammer` is a
+universal channel in every agent spec, so an agent with no bot yet must load as
+*connected-but-disabled*, not `✘ failed`. An empty `CCT_BOT_TOKEN` emits a loud,
+actionable `[WARN]` (naming the agent + the secrets file to define
+`CCT_BOT_TOKEN_<NAME>`), then the MCP still connects but skips `getMe` and the
+poller. Honest status, no silent fallback, no crash.
 
 The `config` identity probe (`bun run ts/telegram-server.ts config [--check]`)
 resolves and prints the config as JSON without starting the server — used to
