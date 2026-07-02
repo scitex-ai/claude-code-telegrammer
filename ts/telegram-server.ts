@@ -49,6 +49,7 @@ import { initStore } from "./lib/store.js";
 import { loadAccess } from "./lib/access.js";
 import { releaseAuthoritative } from "./lib/takeover.js";
 import { resolveConfigProbe, wantsGetMe } from "./lib/config-probe.js";
+import { runHealth, serializeHealthReport } from "./lib/health-adapters.js";
 import { tgApi, getMeRaw } from "./lib/telegram-api.js";
 import {
   validateBotToken,
@@ -56,6 +57,25 @@ import {
   buildDisabledWarning,
 } from "./lib/startup-validate.js";
 import { existsSync } from "fs";
+
+// ── Health probe ("doctor") — no server, no poller ──────────────────────────
+//
+// `bun run ts/telegram-server.ts health` runs the standard health-checker
+// (card cct-health-doctor-mcp-tool-20260702) and prints the shared-contract
+// JSON report ({package, ok, checks[], summary}) to STDOUT, then exits 0 —
+// WITHOUT constructing the MCP stdio transport or starting the poller. Placed
+// BEFORE every fail-loud startup guard below (unexpanded env, renamed env,
+// token validation): the doctor's whole point is to diagnose an UNHEALTHY
+// install, so it must not die on the very conditions it reports — those
+// conditions are its env_unexpanded / env_renamed / bot_token_valid findings.
+// The exit code reflects PROBE success, NOT health: a false `ok` is a finding,
+// not a crash (same contract as the `config` probe). The raw token is never
+// printed (serializeHealthReport redacts it defensively).
+if (process.argv.slice(2).includes("health")) {
+  const report = await runHealth({ poller: "external" });
+  process.stdout.write(serializeHealthReport(report) + "\n");
+  process.exit(0);
+}
 
 // ── Fail loud on unexpanded env ─────────────────────────────────────────────
 //

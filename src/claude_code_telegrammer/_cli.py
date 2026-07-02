@@ -13,6 +13,10 @@ Subcommands::
     claude-code-telegrammer mcp [start]   Start the MCP server + poller (default).
     claude-code-telegrammer config [...]   Print the resolved config as JSON and
                                            exit, WITHOUT starting the server.
+    claude-code-telegrammer health         Run the health check (doctor) and
+                                           print the JSON report, WITHOUT
+                                           starting the server. Exit code
+                                           reflects probe success, not health.
     claude-code-telegrammer --version      Print the package version and exit.
 
 The ``config`` subcommand exists so scitex-agent-container (sac) can preflight a
@@ -46,6 +50,10 @@ _USAGE = (
     "  config [--check]  print the resolved config as JSON and exit, WITHOUT\n"
     "                    starting the server. --check adds a single getMe call\n"
     "                    (bot_username/bot_id). The raw token is never printed.\n"
+    "  health            run the health check (doctor) and print the JSON report\n"
+    "                    {package, ok, checks[], summary}, WITHOUT starting the\n"
+    "                    server. Exits 0 even when unhealthy — a false `ok` is a\n"
+    "                    finding, not a crash. The raw token is never printed.\n"
     "  --version         print the package version and exit\n"
 )
 
@@ -109,6 +117,12 @@ def main(argv: "list[str] | None" = None) -> int:
         # Forward to the TS `config` mode, passing through any extra flags
         # (e.g. --check) so `claude-code-telegrammer config --check` works.
         return _exec_server("config", *args[1:])
+
+    if args[0] == "health":
+        # Forward to the TS `health` mode (the doctor). Like `config`, it
+        # resolves without starting the server/poller and exits 0 regardless
+        # of the health verdict — the JSON `ok` field is the finding.
+        return _exec_server("health", *args[1:])
 
     sys.stderr.write(f"claude-code-telegrammer: unknown command {args[0]!r}\n\n")
     sys.stderr.write(_USAGE)
