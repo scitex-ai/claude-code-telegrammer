@@ -8,7 +8,13 @@ import { join } from "path";
 import { STATE_DIR } from "./config.js";
 import { log } from "./log.js";
 
-const DB_PATH = join(STATE_DIR, "messages.db");
+export const DB_PATH = join(STATE_DIR, "messages.db");
+
+// The schema version this code WRITES into meta.schema_version on init.
+// Exported as the single source of truth so the health check
+// (lib/health-checks.ts::checkDbSchemaCurrent) compares against the same
+// constant instead of a drifting copy.
+export const SCHEMA_VERSION = "2";
 
 let db: Database | null = null;
 
@@ -122,8 +128,8 @@ export function initStore(): void {
 
   // Seed meta with schema version
   db.prepare(
-    "INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', '2')",
-  ).run();
+    "INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?)",
+  ).run(SCHEMA_VERSION);
 
   // ── Migration: forward_json column (added 2026-06) ──────────────────
   // CREATE TABLE IF NOT EXISTS does NOT alter existing tables, so older
@@ -196,7 +202,7 @@ export function initStore(): void {
     SELECT * FROM messages WHERE chat_id = ? ORDER BY id DESC LIMIT ?
   `);
 
-  log("store", `initialized at ${DB_PATH} (schema v2)`);
+  log("store", `initialized at ${DB_PATH} (schema v${SCHEMA_VERSION})`);
 }
 
 // ── Inbound ────────────────────────────────────────────────────────────────

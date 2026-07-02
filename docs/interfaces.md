@@ -8,7 +8,7 @@ Start command:
 bun run ts/telegram-server.ts
 ```
 
-Exposes 10 tools over the MCP stdio protocol. The server's MCP instructions embed
+Exposes 11 tools over the MCP stdio protocol. The server's MCP instructions embed
 a **responsiveness policy**: acknowledge inbound messages immediately and
 delegate heavy work to background subagents, so the relay never blocks.
 
@@ -24,6 +24,7 @@ delegate heavy work to background subagents, so the relay never blocks.
 | `send_document` | Upload a local file to a Telegram chat. |
 | `search_messages` | Text search across stored messages. |
 | `get_context` | Recent conversation formatted as compact text for LLM context. |
+| `health` | Run the health check (doctor) inside the server process; returns the JSON report below. |
 
 Inbound messages arrive as `<channel source="claude-code-telegrammer" …>`
 notifications carrying `chat_id` / `message_id` / `row_id` / `user` — pass
@@ -45,3 +46,33 @@ state_dir, channel_source, turn_url) **without** starting the server or poller.
 `--check` adds a single `getMe` to confirm the token → `@username` mapping. Used
 to preflight per-agent bot identity and detect two agents resolving to the same
 bot. The raw token is never printed.
+
+## health (doctor)
+
+```bash
+bun run ts/telegram-server.ts health          # CLI (or: claude-code-telegrammer health)
+```
+
+Runs the standard health-checker — also exposed as the `health` MCP tool — and
+prints a JSON report **without** starting the server or poller. Ten named
+checks cover env hygiene (`env_unexpanded`, `env_renamed`, `env_legacy`), the
+bot token (`bot_token_present`, `bot_token_valid` via getMe), delivery
+(`webhook_absent` — a set webhook starves getUpdates polling), the poller
+(`poller_alive` via kill-0 on the recorded PID; the MCP-tool variant reports
+its own process), access gating (`allowlist_nonempty`), and local state
+(`state_dir_writable`, `db_schema_current` incl. a poisoned-`update_offset`
+detector). Every failing check carries an actionable `hint`; a tokenless agent
+is reported as disabled-by-design (warn), not unhealthy. The exit code reflects
+probe success, not health — a false `ok` is a finding, not a crash. The raw
+token is never printed.
+
+```json
+{
+  "package": "claude-code-telegrammer",
+  "ok": true,
+  "checks": [
+    { "name": "env_unexpanded", "ok": true, "detail": "...", "hint": null }
+  ],
+  "summary": "10/10 checks ok"
+}
+```

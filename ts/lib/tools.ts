@@ -26,6 +26,7 @@ import {
 import { HOST_NAME, PROJECT, AGENT_ID, BOT_TOKEN_HASH } from "./config.js";
 import { log } from "./log.js";
 import { downloadNow } from "./attachments.js";
+import { runHealth, serializeHealthReport } from "./health-adapters.js";
 
 export function registerTools(mcp: Server): void {
   mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -210,6 +211,18 @@ export function registerTools(mcp: Server): void {
             },
           },
           required: ["query"],
+        },
+      },
+      {
+        name: "health",
+        description:
+          "Run the claude-code-telegrammer health check (doctor). Returns a JSON report " +
+          "{package, ok, checks[], summary} — env hygiene, bot token presence/validity, " +
+          "webhook absence, poller liveness, allowlist, state dir, and DB schema/offset. " +
+          "Every failing check carries an actionable hint. Takes no parameters.",
+        inputSchema: {
+          type: "object" as const,
+          properties: {},
         },
       },
       {
@@ -403,6 +416,17 @@ export function registerTools(mcp: Server): void {
           const rows = searchMessages(query, chatId, limit);
           return {
             content: [{ type: "text", text: JSON.stringify(rows, null, 2) }],
+          };
+        }
+        case "health": {
+          // MCP-tool variant: this server process IS the poller, so the
+          // poller_alive check reports our own pid ("self") instead of the
+          // lockfile/pidfile round-trip the CLI probe does. The serialized
+          // report has the raw token redacted (belt-and-braces — the checks
+          // never include it in the first place).
+          const report = await runHealth({ poller: "self" });
+          return {
+            content: [{ type: "text", text: serializeHealthReport(report) }],
           };
         }
         case "get_context": {

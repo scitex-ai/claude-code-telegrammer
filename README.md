@@ -148,12 +148,17 @@ var). Deep dive: [docs/architecture.md](docs/architecture.md).
 
 ## Interfaces
 
-- **MCP server** — 10 tools over stdio (`reply`, `react`, `edit_message`,
+- **MCP server** — 11 tools over stdio (`reply`, `react`, `edit_message`,
   `get_history`, `get_unread`, `mark_read`, `download_attachment`,
-  `send_document`, `search_messages`, `get_context`) with a built-in
+  `send_document`, `search_messages`, `get_context`, `health`) with a built-in
   responsiveness policy. See [docs/interfaces.md](docs/interfaces.md).
 - **config probe** — `bun run ts/telegram-server.ts config [--check]` prints the
   resolved config as JSON for orchestrator preflight.
+- **health (doctor)** — `bun run ts/telegram-server.ts health` (also exposed as
+  the `health` MCP tool) runs 10 checks — env hygiene, token presence/validity,
+  webhook absence, poller liveness, allowlist, state dir, DB schema/offset — and
+  prints `{package, ok, checks[], summary}`; every failing check carries an
+  actionable hint. See [docs/interfaces.md](docs/interfaces.md).
 - **Skill** — bundled at `src/claude_code_telegrammer/_skills/claude-code-telegrammer/SKILL.md`.
 
 <!-- SciTeX Convention: Ecosystem -->
