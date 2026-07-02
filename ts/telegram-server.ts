@@ -33,6 +33,8 @@ import {
   TOKEN,
   STATE_DIR,
   BOT_TOKEN_HASH,
+  ACCESS_FILE,
+  ENV_ALLOWED,
   findUnexpandedEnv,
 } from "./lib/config.js";
 import { log } from "./lib/log.js";
@@ -40,9 +42,15 @@ import { acquireLock, releaseLock } from "./lib/lock.js";
 import { registerTools } from "./lib/tools.js";
 import { startPolling, stopPolling } from "./lib/poller.js";
 import { initStore } from "./lib/store.js";
+import { loadAccess } from "./lib/access.js";
 import { releaseAuthoritative } from "./lib/takeover.js";
 import { resolveConfigProbe, wantsGetMe } from "./lib/config-probe.js";
-import { tgApi } from "./lib/telegram-api.js";
+import { tgApi, getMeRaw } from "./lib/telegram-api.js";
+import {
+  validateBotToken,
+  describeAccessGating,
+} from "./lib/startup-validate.js";
+import { existsSync } from "fs";
 
 // ── Fail loud on unexpanded env ─────────────────────────────────────────────
 //
@@ -92,6 +100,37 @@ if (!TOKEN) {
       "  export CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN=123456789:AAH...\n",
   );
   process.exit(1);
+}
+
+// ── Validate token against Telegram (getMe) ─────────────────────────────────
+//
+// A PRESENT-but-invalid/revoked token passes the !TOKEN check above, then
+// silently 404s every Bot API call — the poller runs, the operator sees only
+// "✘ failed" receipts, and the real cause (a bad token) stays buried. That was
+// a real incident (a long debugging session lost to a hidden bad token). So we
+// call getMe here — BEFORE acquireLock() (don't take the single-instance lock
+// with a known-bad token) and before the poller starts — and classify:
+//   - invalid_token (401/404) → FATAL: loud, actionable stderr + exit(1). sac's
+//     boot preflight relays our stderr, so this surfaces up front.
+//   - transient (network throw / 429 / 5xx) → WARN and CONTINUE: a Telegram
+//     outage must NOT permanently kill an otherwise-valid poller.
+//   - ok → info line with the resolved @username (a useful positive signal).
+// getMeRaw() (not tgApi) is used because tgApi throws a generic Error that
+// loses the error_code, making 401-vs-transient indistinguishable.
+const tokenCheck = await validateBotToken(getMeRaw);
+if (tokenCheck.ok) {
+  log("server", "bot token validated", {
+    username: tokenCheck.username ? `@${tokenCheck.username}` : undefined,
+    bot_id: tokenCheck.id,
+  });
+} else if (tokenCheck.kind === "invalid_token") {
+  process.stderr.write(
+    `telegram-mcp: refusing to start — ${tokenCheck.message}\n`,
+  );
+  process.exit(1);
+} else {
+  // transient — log a WARN and keep going.
+  log("server", `WARNING: ${tokenCheck.message}`);
 }
 
 // ── Safety nets ─────────────────────────────────────────────────────────────
@@ -177,6 +216,27 @@ process.on("SIGINT", shutdown);
 
 acquireLock();
 initStore();
+
+// ── Access-gating posture (loud at STARTUP) ─────────────────────────────────
+//
+// The gating warning previously fired only LAZILY, on the first message-time
+// loadAccess() ENOENT branch — so a fail-CLOSED bot looked silently dead until
+// (and unless) someone messaged it. Evaluate the effective posture NOW from the
+// same inputs loadAccess() uses (does access.json exist + how many entries did
+// CCT_ALLOWED_USERS contribute + the resolved dmPolicy) and log it up front. The
+// DEFAULT (allowlist + empty list) is fail-CLOSED: every DM rejected, bot looks
+// dead — describeAccessGating() emits a WARN naming CCT_ALLOWED_USERS + the fix.
+const gating = describeAccessGating({
+  accessFileExists: existsSync(ACCESS_FILE),
+  envAllowedCount: ENV_ALLOWED.length,
+  dmPolicy: loadAccess().dmPolicy,
+  accessFilePath: ACCESS_FILE,
+});
+log(
+  "access",
+  gating.level === "warn" ? `WARNING: ${gating.message}` : gating.message,
+);
+
 await mcp.connect(new StdioServerTransport());
 log("server", "MCP server connected via stdio");
 

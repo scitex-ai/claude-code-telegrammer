@@ -25,6 +25,31 @@ export async function tgApi(
   return json.result;
 }
 
+/**
+ * Raw getMe that returns the PARSED Telegram JSON ({ok, result?, error_code?,
+ * description?}) instead of tgApi()'s unwrapped `result`. tgApi() throws a
+ * generic Error on ok:false that LOSES the error_code, so a caller cannot tell
+ * an invalid-token 401/404 from a transient 429/5xx. Startup token validation
+ * (lib/startup-validate.ts) needs that distinction, so this variant does NOT
+ * throw on ok:false — it hands back the full envelope. It still REJECTS on a
+ * transport-level fetch failure (DNS/connect/reset), which validateBotToken()
+ * classifies as transient.
+ */
+export async function getMeRaw(): Promise<{
+  ok: boolean;
+  result?: { id?: number; username?: string; [k: string]: unknown };
+  error_code?: number;
+  description?: string;
+}> {
+  const res = await fetch(`${API_BASE}/getMe`, { method: "POST" });
+  return (await res.json()) as {
+    ok: boolean;
+    result?: { id?: number; username?: string; [k: string]: unknown };
+    error_code?: number;
+    description?: string;
+  };
+}
+
 export function splitText(text: string, limit: number = MAX_TEXT): string[] {
   if (text.length <= limit) return [text];
   const out: string[] = [];
@@ -164,4 +189,3 @@ export async function editMessageText(
     text: signed,
   });
 }
-
