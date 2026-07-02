@@ -5,7 +5,7 @@
  * sets them before any imports, we test the values that preload established.
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { tmpdir, hostname, homedir } from "os";
 import { join } from "path";
 import {
@@ -26,6 +26,7 @@ import {
   READ_RECEIPTS_ENABLED,
   RECEIPT_DELIVERED_EMOJI,
   RECEIPT_READ_EMOJI,
+  findUnexpandedEnv,
 } from "../lib/config.js";
 
 describe("config", () => {
@@ -131,6 +132,42 @@ describe("resolveStateDir", () => {
   });
 
   test("sanitizes path separators out of an exotic AGENT_ID", () => {
-    expect(resolveStateDir({ CCT_AGENT_ID: "../evil" })).toBe(`${base}-..-evil`);
+    expect(resolveStateDir({ CCT_AGENT_ID: "../evil" })).toBe(
+      `${base}-..-evil`,
+    );
+  });
+});
+
+describe("findUnexpandedEnv (neurovista unexpanded-${} regression)", () => {
+  // Locks in the guard that caught the real neurovista outage: a materialized
+  // .mcp.json carried `"CCT_STATE_DIR": "${CCT_STATE_DIR}"` for a var defined
+  // nowhere, so Claude passed the LITERAL "${CCT_STATE_DIR}" through. The guard
+  // must flag ANY telegrammer-prefixed var whose value still contains "${" and
+  // name that exact var, so the startup abort is actionable (define it / drop
+  // the placeholder). findUnexpandedEnv reads process.env live, so we mutate +
+  // restore CCT_STATE_DIR around each case (preload.ts leaves a hermetic env).
+  const KEY = "CCT_STATE_DIR";
+  let saved: string | undefined;
+  beforeEach(() => {
+    saved = process.env[KEY];
+  });
+  afterEach(() => {
+    if (saved === undefined) delete process.env[KEY];
+    else process.env[KEY] = saved;
+  });
+
+  test("flags a var still holding a literal ${...}, as NAME=value naming the exact var", () => {
+    process.env[KEY] = "${CCT_STATE_DIR}";
+    const offenders = findUnexpandedEnv();
+    const entry = offenders.find((line) => line.startsWith(`${KEY}=`));
+    expect(entry).toBeDefined();
+    // NAME=value form so the abort can name the exact var + its bad value.
+    expect(entry).toContain("${");
+  });
+
+  test("does NOT flag a fully-expanded (clean) value", () => {
+    process.env[KEY] = `${homedir()}/.claude-code-telegrammer-neurovista`;
+    const offenders = findUnexpandedEnv();
+    expect(offenders.some((line) => line.startsWith(`${KEY}=`))).toBe(false);
   });
 });
