@@ -61,6 +61,24 @@ const ALLOWED_USERS_VAR = "CCT_ALLOWED_USERS";
 const ALLOWED_USERS_VAR_CANONICAL = "CLAUDE_CODE_TELEGRAMMER_ALLOWED_USERS";
 
 /**
+ * Loud, actionable startup WARNING for the DISABLED state: CCT_BOT_TOKEN is
+ * empty/absent, so telegram is off for this agent. The channel is a universal
+ * default in every agent spec, so a tokenless agent loads connected-but-DISABLED
+ * (honest status, not a hard "✘ failed") — and this WARN, emitted prominently on
+ * every startup (never deduped), keeps the state VISIBLE so it is never a silent
+ * "connected-and-fine". A PRESENT-but-invalid token is a real misconfiguration
+ * and still fails loud (see validateBotToken).
+ */
+export function buildDisabledWarning(agentId: string): string {
+  return (
+    `[WARN] claude-code-telegrammer disabled for agent "${agentId}": ` +
+    `${BOT_TOKEN_VAR} empty — define ${BOT_TOKEN_VAR}_<NAME> in secrets ` +
+    `(~/.bash.d/secrets/010_scitex/01_claude-code-telegrammer.src; papers ` +
+    `PAPER_<NAME>, else bare <NAME>) and restart.`
+  );
+}
+
+/**
  * Classify the result of a getMe call against Telegram.
  *
  * `rawGetMe` is injected (the caller binds it to a real fetch-based getMe, or a
