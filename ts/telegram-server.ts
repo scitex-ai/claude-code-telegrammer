@@ -18,8 +18,10 @@
  *     of both 409-looping forever.
  *
  * Env vars:
- *   CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN     - required
- *   CLAUDE_CODE_TELEGRAMMER_STATE_DIR     - default: ~/.claude-code-telegrammer
+ *   CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN       - required
+ *   CLAUDE_CODE_TELEGRAMMER_AGENT_STATE_DIR - default: ~/.claude-code-telegrammer
+ *                                             (per-agent override; the old
+ *                                             …_STATE_DIR name is rejected loud)
  *   CLAUDE_CODE_TELEGRAMMER_ALLOWED_USERS - comma-separated user IDs (optional)
  *   CLAUDE_CODE_TELEGRAMMER_HOST_NAME     - default: os.hostname()
  *   CLAUDE_CODE_TELEGRAMMER_PROJECT       - default: process.cwd()
@@ -36,6 +38,7 @@ import {
   ACCESS_FILE,
   ENV_ALLOWED,
   findUnexpandedEnv,
+  findRenamedEnv,
 } from "./lib/config.js";
 import { log } from "./lib/log.js";
 import { acquireLock, releaseLock } from "./lib/lock.js";
@@ -90,6 +93,26 @@ if (process.argv.slice(2).includes("config")) {
   );
   process.stdout.write(JSON.stringify(probe, null, 2) + "\n");
   process.exit(0);
+}
+
+// ── Fail loud on renamed env vars ───────────────────────────────────────────
+//
+// The state-dir override was renamed to say PER-AGENT (CCT_AGENT_STATE_DIR /
+// CLAUDE_CODE_TELEGRAMMER_AGENT_STATE_DIR). A launcher/.envrc still setting the
+// OLD name (CCT_STATE_DIR or CLAUDE_CODE_TELEGRAMMER_STATE_DIR, or the legacy
+// …_TELEGRAM_STATE_DIR) must NOT be silently ignored — that would quietly
+// resolve to a different dir than the operator intended. Abort loud + actionable
+// instead. Placed AFTER the `config` probe branch so the probe still resolves
+// exit-0 (sac's preflight window while it cleans up lingering old vars), and
+// before acquireLock() so a stale override never takes the single-instance lock.
+const renamed = findRenamedEnv();
+if (renamed.length > 0) {
+  process.stderr.write(
+    "telegram-mcp: refusing to start — renamed env var(s) still set:\n" +
+      renamed.map((line) => `    ${line}\n`).join("") +
+      "  Update your .envrc / .mcp.json to the new AGENT_STATE_DIR name.\n",
+  );
+  process.exit(1);
 }
 
 // ── Validate token ──────────────────────────────────────────────────────────

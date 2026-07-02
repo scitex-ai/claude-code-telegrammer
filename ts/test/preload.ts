@@ -19,7 +19,7 @@ for (const name of Object.keys(process.env)) {
   }
 }
 
-process.env.CLAUDE_CODE_TELEGRAMMER_STATE_DIR = TEST_DIR;
+process.env.CLAUDE_CODE_TELEGRAMMER_AGENT_STATE_DIR = TEST_DIR;
 process.env.CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN = "fake:token";
 process.env.CLAUDE_CODE_TELEGRAMMER_ALLOWED_USERS = "";
 process.env.CLAUDE_CODE_TELEGRAMMER_TURN_URL = "http://fake.localhost/v1/turn";

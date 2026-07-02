@@ -17,15 +17,20 @@ function sanitizeAgentSegment(id: string): string {
  * Resolve the telegrammer state directory.
  *
  * Precedence:
- *   1. An explicit STATE_DIR env (CCT_STATE_DIR / CLAUDE_CODE_TELEGRAMMER_STATE_DIR)
- *      is honoured verbatim.
+ *   1. An explicit AGENT_STATE_DIR env (CCT_AGENT_STATE_DIR /
+ *      CLAUDE_CODE_TELEGRAMMER_AGENT_STATE_DIR) is honoured verbatim. The name
+ *      encodes that this state is PER-AGENT (its own bot/token → its own
+ *      message/receipt state), not shared. The old ambiguous CCT_STATE_DIR /
+ *      CLAUDE_CODE_TELEGRAMMER_STATE_DIR spellings were renamed and are now
+ *      rejected fail-loud (findRenamedEnv) so a stale override is never silently
+ *      ignored.
  *   2. Otherwise, when an AGENT_ID is set (and not the generic default
  *      "telegram"), derive a PER-AGENT directory `~/.claude-code-telegrammer-<id>`.
  *      Multiple agents sharing one host home would otherwise collide on the
  *      poller pidfile / messages.db, and the newest-wins takeover (lib/takeover.ts)
  *      would let only ONE agent hold the channel. Deriving the per-agent dir HERE
- *      — instead of having each launcher inject an explicit STATE_DIR — keeps
- *      state-dir ownership inside the bridge, decoupled from the launcher
+ *      — instead of having each launcher inject an explicit AGENT_STATE_DIR —
+ *      keeps state-dir ownership inside the bridge, decoupled from the launcher
  *      (scitex-agent-container / dotfiles) templating.
  *   3. The lead's single interactive bridge leaves AGENT_ID unset (or "telegram")
  *      and keeps the shared `~/.claude-code-telegrammer`.
@@ -33,7 +38,7 @@ function sanitizeAgentSegment(id: string): string {
 export function resolveStateDir(
   env: Record<string, string | undefined> = process.env,
 ): string {
-  const explicit = getenv("STATE_DIR", undefined, env);
+  const explicit = getenv("AGENT_STATE_DIR", undefined, env);
   if (explicit) return explicit;
   const base = join(homedir(), ".claude-code-telegrammer");
   const agentId = getenv("AGENT_ID", undefined, env);
@@ -91,6 +96,48 @@ export function findUnexpandedEnv(): string[] {
         value.includes("${"),
     )
     .map(([name, value]) => `${name}=${value}`);
+}
+
+// ── Renamed-env guard ───────────────────────────────────────────────────────
+//
+// Env vars that were RENAMED (operator decision 2026-07-02): the state-dir
+// override now says PER-AGENT in its name. Old spellings are NOT silently
+// honoured OR ignored — startup fails LOUD (telegram-server.ts) so a stale
+// override in a launcher/.envrc surfaces immediately instead of quietly
+// resolving to a different dir than the operator intended. Both current
+// spellings AND the deprecated legacy alias of the OLD name are rejected;
+// their replacement is the single new AGENT_STATE_DIR spelling family.
+//
+// An EMPTY value ("") counts as ABSENT (same rule as env.ts getenv): a folded
+// but unresolved `export CCT_STATE_DIR="$CCT_STATE_DIR"` self-reference must not
+// trip the guard.
+const RENAMED_ENV: ReadonlyArray<{ old: string; replacement: string }> = [
+  { old: "CCT_STATE_DIR", replacement: "CCT_AGENT_STATE_DIR" },
+  {
+    old: "CLAUDE_CODE_TELEGRAMMER_STATE_DIR",
+    replacement: "CLAUDE_CODE_TELEGRAMMER_AGENT_STATE_DIR",
+  },
+  {
+    old: "CLAUDE_CODE_TELEGRAMMER_TELEGRAM_STATE_DIR",
+    replacement: "CLAUDE_CODE_TELEGRAMMER_AGENT_STATE_DIR",
+  },
+];
+
+/**
+ * Detect any RENAMED env var that is still set (non-empty). Returns an
+ * actionable "OLD was renamed to NEW; unset the old var" line per offender
+ * (empty array when clean) — the caller prints them and exits.
+ */
+export function findRenamedEnv(
+  env: Record<string, string | undefined> = process.env,
+): string[] {
+  return RENAMED_ENV.filter(({ old }) => {
+    const v = env[old];
+    return typeof v === "string" && v !== "";
+  }).map(
+    ({ old, replacement }) =>
+      `${old} was renamed to ${replacement}; unset the old var (its value is ignored).`,
+  );
 }
 
 // ── Read receipts ──────────────────────────────────────────────────────────
