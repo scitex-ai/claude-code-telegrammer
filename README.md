@@ -29,6 +29,11 @@
 
 ---
 
+**What it is:** a self-contained Telegram bridge for Claude Code — a Bun MCP
+server that turns any Claude Code session into an autonomous agent you talk to
+over Telegram, plus a TUI watchdog that keeps it running unattended. Each agent
+runs its own bot, its own message store, and fails loud on misconfiguration.
+
 ## Problem and Solution
 
 <table>
@@ -79,295 +84,96 @@
 </tr>
 </table>
 
-<p align="center"><sub><b>Table 1.</b> Eight issues with the official Telegram plugin (as of April 2026) and how claude-code-telegrammer addresses each. These problems make the official plugin unusable for production autonomous agents.</sub></p>
+<p align="center"><sub><b>Table 1.</b> Eight issues with the official Telegram plugin (as of April 2026) and how claude-code-telegrammer addresses each.</sub></p>
 
-### Architecture
+## Quickstart
 
-1. **Custom Telegram MCP Server** (`ts/`) -- Self-contained Bun + MCP server. 10 tools, SQLite persistence, allowlist access control, attachment handling, reaction support. Incoming messages acknowledged with 📩. Built-in responsiveness policy directs the agent to reply immediately and delegate heavy work to background subagents.
-
-2. **TUI Watchdog** (`lib/`) -- Polls a GNU Screen session, detects Claude Code's TUI state via pattern matching, and sends keystrokes to keep the agent running unattended (auto-accepts permission prompts, re-engages on idle). Throttled with burst limits to prevent runaway responses. Orchestration handled by [scitex-agent-container](https://github.com/ywatanabe1989/scitex-agent-container).
-
-<details>
-<summary><strong>MCP Tools (10)</strong></summary>
-
-| Tool | Description |
-|------|-------------|
-| `reply` | Reply on Telegram. Supports threading (`reply_to`), auto-marks inbound as read. Inbound reply-to-message references are tracked and forwarded. |
-| `react` | Add an emoji reaction to a message. Inbound reactions (`message_reaction`) are also delivered as channel notifications. |
-| `edit_message` | Edit a previously sent bot message. |
-| `get_history` | Retrieve message history for a chat from local SQLite. |
-| `get_unread` | List unread inbound messages, optionally filtered by `chat_id`. |
-| `mark_read` | Mark messages as read by `chat_id` or `message_ids`. |
-| `download_attachment` | Download a Telegram file by `file_id`, returns local path. |
-| `send_document` | Upload a local file to a Telegram chat. |
-| `search_messages` | Text search across stored messages. |
-| `get_context` | Recent conversation formatted as compact text for LLM context. |
-
-</details>
-
-### Important: Bot Token Exclusivity
-
-This MCP server **must be the sole consumer** of its configured Telegram bot token. The Telegram Bot API allows only one `getUpdates` long-polling connection per token.
-
-**What happens with duplicate consumers:**
-
-| Scenario | Symptom | Detection |
-|----------|---------|-----------|
-| Two pollers start simultaneously | One gets 409, the other wins silently | The loser sees `409 Conflict` in logs |
-| Two pollers start sequentially | Both appear to work, but only one receives messages | **No error** — the other poller gets empty responses forever |
-| Webhook active + poller | Poller gets nothing | **No error** — Telegram ignores `getUpdates` when webhook is set |
-
-**Why 409 detection alone is insufficient:** The Telegram API does not reliably return 409 for all conflict cases. When two consumers poll sequentially (not overlapping), both connections succeed — one simply receives all messages while the other gets none, with no error. The server performs a `timeout=3` preflight check at startup to catch overlapping polls, but this cannot detect the sequential case.
-
-**If messages aren't arriving:**
-1. Check if another process is polling the same token: `ps aux | grep telegram-server`
-2. Check if a webhook is set: `curl https://api.telegram.org/bot<TOKEN>/getWebhookInfo`
-3. Use a separate bot token per component (recommended)
-4. Or disable the other consumer
-
-**Alternative: Webhook mode via scitex-orochi.** If you run [scitex-orochi](https://github.com/ywatanabe1989/scitex-orochi), it supports Telegram webhook mode (`POST /webhook/telegram/`) which eliminates polling conflicts entirely. Telegram pushes updates to a single HTTPS endpoint instead of competing pollers. See `SCITEX_OROCHI_TELEGRAM_WEBHOOK_URL` in the orochi documentation.
-
-## Installation
-
-### Prerequisites
-
-- [Bun](https://bun.sh/) >= 1.0 (for the MCP server)
-- GNU Screen (for watchdog, optional)
-
-### Install
+**Prerequisites:** [Bun](https://bun.sh/) ≥ 1.0 (MCP server); GNU Screen (watchdog, optional).
 
 ```bash
 git clone https://github.com/ywatanabe1989/claude-code-telegrammer.git
 cd claude-code-telegrammer/ts && bun install
 ```
 
-## Quickstart
+**1. Get a bot token** — message [@BotFather](https://t.me/BotFather), send
+`/newbot`, and copy the token (`123456789:AAH...`). Open your bot and send it any
+message. Verify: `curl -s "https://api.telegram.org/bot<TOKEN>/getMe"`.
 
-### Get a Telegram Bot Token
+**2. Register the MCP server** with Claude Code — copy `.mcp.json.example` to
+`.mcp.json` (gitignored) and set `CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN` +
+`CLAUDE_CODE_TELEGRAMMER_ALLOWED_USERS` (your Telegram user id, from
+[@userinfobot](https://t.me/userinfobot)). Full env reference:
+[docs/configuration.md](docs/configuration.md).
 
-1. Open Telegram and message [@BotFather](https://t.me/BotFather)
-2. Send `/newbot`, then enter a name (e.g., `Claude Code Telegrammer`) and a username (e.g., `ClaudeCodeTelegrammerBot`)
-3. BotFather replies with your token: `123456789:AAH...`
-4. Verify your token works:
-   ```bash
-   curl -s "https://api.telegram.org/bot<YOUR_TOKEN>/getMe"
-   # Should return {"ok":true,"result":{"is_bot":true,...}}
-   ```
-5. Open your bot (e.g., [t.me/ClaudeCodeTelegrammerBot](https://t.me/ClaudeCodeTelegrammerBot)) and send any message to start a conversation
-
-### Register MCP Server with Claude Code
-
-Copy the example and fill in your values (`.mcp.json` is gitignored):
-
-```json
-{
-  "mcpServers": {
-    "claude-code-telegrammer": {
-      "type": "stdio",
-      "command": "bun",
-      "args": ["run", "/path/to/claude-code-telegrammer/ts/telegram-server.ts"],
-      "env": {
-        "CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN": "123456789:AAH...",
-        "CLAUDE_CODE_TELEGRAMMER_ALLOWED_USERS": "YOUR_TELEGRAM_USER_ID",
-        "CLAUDE_CODE_TELEGRAMMER_AGENT_STATE_DIR": "~/.claude-code-telegrammer"
-      }
-    }
-  }
-}
-```
+**3. Run:**
 
 ```bash
-cp .mcp.json.example .mcp.json
-# Edit .mcp.json with your token, user ID, and paths
+claude --dangerously-skip-permissions \
+       --dangerously-load-development-channels server:claude-code-telegrammer
 ```
 
-Find your Telegram user ID by messaging [@userinfobot](https://t.me/userinfobot).
-
-### Run
-
-```bash
-claude \
-    --dangerously-skip-permissions \
-    --dangerously-load-development-channels server:claude-code-telegrammer
-```
-
-You should see `Listening for channel messages from: server:claude-code-telegrammer` in the Claude Code TUI. Send a message from Telegram to your bot — Claude Code will receive it as a channel notification.
-
-## Interfaces
-
-<details>
-<summary><strong>MCP Server -- for AI Agents</strong></summary>
-
-Start command:
-```bash
-bun run ts/telegram-server.ts
-```
-
-10 tools exposed via MCP stdio protocol. See [MCP Tools](#solution) above. The server's MCP instructions include a responsiveness policy that directs the agent to acknowledge messages immediately and delegate heavy work to background subagents.
-
-</details>
-
-<details>
-<summary><strong>Skills -- for AI Agent Discovery</strong></summary>
-
-Skills are bundled at `src/claude_code_telegrammer/_skills/claude-code-telegrammer/SKILL.md`.
-
-</details>
+You should see `Listening for channel messages from: server:claude-code-telegrammer`.
+Message your bot from Telegram — Claude Code receives it as a channel notification.
 
 ## Architecture
 
-```
-User (Telegram)
-    |
-    |  Bot API (getUpdates long-polling)
-    v
-┌──────────────────────────────────────────────────────────────┐
-│  Custom Telegram MCP Server (ts/telegram-server.ts)          │
-│    Bun + @modelcontextprotocol/sdk                           │
-│                                                              │
-│    ┌─────────┐  ┌─────────┐  ┌──────────┐  ┌────────────┐    │
-│    │ Poller  │  │  Store  │  │  Tools   │  │ Attachments│    │
-│    │ (long   │  │ (SQLite │  │ (10 MCP  │  │ (download  │    │
-│    │  poll)  │  │  WAL)   │  │  tools)  │  │  queue)    │    │
-│    └─────────┘  └─────────┘  └──────────┘  └────────────┘    │
-│    ┌─────────┐  ┌─────────┐  ┌──────────┐                    │
-│    │ Access  │  │  Config │  │   Lock   │                    │
-│    │ (allow- │  │ (env    │  │ (PID     │                    │
-│    │  list)  │  │  vars)  │  │  file)   │                    │
-│    └─────────┘  └─────────┘  └──────────┘                    │
-└──────────────────────┬───────────────────────────────────────┘
-                       │ MCP stdio
-                       v
-┌──────────────────────────────────────────────────────────────┐
-│  Claude Code (in GNU Screen session)                         │
-│    --mcp-config points to the custom MCP server              │
-└──────────────────────┬───────────────────────────────────────┘
-                       │ screen buffer
-                       v
-┌──────────────────────────────────────────────────────────────┐
-│  Watchdog (claude-code-telegrammer-watchdog)                 │
-│    Polls screen buffer every 1.5s                            │
-│    Detects: y/n prompt -> "1", y/y/n -> "2", idle -> cmd     │
-│    Throttled: burst limit, same-state delay, min interval    │
-└──────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    op["Operator<br/>(Telegram app)"]
+    bot["Telegram Bot API<br/>per-agent bot token"]
+    op <-->|messages| bot
+
+    subgraph agent["One agent — isolated home"]
+        direction TB
+        srv["telegram-server.ts<br/>(Bun MCP server)"]
+        gate{"allowlist gate<br/>CCT_ALLOWED_USERS<br/>+ access.json"}
+        db[("state dir · per-agent<br/>messages.db · lock<br/>CCT_AGENT_STATE_DIR")]
+        cc["Claude Code<br/>(the agent)"]
+        srv -->|inbound| gate
+        gate -->|"allowed → channel notification"| cc
+        cc -->|"reply · react · send_document (MCP stdio)"| srv
+        srv <--> db
+    end
+
+    bot -->|"getUpdates (long-poll)"| srv
+    srv -->|sendMessage| bot
 ```
 
-<details>
-<summary><strong>State Detection</strong></summary>
+The MCP server long-polls Telegram, gates inbound messages through the allowlist,
+and delivers them to Claude Code as channel notifications; the agent replies
+through MCP tools. Each agent is self-contained — its own bot token, its own
+per-agent state dir, its own poller — and **fails loud** at startup on any
+misconfiguration (missing/invalid token, unexpanded `${…}`, or a renamed env
+var). Deep dive: [docs/architecture.md](docs/architecture.md).
 
-| State | Pattern | Response |
-|-------|---------|----------|
-| `running` | `(esc to interrupt)`, `tokens ·`, `ing...` | No action |
-| `y_n` | `1. Yes` + `3. No` (two-choice prompt) | Send `1` (accept) |
-| `y_y_n` | `2. Yes, and...` / `2. Yes, allow...` / `2. Yes, don't ask...` | Send `2` (accept all) |
-| `waiting` | Cooking puns (`Crafted for`, etc.), empty `>` prompt, idle hints | Send configurable command |
+## Interfaces
 
-Response throttling: minimum interval between responses, burst limit (10 in 3s window), same-state delay.
-
-</details>
-
-<details>
-<summary><strong>Configuration (Environment Variables)</strong></summary>
-
-**MCP Server:**
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN` | Yes | -- | Telegram Bot API token |
-| `CLAUDE_CODE_TELEGRAMMER_AGENT_STATE_DIR` | No | `~/.claude-code-telegrammer` | Per-agent directory for SQLite DB, access.json, lock file. (The old `…_STATE_DIR` name was renamed and is now rejected at startup — unset it.) |
-| `CLAUDE_CODE_TELEGRAMMER_ALLOWED_USERS` | No | -- | Comma-separated Telegram user IDs for DM allowlist |
-| `CLAUDE_CODE_TELEGRAMMER_HOST_NAME` | No | `os.hostname()` | Hostname stored with each message |
-| `CLAUDE_CODE_TELEGRAMMER_PROJECT` | No | `process.cwd()` | Project path stored with each message |
-| `CLAUDE_CODE_TELEGRAMMER_AGENT_ID` | No | `'telegram'` | Agent identifier stored with each message |
-| `CLAUDE_CODE_TELEGRAMMER_READ_RECEIPTS` | No | `on` | Two-stage read-receipt reactions: ⚡ on receive, 👀 when surfaced into the session. Set to `0`/`false`/`no`/`off` to disable. |
-
-**Watchdog:**
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `CLAUDE_CODE_TELEGRAMMER_SESSION` | `claude-code-telegrammer` | GNU Screen session name |
-| `CLAUDE_CODE_TELEGRAMMER_WATCHDOG_INTERVAL` | `1.5` | Poll interval in seconds |
-| `CLAUDE_CODE_TELEGRAMMER_RESP_Y_N` | `1` | Response for y/n prompts |
-| `CLAUDE_CODE_TELEGRAMMER_RESP_Y_Y_N` | `2` | Response for y/y/n prompts |
-| `CLAUDE_CODE_TELEGRAMMER_RESP_WAITING` | `/speak-and-call` | Response when idle/waiting |
-
-</details>
-
-<details>
-<summary><strong>SQLite Schema (v2)</strong></summary>
-
-All messages persisted in `$CLAUDE_CODE_TELEGRAMMER_AGENT_STATE_DIR/messages.db` using WAL mode.
-
-**messages table:** direction, chat_id, message_id, user_id, username, text, timestamps (telegram_ts, received_at, read_at, replied_at), threading (reply_to_message_id, reply_to_row_id), identity (host, project, agent_id, bot_token_hash), raw_json.
-
-**attachments table:** message_row_id (FK), kind, file_id, file_name, mime_type, file_size, local_path, downloaded_at.
-
-**meta table:** key-value store for schema_version, update_offset.
-
-</details>
-
-<details>
-<summary><strong>Integration with scitex-agent-container</strong></summary>
-
-For YAML-based agent orchestration (screen sessions, watchdog lifecycle, restart policies), see [scitex-agent-container](https://github.com/ywatanabe1989/scitex-agent-container).
-
-</details>
-
-<details>
-<summary><strong>Access Control</strong></summary>
-
-Managed via `access.json` in `$CLAUDE_CODE_TELEGRAMMER_AGENT_STATE_DIR`:
-
-```json
-{
-  "dmPolicy": "allowlist",
-  "allowFrom": ["123456789"],
-  "groups": {
-    "-100123456": {
-      "requireMention": true,
-      "allowFrom": ["123456789"]
-    }
-  }
-}
-```
-
-Merged with `CLAUDE_CODE_TELEGRAMMER_ALLOWED_USERS` env var at runtime. Mtime-based caching means edits take effect without restart.
-
-</details>
+- **MCP server** — 10 tools over stdio (`reply`, `react`, `edit_message`,
+  `get_history`, `get_unread`, `mark_read`, `download_attachment`,
+  `send_document`, `search_messages`, `get_context`) with a built-in
+  responsiveness policy. See [docs/interfaces.md](docs/interfaces.md).
+- **config probe** — `bun run ts/telegram-server.ts config [--check]` prints the
+  resolved config as JSON for orchestrator preflight.
+- **Skill** — bundled at `src/claude_code_telegrammer/_skills/claude-code-telegrammer/SKILL.md`.
 
 <!-- SciTeX Convention: Ecosystem -->
 ## Part of SciTeX
 
-claude-code-telegrammer is part of [**SciTeX**](https://scitex.ai). It provides the Telegram communication layer and TUI watchdog used by [scitex-agent-container](https://github.com/ywatanabe1989/scitex-agent-container) for autonomous agent operation.
-
-```
-┌─────────────────────────────────────────────────────────┐
-│ scitex-orochi         — agent definitions, dashboard    │
-└──────────────────────────┬──────────────────────────────┘
-                           v
-┌─────────────────────────────────────────────────────────┐
-│ scitex-agent-container  — lifecycle, health, restart    │
-└──────────────────────────┬──────────────────────────────┘
-                           v
-┌─────────────────────────────────────────────────────────┐
-│ claude-code-telegrammer  <-- YOU ARE HERE               │
-│   MCP server: Telegram API, message DB, 10 tools        │
-│   Watchdog: TUI auto-response, screen polling           │
-└─────────────────────────────────────────────────────────┘
-```
+claude-code-telegrammer is part of [**SciTeX**](https://scitex.ai) — the Telegram
+communication layer and TUI watchdog used by
+[scitex-agent-container](https://github.com/ywatanabe1989/scitex-agent-container)
+(lifecycle, health, restart) and
+[scitex-orochi](https://github.com/ywatanabe1989/scitex-orochi) (agent
+definitions, dashboard) for autonomous agent operation. See the
+[agent stack](docs/architecture.md#part-of-the-scitex-agent-stack).
 
 ## References
 
-- [Claude Code Channels](https://docs.anthropic.com/en/docs/claude-code/channels) -- Official documentation for Claude Code's channel system
-- [Official Telegram Plugin](https://github.com/anthropics/claude-code/tree/main/plugins/telegram) -- The `plugin:telegram@claude-plugins-official` source code
-- [#851: STATE_DIR not respected](https://github.com/anthropics/claude-code/issues/851) -- Hardcoded access.json path
-- [#1075: 409 Conflict errors](https://github.com/anthropics/claude-code/issues/1075) -- Multiple instances polling the same bot
-- [#1146: Zombie CPU consumption](https://github.com/anthropics/claude-code/issues/1146) -- Runaway process after session ends
-- [Telegram BotFather](https://t.me/BotFather) -- Create and manage Telegram bots
-- [Telegram Bot API](https://core.telegram.org/bots/api) -- Official Bot API documentation
-- [MCP Specification](https://modelcontextprotocol.io/) -- Model Context Protocol standard
-- [claude-code-telegrammer Issues](https://github.com/ywatanabe1989/claude-code-telegrammer/issues) -- Bug reports and feature requests
-- [claude-code-telegrammer Pull Requests](https://github.com/ywatanabe1989/claude-code-telegrammer/pulls) -- Contributions
+- [Claude Code Channels](https://docs.anthropic.com/en/docs/claude-code/channels) -- Claude Code's channel system
+- [Official Telegram Plugin](https://github.com/anthropics/claude-code/tree/main/plugins/telegram) -- the `plugin:telegram@claude-plugins-official` source
+- [#851](https://github.com/anthropics/claude-code/issues/851) · [#1075](https://github.com/anthropics/claude-code/issues/1075) · [#1146](https://github.com/anthropics/claude-code/issues/1146) -- the upstream issues this project fixes
+- [Telegram BotFather](https://t.me/BotFather) · [Telegram Bot API](https://core.telegram.org/bots/api) · [MCP Specification](https://modelcontextprotocol.io/)
+- [Issues](https://github.com/ywatanabe1989/claude-code-telegrammer/issues) · [Pull Requests](https://github.com/ywatanabe1989/claude-code-telegrammer/pulls)
 
 <!-- SciTeX Convention: Footer (Four Freedoms + icon) -->
 >Four Freedoms for Research
