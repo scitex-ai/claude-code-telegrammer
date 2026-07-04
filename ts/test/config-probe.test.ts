@@ -33,8 +33,10 @@ describe("buildConfigProbe (local, no network)", () => {
     expect(probe.state_dir).toContain("cct-test-");
   });
 
-  test("channel_source is the MCP server name", () => {
-    expect(buildConfigProbe().channel_source).toBe("claude-code-telegrammer");
+  test("channel_source carries the -system suffix distinguishing it from the MCP server name", () => {
+    expect(buildConfigProbe().channel_source).toBe(
+      "claude-code-telegrammer-system",
+    );
   });
 
   test("agent_id is null when AGENT_ID is unset (not the 'telegram' default)", () => {

@@ -26,7 +26,7 @@ delegate heavy work to background subagents, so the relay never blocks.
 | `get_context` | Recent conversation formatted as compact text for LLM context. |
 | `health` | Run the health check (doctor) inside the server process; returns the JSON report below. |
 
-Inbound messages arrive as `<channel source="claude-code-telegrammer" …>`
+Inbound messages arrive as `<channel source="claude-code-telegrammer-system" …>`
 notifications carrying `chat_id` / `message_id` / `row_id` / `user` — pass
 `chat_id` and `row_id` back to `reply`.
 
