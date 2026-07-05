@@ -1,0 +1,697 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="./">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>API Reference &mdash; scitex-dev  documentation</title>
+      <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="_static/css/theme.css?v=9edc463e" />
+      <link rel="stylesheet" type="text/css" href="_static/copybutton.css?v=76b2166b" />
+
+  
+      <script src="_static/jquery.js?v=5d32c60e"></script>
+      <script src="_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+      <script src="_static/clipboard.min.js?v=a7894cd8"></script>
+      <script src="_static/copybutton.js?v=f281be69"></script>
+    <script src="_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Unified Search" href="search.html" />
+    <link rel="prev" title="Quick Start" href="quickstart.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="index.html" class="icon icon-home">
+            scitex-dev
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="quickstart.html">Quick Start</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">API Reference</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#module-scitex_dev.cli">CLI entry point</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#scitex_dev.cli.docs_click_group"><code class="docutils literal notranslate"><span class="pre">docs_click_group()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#scitex_dev.cli.register_docs_subcommand"><code class="docutils literal notranslate"><span class="pre">register_docs_subcommand()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#scitex_dev.cli.register_skills_subcommand"><code class="docutils literal notranslate"><span class="pre">register_skills_subcommand()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#scitex_dev.cli.skills_click_group"><code class="docutils literal notranslate"><span class="pre">skills_click_group()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#module-scitex_dev._cli">CLI subcommand groups</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#scitex_dev._cli.add_dry_run_argument"><code class="docutils literal notranslate"><span class="pre">add_dry_run_argument()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#scitex_dev._cli.add_json_argument"><code class="docutils literal notranslate"><span class="pre">add_json_argument()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#scitex_dev._cli.dry_run_option"><code class="docutils literal notranslate"><span class="pre">dry_run_option()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#scitex_dev._cli.handle_result"><code class="docutils literal notranslate"><span class="pre">handle_result()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#scitex_dev._cli.json_option"><code class="docutils literal notranslate"><span class="pre">json_option()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#scitex_dev._cli.run_as_cli"><code class="docutils literal notranslate"><span class="pre">run_as_cli()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#scitex_dev._cli.wrap_as_cli"><code class="docutils literal notranslate"><span class="pre">wrap_as_cli()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#module-scitex_dev._core">Core</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#module-scitex_dev._ecosystem">Ecosystem</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#scitex_dev._ecosystem.get_all_packages"><code class="docutils literal notranslate"><span class="pre">get_all_packages()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#scitex_dev._ecosystem.get_local_path"><code class="docutils literal notranslate"><span class="pre">get_local_path()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#scitex_dev._ecosystem.should_skip_audit"><code class="docutils literal notranslate"><span class="pre">should_skip_audit()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#module-scitex_dev._creds">Credentials</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#scitex_dev._creds.RotateResult"><code class="docutils literal notranslate"><span class="pre">RotateResult</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#scitex_dev._creds.RotateResult.is_error"><code class="docutils literal notranslate"><span class="pre">RotateResult.is_error()</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#scitex_dev._creds.RotateResult.message"><code class="docutils literal notranslate"><span class="pre">RotateResult.message</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#scitex_dev._creds.RotateResult.package"><code class="docutils literal notranslate"><span class="pre">RotateResult.package</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#scitex_dev._creds.RotateResult.repo"><code class="docutils literal notranslate"><span class="pre">RotateResult.repo</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#scitex_dev._creds.RotateResult.status"><code class="docutils literal notranslate"><span class="pre">RotateResult.status</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#scitex_dev._creds.rotate_all"><code class="docutils literal notranslate"><span class="pre">rotate_all()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#scitex_dev._creds.validate_source"><code class="docutils literal notranslate"><span class="pre">validate_source()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#module-scitex_dev._docs">Docs (search / index helpers)</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#module-scitex_dev._branding">Branding</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#scitex_dev._branding.Brand"><code class="docutils literal notranslate"><span class="pre">Brand</span></code></a><ul>
+<li class="toctree-l4"><a class="reference internal" href="#scitex_dev._branding.Brand.alias"><code class="docutils literal notranslate"><span class="pre">Brand.alias</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#scitex_dev._branding.Brand.display"><code class="docutils literal notranslate"><span class="pre">Brand.display</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#scitex_dev._branding.Brand.env_prefix"><code class="docutils literal notranslate"><span class="pre">Brand.env_prefix</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#scitex_dev._branding.Brand.import_"><code class="docutils literal notranslate"><span class="pre">Brand.import_</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#scitex_dev._branding.Brand.method_prefix"><code class="docutils literal notranslate"><span class="pre">Brand.method_prefix</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#scitex_dev._branding.Brand.native_brand"><code class="docutils literal notranslate"><span class="pre">Brand.native_brand</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#scitex_dev._branding.Brand.pypi"><code class="docutils literal notranslate"><span class="pre">Brand.pypi</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#scitex_dev._branding.Brand.umbrella_attr"><code class="docutils literal notranslate"><span class="pre">Brand.umbrella_attr</span></code></a></li>
+<li class="toctree-l4"><a class="reference internal" href="#scitex_dev._branding.Brand.umbrella_brand"><code class="docutils literal notranslate"><span class="pre">Brand.umbrella_brand</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l3"><a class="reference internal" href="#scitex_dev._branding.get"><code class="docutils literal notranslate"><span class="pre">get()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#scitex_dev._branding.get_brand"><code class="docutils literal notranslate"><span class="pre">get_brand()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#scitex_dev._branding.get_env"><code class="docutils literal notranslate"><span class="pre">get_env()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#scitex_dev._branding.iter_brands"><code class="docutils literal notranslate"><span class="pre">iter_brands()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#scitex_dev._branding.register_method_aliases"><code class="docutils literal notranslate"><span class="pre">register_method_aliases()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#scitex_dev._branding.translate"><code class="docutils literal notranslate"><span class="pre">translate()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#module-scitex_dev._release">Release</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#module-scitex_dev.testing">Testing helpers</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#scitex_dev.testing.audit_all_for_package"><code class="docutils literal notranslate"><span class="pre">audit_all_for_package()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#module-scitex_dev.linter">Linter</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#scitex_dev.linter.list_rules"><code class="docutils literal notranslate"><span class="pre">list_rules()</span></code></a></li>
+</ul>
+</li>
+<li class="toctree-l2"><a class="reference internal" href="#module-scitex_dev._mcp">MCP server</a></li>
+<li class="toctree-l2"><a class="reference internal" href="#module-scitex_dev.dashboard">Dashboard</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="#scitex_dev.dashboard.create_app"><code class="docutils literal notranslate"><span class="pre">create_app()</span></code></a></li>
+<li class="toctree-l3"><a class="reference internal" href="#scitex_dev.dashboard.run_dashboard"><code class="docutils literal notranslate"><span class="pre">run_dashboard()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="search.html">Search Page</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cli.html">CLI Mixin</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">scitex-dev</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="index.html" class="icon icon-home" aria-label="Home"></a></li>
+      <li class="breadcrumb-item active">API Reference</li>
+      <li class="wy-breadcrumbs-aside">
+            <a href="_sources/api.rst.txt" rel="nofollow"> View page source</a>
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <section id="api-reference">
+<h1>API Reference<a class="headerlink" href="#api-reference" title="Link to this heading"></a></h1>
+<p>Top-level modules that survived the 2026-05 restructure. Removed
+<code class="docutils literal notranslate"><span class="pre">scitex_dev.{skills,fix,ci,deploy,versions,docs,search,_discovery,_manifest,_builder}</span></code>
+were absorbed into <code class="docutils literal notranslate"><span class="pre">_cli/</span></code>, <code class="docutils literal notranslate"><span class="pre">_creds/</span></code>, <code class="docutils literal notranslate"><span class="pre">_ecosystem/</span></code>, etc. — see
+the CLI surface and per-subcommand entry points for the live API.</p>
+<section id="module-scitex_dev.cli">
+<span id="cli-entry-point"></span><h2>CLI entry point<a class="headerlink" href="#module-scitex_dev.cli" title="Link to this heading"></a></h2>
+<p>Backward-compat shim — re-exports from <cite>scitex_dev._dispatch</cite>.</p>
+<p>The reusable docs/skills CLI mixins moved to <cite>scitex_dev._dispatch</cite>
+in 0.11.0. This shim keeps <cite>from scitex_dev.cli import …</cite> working for
+downstream packages (figrecipe, scitex-io, scitex-app, etc.) until they
+migrate. Will be removed in 0.12.0.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="scitex_dev.cli.docs_click_group">
+<span class="sig-prename descclassname"><span class="pre">scitex_dev.cli.</span></span><span class="sig-name descname"><span class="pre">docs_click_group</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">package</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'docs'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/scitex_dev/_core/dispatch.html#docs_click_group"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scitex_dev.cli.docs_click_group" title="Link to this definition"></a></dt>
+<dd><p>Create a Click command group for docs (requires Click installed).</p>
+<dl class="simple">
+<dt>Usage::</dt><dd><p>from scitex_dev.cli import docs_click_group
+cli.add_command(docs_click_group(package=”scitex-writer”))</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="scitex_dev.cli.register_docs_subcommand">
+<span class="sig-prename descclassname"><span class="pre">scitex_dev.cli.</span></span><span class="sig-name descname"><span class="pre">register_docs_subcommand</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">subparsers</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">_SubParsersAction</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">package</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/argparse.html#argparse.ArgumentParser" title="(in Python v3.14)"><span class="pre">ArgumentParser</span></a></span></span><a class="reference internal" href="_modules/scitex_dev/_core/dispatch.html#register_docs_subcommand"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scitex_dev.cli.register_docs_subcommand" title="Link to this definition"></a></dt>
+<dd><p>Register <code class="docutils literal notranslate"><span class="pre">docs</span></code> with <code class="docutils literal notranslate"><span class="pre">list</span></code> and <code class="docutils literal notranslate"><span class="pre">get</span></code> verb subcommands.</p>
+<dl class="simple">
+<dt>Usage::</dt><dd><p>scitex-stats docs list            # List doc pages
+scitex-stats docs get             # Show available pages
+scitex-stats docs get api         # Show specific page</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="scitex_dev.cli.register_skills_subcommand">
+<span class="sig-prename descclassname"><span class="pre">scitex_dev.cli.</span></span><span class="sig-name descname"><span class="pre">register_skills_subcommand</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">subparsers</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">_SubParsersAction</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">package</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/argparse.html#argparse.ArgumentParser" title="(in Python v3.14)"><span class="pre">ArgumentParser</span></a></span></span><a class="reference internal" href="_modules/scitex_dev/_core/dispatch.html#register_skills_subcommand"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scitex_dev.cli.register_skills_subcommand" title="Link to this definition"></a></dt>
+<dd><p>Register <code class="docutils literal notranslate"><span class="pre">skills</span></code> with <code class="docutils literal notranslate"><span class="pre">list</span></code> and <code class="docutils literal notranslate"><span class="pre">get</span></code> verb subcommands.</p>
+<dl class="simple">
+<dt>Usage::</dt><dd><p>scitex-stats skills list              # List skill pages
+scitex-stats skills get               # Show main SKILL.md
+scitex-stats skills get test-selection # Show a reference page</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="scitex_dev.cli.skills_click_group">
+<span class="sig-prename descclassname"><span class="pre">scitex_dev.cli.</span></span><span class="sig-name descname"><span class="pre">skills_click_group</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">package</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'skills'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/scitex_dev/_core/dispatch.html#skills_click_group"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scitex_dev.cli.skills_click_group" title="Link to this definition"></a></dt>
+<dd><p>Create a Click command group for skills (requires Click installed).</p>
+<dl class="simple">
+<dt>Usage::</dt><dd><p>from scitex_dev.cli import skills_click_group
+cli.add_command(skills_click_group(package=”scitex-app”))</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+<section id="module-scitex_dev._cli">
+<span id="cli-subcommand-groups"></span><h2>CLI subcommand groups<a class="headerlink" href="#module-scitex_dev._cli" title="Link to this heading"></a></h2>
+<p>SciTeX-dev CLI package — entry point + reusable subcommand mixins.</p>
+<p>Module map:
+- <cite>_root</cite>        — top-level Click group <cite>main</cite> (the <cite>scitex-dev</cite> console script entry point)
+- <cite>_utils</cite>       — <cite>handle_result</cite>, <cite>run_as_cli</cite>, <cite>wrap_as_cli</cite>, json/dry-run option helpers
+- <cite>_completion</cite>  — shell tab-completion installer
+- <cite>_doctor</cite>      — <cite>scitex-dev doctor</cite>
+- <cite>_stats</cite>       — <cite>scitex-dev ecosystem stats</cite>
+- <cite>audit/</cite>       — <cite>_summary</cite> (was _cli_audit), <cite>_api</cite>, <cite>_project</cite>, <cite>_skills</cite>
+- <cite>ecosystem/</cite>   — <cite>_registry</cite> (was _cli_ecosystem)
+- <cite>quality/</cite>     — <cite>_check</cite> (was _cli_quality), <cite>_frontmatter</cite>
+- <cite>skills/</cite>      — <cite>_manage</cite> (was _cli_skills), <cite>_tags</cite></p>
+<p>The <cite>main</cite> callable is the <cite>[project.scripts]</cite> target — <cite>scitex_dev._cli:main</cite>
+must remain importable.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="scitex_dev._cli.add_dry_run_argument">
+<span class="sig-prename descclassname"><span class="pre">scitex_dev._cli.</span></span><span class="sig-name descname"><span class="pre">add_dry_run_argument</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">parser</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.14)"><span class="pre">Any</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/scitex_dev/_cli/_utils.html#add_dry_run_argument"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scitex_dev._cli.add_dry_run_argument" title="Link to this definition"></a></dt>
+<dd><p>Add <code class="docutils literal notranslate"><span class="pre">--dry-run</span></code> flag to an argparse parser.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="scitex_dev._cli.add_json_argument">
+<span class="sig-prename descclassname"><span class="pre">scitex_dev._cli.</span></span><span class="sig-name descname"><span class="pre">add_json_argument</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">parser</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.14)"><span class="pre">Any</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/scitex_dev/_cli/_utils.html#add_json_argument"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scitex_dev._cli.add_json_argument" title="Link to this definition"></a></dt>
+<dd><p>Add <code class="docutils literal notranslate"><span class="pre">--json</span></code> flag to an argparse parser.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="scitex_dev._cli.dry_run_option">
+<span class="sig-prename descclassname"><span class="pre">scitex_dev._cli.</span></span><span class="sig-name descname"><span class="pre">dry_run_option</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">fn</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Callable" title="(in Python v3.14)"><span class="pre">Callable</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Callable" title="(in Python v3.14)"><span class="pre">Callable</span></a></span></span><a class="reference internal" href="_modules/scitex_dev/_cli/_utils.html#dry_run_option"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scitex_dev._cli.dry_run_option" title="Link to this definition"></a></dt>
+<dd><p>Click decorator: adds <code class="docutils literal notranslate"><span class="pre">--dry-run</span></code> flag.</p>
+<p>Uses lazy <code class="docutils literal notranslate"><span class="pre">import</span> <span class="pre">click</span></code> so scitex-dev stays stdlib-only.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="scitex_dev._cli.handle_result">
+<span class="sig-prename descclassname"><span class="pre">scitex_dev._cli.</span></span><span class="sig-name descname"><span class="pre">handle_result</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">result</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Result</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">as_json</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><span class="pre">bool</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">file</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.14)"><span class="pre">Any</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></span></span><a class="reference internal" href="_modules/scitex_dev/_cli/_utils.html#handle_result"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scitex_dev._cli.handle_result" title="Link to this definition"></a></dt>
+<dd><p>Format and print a Result, return the exit code.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>result</strong> (<em>Result</em>) – The structured result to display.</p></li>
+<li><p><strong>as_json</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>) – If True, output full JSON. If False, human-friendly text.</p></li>
+<li><p><strong>file</strong> (<em>file-like</em><em> | </em><em>None</em>) – Output stream. Defaults to stdout/stderr based on success.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>Exit code suitable for <code class="docutils literal notranslate"><span class="pre">sys.exit()</span></code>.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)">int</a></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="scitex_dev._cli.json_option">
+<span class="sig-prename descclassname"><span class="pre">scitex_dev._cli.</span></span><span class="sig-name descname"><span class="pre">json_option</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">fn</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Callable" title="(in Python v3.14)"><span class="pre">Callable</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Callable" title="(in Python v3.14)"><span class="pre">Callable</span></a></span></span><a class="reference internal" href="_modules/scitex_dev/_cli/_utils.html#json_option"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scitex_dev._cli.json_option" title="Link to this definition"></a></dt>
+<dd><p>Click decorator: adds <code class="docutils literal notranslate"><span class="pre">--json</span></code> flag as <code class="docutils literal notranslate"><span class="pre">as_json</span></code> parameter.</p>
+<p>Uses lazy <code class="docutils literal notranslate"><span class="pre">import</span> <span class="pre">click</span></code> so scitex-dev stays stdlib-only.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="scitex_dev._cli.run_as_cli">
+<span class="sig-prename descclassname"><span class="pre">scitex_dev._cli.</span></span><span class="sig-name descname"><span class="pre">run_as_cli</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">fn</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Callable" title="(in Python v3.14)"><span class="pre">Callable</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">as_json</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><span class="pre">bool</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.14)"><span class="pre">Any</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/scitex_dev/_cli/_utils.html#run_as_cli"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scitex_dev._cli.run_as_cli" title="Link to this definition"></a></dt>
+<dd><p>Call a <code class="docutils literal notranslate"><span class="pre">&#64;supports_return_as</span></code> function and exit with proper code.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>fn</strong> (<em>Callable</em>) – A function decorated with <code class="docutils literal notranslate"><span class="pre">&#64;supports_return_as</span></code>.</p></li>
+<li><p><strong>as_json</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>) – If True, output full JSON.</p></li>
+<li><p><strong>**kwargs</strong> – Arguments to pass to <code class="docutils literal notranslate"><span class="pre">fn</span></code>.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="scitex_dev._cli.wrap_as_cli">
+<span class="sig-prename descclassname"><span class="pre">scitex_dev._cli.</span></span><span class="sig-name descname"><span class="pre">wrap_as_cli</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">fn</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Callable" title="(in Python v3.14)"><span class="pre">Callable</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">as_json</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><span class="pre">bool</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.14)"><span class="pre">Any</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/scitex_dev/_cli/_utils.html#wrap_as_cli"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scitex_dev._cli.wrap_as_cli" title="Link to this definition"></a></dt>
+<dd><p>Call any function and display its result via CLI.</p>
+<p>Like <code class="docutils literal notranslate"><span class="pre">wrap_as_mcp</span></code> but for terminal output. Wraps any plain
+function in Result, formats based on <code class="docutils literal notranslate"><span class="pre">as_json</span></code>, and exits
+with proper exit code.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>fn</strong> (<em>Callable</em>) – Any callable returning data or raising exceptions.</p></li>
+<li><p><strong>as_json</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>) – If True, output full JSON Result. If False, human-friendly text.</p></li>
+<li><p><strong>**kwargs</strong> – Arguments to pass to <code class="docutils literal notranslate"><span class="pre">fn</span></code>.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+<section id="module-scitex_dev._core">
+<span id="core"></span><h2>Core<a class="headerlink" href="#module-scitex_dev._core" title="Link to this heading"></a></h2>
+<p>Core glue: config, types, errors, dispatch, discovery, manifests.</p>
+</section>
+<section id="module-scitex_dev._ecosystem">
+<span id="ecosystem"></span><h2>Ecosystem<a class="headerlink" href="#module-scitex_dev._ecosystem" title="Link to this heading"></a></h2>
+<p>SciTeX ecosystem registry, dependency graph, and package-state utilities.</p>
+<p>Module map:
+- <cite>_core</cite>     — <cite>ECOSYSTEM</cite> registry + <cite>get_all_packages</cite> / <cite>get_local_path</cite>
+- <cite>_graph</cite>    — pyproject dependency graph (discover, parse, mermaid/dot, cycles)
+- <cite>_packages</cite> — multi-host package SHA collection + audit/sync helpers</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="scitex_dev._ecosystem.get_all_packages">
+<span class="sig-prename descclassname"><span class="pre">scitex_dev._ecosystem.</span></span><span class="sig-name descname"><span class="pre">get_all_packages</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.14)"><span class="pre">List</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/scitex_dev/_ecosystem/_core.html#get_all_packages"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scitex_dev._ecosystem.get_all_packages" title="Link to this definition"></a></dt>
+<dd><p>Get list of all ecosystem package names.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="scitex_dev._ecosystem.get_local_path">
+<span class="sig-prename descclassname"><span class="pre">scitex_dev._ecosystem.</span></span><span class="sig-name descname"><span class="pre">get_local_path</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">package</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/pathlib.html#pathlib.Path" title="(in Python v3.14)"><span class="pre">Path</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/scitex_dev/_ecosystem/_core.html#get_local_path"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scitex_dev._ecosystem.get_local_path" title="Link to this definition"></a></dt>
+<dd><p>Get expanded local path for a package.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="scitex_dev._ecosystem.should_skip_audit">
+<span class="sig-prename descclassname"><span class="pre">scitex_dev._ecosystem.</span></span><span class="sig-name descname"><span class="pre">should_skip_audit</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">package</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">auditor</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.14)"><span class="pre">tuple</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><span class="pre">bool</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/scitex_dev/_ecosystem/_core.html#should_skip_audit"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scitex_dev._ecosystem.should_skip_audit" title="Link to this definition"></a></dt>
+<dd><p>Return (skip, reason) for running <cite>auditor</cite> on <cite>package</cite>.</p>
+<p><cite>auditor</cite> is one of the keys in <cite>_CATEGORY_SKIP</cite>. Unknown auditors
+return (False, “”) — fail open so a typo doesn’t silently skip.</p>
+<p>Skip semantics:</p>
+<ul class="simple">
+<li><p>archived packages are skipped for <em>every</em> auditor.</p></li>
+<li><p>per-auditor categories listed in _CATEGORY_SKIP are skipped.</p></li>
+<li><p>unknown package (not in ECOSYSTEM) is NOT skipped — the auditor’s
+own not-found path will handle it.</p></li>
+</ul>
+</dd></dl>
+
+</section>
+<section id="module-scitex_dev._creds">
+<span id="credentials"></span><h2>Credentials<a class="headerlink" href="#module-scitex_dev._creds" title="Link to this heading"></a></h2>
+<p>Ecosystem-wide Claude Code credential rotation.</p>
+<p>Multiplexes <code class="docutils literal notranslate"><span class="pre">~/.claude/.credentials.json</span></code> to the GitHub Actions secret
+slot <code class="docutils literal notranslate"><span class="pre">CLAUDE_CODE_CREDENTIALS_JSON</span></code> (with sha256 sidecar variable
+<code class="docutils literal notranslate"><span class="pre">CLAUDE_CODE_CREDENTIALS_JSON_SHA256</span></code>) across every package in the
+SciTeX ecosystem registry.</p>
+<p>Distinct from the single-repo <code class="docutils literal notranslate"><span class="pre">sac</span> <span class="pre">dev</span> <span class="pre">upload-credentials-to-github</span></code>
+command — that one writes the package-prefixed <code class="docutils literal notranslate"><span class="pre">SAC_…</span></code> slot. This
+module uses the canonical un-prefixed name shared by every scitex
+package that consumes Claude Code OAuth.</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="scitex_dev._creds.RotateResult">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">scitex_dev._creds.</span></span><span class="sig-name descname"><span class="pre">RotateResult</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">package</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">repo</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">status</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">message</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">''</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="_modules/scitex_dev/_creds/_rotate.html#RotateResult"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scitex_dev._creds.RotateResult" title="Link to this definition"></a></dt>
+<dd><p>Per-repo rotation outcome.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="scitex_dev._creds.RotateResult.is_error">
+<span class="sig-name descname"><span class="pre">is_error</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><span class="pre">bool</span></a></span></span><a class="reference internal" href="_modules/scitex_dev/_creds/_rotate.html#RotateResult.is_error"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scitex_dev._creds.RotateResult.is_error" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="scitex_dev._creds.RotateResult.message">
+<span class="sig-name descname"><span class="pre">message</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span><span class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">''</span></span><a class="headerlink" href="#scitex_dev._creds.RotateResult.message" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="scitex_dev._creds.RotateResult.package">
+<span class="sig-name descname"><span class="pre">package</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span><a class="headerlink" href="#scitex_dev._creds.RotateResult.package" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="scitex_dev._creds.RotateResult.repo">
+<span class="sig-name descname"><span class="pre">repo</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span><a class="headerlink" href="#scitex_dev._creds.RotateResult.repo" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="scitex_dev._creds.RotateResult.status">
+<span class="sig-name descname"><span class="pre">status</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span><a class="headerlink" href="#scitex_dev._creds.RotateResult.status" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="scitex_dev._creds.rotate_all">
+<span class="sig-prename descclassname"><span class="pre">scitex_dev._creds.</span></span><span class="sig-name descname"><span class="pre">rotate_all</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">packages</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Iterable" title="(in Python v3.14)"><span class="pre">Iterable</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">only</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Iterable" title="(in Python v3.14)"><span class="pre">Iterable</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">exclude</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Iterable" title="(in Python v3.14)"><span class="pre">Iterable</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">]</span></span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">source_path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/pathlib.html#pathlib.Path" title="(in Python v3.14)"><span class="pre">Path</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">PosixPath('/home/runner/.claude/.credentials.json')</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">dry_run</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><span class="pre">bool</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">force</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><span class="pre">bool</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">ecosystem</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.14)"><span class="pre">dict</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">local_path_lookup</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a><span class="p"><span class="pre">[</span></span><a class="reference internal" href="#scitex_dev._creds.RotateResult" title="scitex_dev._creds._rotate.RotateResult"><span class="pre">RotateResult</span></a><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/scitex_dev/_creds/_rotate.html#rotate_all"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scitex_dev._creds.rotate_all" title="Link to this definition"></a></dt>
+<dd><p>Rotate the credential across every (or a filtered set of) repo.</p>
+<p>Returns one <code class="docutils literal notranslate"><span class="pre">RotateResult</span></code> per package processed. Returns an
+empty list if the source is silently absent/expired — that is the
+“fresh laptop / expired token” exit-0 path, deliberately quiet.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="scitex_dev._creds.validate_source">
+<span class="sig-prename descclassname"><span class="pre">scitex_dev._creds.</span></span><span class="sig-name descname"><span class="pre">validate_source</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">path</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/pathlib.html#pathlib.Path" title="(in Python v3.14)"><span class="pre">Path</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">PosixPath('/home/runner/.claude/.credentials.json')</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">*</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">now_ms</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><span class="pre">Callable[[]</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">int]</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">&lt;function</span> <span class="pre">_now_ms&gt;</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">SourceState</span><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/scitex_dev/_creds/_rotate.html#validate_source"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scitex_dev._creds.validate_source" title="Link to this definition"></a></dt>
+<dd><p>Return SourceState, or None if rotation should be a silent no-op.</p>
+<p>Silent-no-op (returns None) is reserved for the operator-on-a-fresh-
+-laptop / expired-token cases that should NOT spam every hour:</p>
+<ul class="simple">
+<li><p>source file is missing</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">claudeAiOauth.expiresAt</span></code> (or <code class="docutils literal notranslate"><span class="pre">expires_at</span></code>) is in the past</p></li>
+</ul>
+<p>Raises <code class="docutils literal notranslate"><span class="pre">ValueError</span></code> for cases that DO deserve a loud error:</p>
+<ul class="simple">
+<li><p>file present but doesn’t parse as JSON</p></li>
+<li><p>file parses but has no <code class="docutils literal notranslate"><span class="pre">claudeAiOauth</span></code> key</p></li>
+</ul>
+</dd></dl>
+
+</section>
+<section id="module-scitex_dev._docs">
+<span id="docs-search-index-helpers"></span><h2>Docs (search / index helpers)<a class="headerlink" href="#module-scitex_dev._docs" title="Link to this heading"></a></h2>
+<p>Docs build, search, and skills aggregation utilities.</p>
+</section>
+<section id="module-scitex_dev._branding">
+<span id="branding"></span><h2>Branding<a class="headerlink" href="#module-scitex_dev._branding" title="Link to this heading"></a></h2>
+<p>Ecosystem branding / translation registry.</p>
+<p>Single source of truth for SciTeX-ecosystem brand identities (pypi name,
+import name, umbrella attr, alias, display, method-prefix, env-prefix).
+See <code class="docutils literal notranslate"><span class="pre">registry.yaml</span></code> for entries and <code class="docutils literal notranslate"><span class="pre">BRANDING_TRANSLATION_REGISTRY_PLAN.md</span></code>
+for design rationale.</p>
+<p>Runtime API (minimal — only what figrecipe + socialia need):</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">get</span><span class="p">(</span><span class="n">brand_key</span><span class="p">,</span> <span class="n">field</span><span class="p">)</span>               <span class="o">-&gt;</span> <span class="nb">str</span>
+<span class="n">translate</span><span class="p">(</span><span class="n">name</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">from_brand</span><span class="p">,</span> <span class="n">to_brand</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span>
+<span class="n">register_method_aliases</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">brand_key</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span>
+<span class="n">get_env</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">brand_key</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span>
+</pre></div>
+</div>
+<p>Plus low-level helpers used by the auditor:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">get_brand</span><span class="p">(</span><span class="n">brand_key</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Brand</span>
+<span class="n">iter_brands</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">Iterator</span><span class="p">[</span><span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Brand</span><span class="p">]]</span>
+</pre></div>
+</div>
+<dl class="py class">
+<dt class="sig sig-object py" id="scitex_dev._branding.Brand">
+<span class="property"><span class="k"><span class="pre">class</span></span><span class="w"> </span></span><span class="sig-prename descclassname"><span class="pre">scitex_dev._branding.</span></span><span class="sig-name descname"><span class="pre">Brand</span></span><a class="reference internal" href="_modules/scitex_dev/_branding/_helpers.html#Brand"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scitex_dev._branding.Brand" title="Link to this definition"></a></dt>
+<dd><dl class="py attribute">
+<dt class="sig sig-object py" id="scitex_dev._branding.Brand.alias">
+<span class="sig-name descname"><span class="pre">alias</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span><a class="headerlink" href="#scitex_dev._branding.Brand.alias" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="scitex_dev._branding.Brand.display">
+<span class="sig-name descname"><span class="pre">display</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span><a class="headerlink" href="#scitex_dev._branding.Brand.display" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="scitex_dev._branding.Brand.env_prefix">
+<span class="sig-name descname"><span class="pre">env_prefix</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span><a class="headerlink" href="#scitex_dev._branding.Brand.env_prefix" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="scitex_dev._branding.Brand.import_">
+<span class="sig-name descname"><span class="pre">import_</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span><a class="headerlink" href="#scitex_dev._branding.Brand.import_" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="scitex_dev._branding.Brand.method_prefix">
+<span class="sig-name descname"><span class="pre">method_prefix</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span><a class="headerlink" href="#scitex_dev._branding.Brand.method_prefix" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="scitex_dev._branding.Brand.native_brand">
+<span class="sig-name descname"><span class="pre">native_brand</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span><a class="headerlink" href="#scitex_dev._branding.Brand.native_brand" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="scitex_dev._branding.Brand.pypi">
+<span class="sig-name descname"><span class="pre">pypi</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span><a class="headerlink" href="#scitex_dev._branding.Brand.pypi" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="scitex_dev._branding.Brand.umbrella_attr">
+<span class="sig-name descname"><span class="pre">umbrella_attr</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span><a class="headerlink" href="#scitex_dev._branding.Brand.umbrella_attr" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="scitex_dev._branding.Brand.umbrella_brand">
+<span class="sig-name descname"><span class="pre">umbrella_brand</span></span><span class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span><a class="headerlink" href="#scitex_dev._branding.Brand.umbrella_brand" title="Link to this definition"></a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="scitex_dev._branding.get">
+<span class="sig-prename descclassname"><span class="pre">scitex_dev._branding.</span></span><span class="sig-name descname"><span class="pre">get</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">brand_key</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">field</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.14)"><span class="pre">Any</span></a></span></span><a class="reference internal" href="_modules/scitex_dev/_branding/_helpers.html#get"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scitex_dev._branding.get" title="Link to this definition"></a></dt>
+<dd><p>Look up a single field. No fallbacks — registry is authoritative.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="scitex_dev._branding.get_brand">
+<span class="sig-prename descclassname"><span class="pre">scitex_dev._branding.</span></span><span class="sig-name descname"><span class="pre">get_brand</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">brand_key</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference internal" href="#scitex_dev._branding.Brand" title="scitex_dev._branding._helpers.Brand"><span class="pre">Brand</span></a></span></span><a class="reference internal" href="_modules/scitex_dev/_branding/_helpers.html#get_brand"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scitex_dev._branding.get_brand" title="Link to this definition"></a></dt>
+<dd><p>Whole entry for one brand. Raises KeyError if unknown.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="scitex_dev._branding.get_env">
+<span class="sig-prename descclassname"><span class="pre">scitex_dev._branding.</span></span><span class="sig-name descname"><span class="pre">get_env</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">key</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">brand_key</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">default</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="w"> </span><span class="p"><span class="pre">|</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/scitex_dev/_branding/_helpers.html#get_env"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scitex_dev._branding.get_env" title="Link to this definition"></a></dt>
+<dd><p>Read an environment variable using the brand’s declared env_prefix,
+with a fallback to the counterpart brand’s prefix (for white-label
+rebrands), then the unprefixed name, then <em>default</em>.</p>
+<dl class="simple">
+<dt>Lookup order:</dt><dd><ol class="arabic simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">&lt;this</span> <span class="pre">brand</span> <span class="pre">env_prefix&gt;_&lt;key&gt;</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">&lt;counterpart</span> <span class="pre">env_prefix&gt;_&lt;key&gt;</span></code> (if a counterpart exists)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">&lt;key&gt;</span></code> (unprefixed)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">default</span></code></p></li>
+</ol>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="scitex_dev._branding.iter_brands">
+<span class="sig-prename descclassname"><span class="pre">scitex_dev._branding.</span></span><span class="sig-name descname"><span class="pre">iter_brands</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Iterator" title="(in Python v3.14)"><span class="pre">Iterator</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.14)"><span class="pre">tuple</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><a class="reference internal" href="#scitex_dev._branding.Brand" title="scitex_dev._branding._helpers.Brand"><span class="pre">Brand</span></a><span class="p"><span class="pre">]</span></span><span class="p"><span class="pre">]</span></span></span></span><a class="reference internal" href="_modules/scitex_dev/_branding/_helpers.html#iter_brands"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scitex_dev._branding.iter_brands" title="Link to this definition"></a></dt>
+<dd><p>Iterate (brand_key, entry). For audit rules.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="scitex_dev._branding.register_method_aliases">
+<span class="sig-prename descclassname"><span class="pre">scitex_dev._branding.</span></span><span class="sig-name descname"><span class="pre">register_method_aliases</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">cls</span></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">brand_key</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/scitex_dev/_branding/_helpers.html#register_method_aliases"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scitex_dev._branding.register_method_aliases" title="Link to this definition"></a></dt>
+<dd><p>Walk <code class="docutils literal notranslate"><span class="pre">dir(cls)</span></code> and bind the counterpart-brand’s prefix as aliases.</p>
+<p>For each method starting with <code class="docutils literal notranslate"><span class="pre">&lt;this</span> <span class="pre">brand&gt;.method_prefix</span></code>, bind an
+attribute named with the counterpart’s method_prefix that points at the
+same function. The alias gets <code class="docutils literal notranslate"><span class="pre">__module__</span></code> rebound to the counterpart’s
+import path so <code class="docutils literal notranslate"><span class="pre">help()</span></code> on the umbrella side doesn’t leak the native
+package name.</p>
+<p>No-op if the brand has no counterpart or no method_prefix.</p>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="scitex_dev._branding.translate">
+<span class="sig-prename descclassname"><span class="pre">scitex_dev._branding.</span></span><span class="sig-name descname"><span class="pre">translate</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">name</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">from_brand</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="n"><span class="pre">to_brand</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></span><a class="reference internal" href="_modules/scitex_dev/_branding/_helpers.html#translate"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scitex_dev._branding.translate" title="Link to this definition"></a></dt>
+<dd><p>Layer-5 only — swap one brand’s method_prefix for the counterpart’s.</p>
+<p>Raises ValueError if from_brand/to_brand are not declared as
+native/umbrella counterparts in the registry.</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">translate</span><span class="p">(</span><span class="s2">&quot;fr_conf_mat&quot;</span><span class="p">,</span> <span class="n">from_brand</span><span class="o">=</span><span class="s2">&quot;figrecipe&quot;</span><span class="p">,</span> <span class="n">to_brand</span><span class="o">=</span><span class="s2">&quot;scitex-plt&quot;</span><span class="p">)</span>
+<span class="go">&#39;stx_conf_mat&#39;</span>
+</pre></div>
+</div>
+</dd></dl>
+
+</section>
+<section id="module-scitex_dev._release">
+<span id="release"></span><h2>Release<a class="headerlink" href="#module-scitex_dev._release" title="Link to this heading"></a></h2>
+<p>Release-related utilities (CI, deploy, version bumpers, lint gates, RTD onboarding).</p>
+</section>
+<section id="module-scitex_dev.testing">
+<span id="testing-helpers"></span><h2>Testing helpers<a class="headerlink" href="#module-scitex_dev.testing" title="Link to this heading"></a></h2>
+<p>Pytest helpers for downstream SciTeX packages.</p>
+<p>Public re-exports:
+- <cite>audit_all_for_package</cite> — assert <cite>audit-all &lt;pkg&gt;</cite> exits 0.</p>
+<p>Each ecosystem package drops a one-liner test that calls this helper
+so the package’s local pytest run includes the same audit gates that
+CI used to run as a separate workflow. See the auto-generated
+<cite>tests/test_audit.py</cite> template (via
+<cite>scitex-dev ecosystem write-audit-test &lt;pkg&gt;</cite>) and the skill leaf
+<cite>_skills/general/02_package/07_github-actions.md</cite> for the canonical
+shape.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="scitex_dev.testing.audit_all_for_package">
+<span class="sig-prename descclassname"><span class="pre">scitex_dev.testing.</span></span><span class="sig-name descname"><span class="pre">audit_all_for_package</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">distribution</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span></em>, <em class="sig-param"><span class="keyword-only-separator o"><abbr title="Keyword-only parameters separator (PEP 3102)"><span class="pre">*</span></abbr></span></em>, <em class="sig-param"><span class="n"><span class="pre">timeout</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.14)"><span class="pre">float</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">120.0</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">skip_rules</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.14)"><span class="pre">tuple</span></a><span class="p"><span class="pre">[</span></span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a><span class="p"><span class="pre">,</span></span><span class="w"> </span><span class="p"><span class="pre">...</span></span><span class="p"><span class="pre">]</span></span></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">()</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/scitex_dev/testing/_audit_conformance.html#audit_all_for_package"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scitex_dev.testing.audit_all_for_package" title="Link to this definition"></a></dt>
+<dd><p>Run <cite>scitex-dev ecosystem audit-all &lt;distribution&gt;</cite> and assert exit 0.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>distribution</strong> – ECOSYSTEM key (e.g. <code class="docutils literal notranslate"><span class="pre">&quot;scitex-io&quot;</span></code>, <code class="docutils literal notranslate"><span class="pre">&quot;scitex-stats&quot;</span></code>,
+<code class="docutils literal notranslate"><span class="pre">&quot;socialia&quot;</span></code>).</p></li>
+<li><p><strong>timeout</strong> – Per-test wall-clock cap; covers a slow PyPI install in CI.</p></li>
+<li><p><strong>Bypass</strong></p></li>
+<li><p><strong>------</strong></p></li>
+<li><p><strong>the</strong> (<em>audit</em><em> (</em><em>the test calls pytest.skip instead</em><em> of </em><em>running</em>)</p></li>
+<li><p><strong>the</strong></p></li>
+<li><p><strong>pre-existing</strong> (<em>subprocess</em><em>)</em><em>. Use during a remediation push when</em>)</p></li>
+<li><p><strong>runs</strong> (<em>violations would block unrelated test</em>)</p></li>
+<li><p><strong>developing</strong> (<em>or when</em>)</p></li>
+<li><p><strong>for</strong> (<em>locally without scitex-dev's audit corpus available. CI</em>)</p></li>
+<li><p><strong>silent.</strong> (<em>release branches MUST NOT set this — drift goes</em>)</p></li>
+</ul>
+</dd>
+<dt class="field-even">Raises<span class="colon">:</span></dt>
+<dd class="field-even"><p><a class="reference external" href="https://docs.python.org/3/library/exceptions.html#AssertionError" title="(in Python v3.14)"><strong>AssertionError</strong></a> – If the subprocess returns non-zero. The full stdout + stderr
+    are included in the message so the failing rule is visible in
+    the test report without re-running the audit by hand.</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+<section id="module-scitex_dev.linter">
+<span id="linter"></span><h2>Linter<a class="headerlink" href="#module-scitex_dev.linter" title="Link to this heading"></a></h2>
+<p>SciTeX Linter — enforce reproducible research patterns via AST analysis.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="scitex_dev.linter.list_rules">
+<span class="sig-prename descclassname"><span class="pre">scitex_dev.linter.</span></span><span class="sig-name descname"><span class="pre">list_rules</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">category</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)"><span class="pre">list</span></a></span></span><a class="reference internal" href="_modules/scitex_dev/linter.html#list_rules"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scitex_dev.linter.list_rules" title="Link to this definition"></a></dt>
+<dd><p>Return all rules (built-in + plugin), optionally filtered by category.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>category</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a><em>, </em><em>optional</em>) – If provided, only return rules whose category matches this value.</p>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p>All matching Rule objects from built-in definitions and loaded plugins.</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#list" title="(in Python v3.14)">list</a> of Rule</p>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+<section id="module-scitex_dev._mcp">
+<span id="mcp-server"></span><h2>MCP server<a class="headerlink" href="#module-scitex_dev._mcp" title="Link to this heading"></a></h2>
+<p>scitex-dev’s OWN FastMCP server.</p>
+<p>The MCP helper utilities (<cite>wrap_as_mcp</cite>, <cite>register_docs_tools</cite>,
+<cite>get_tools_sync</cite>, …) used to live here but are now ecosystem-glue
+under <cite>scitex_dev._ecosystem._mcp</cite> and re-exported as the public
+<cite>scitex_dev.ecosystem</cite> surface. This package retains only the
+<cite>_server</cite> module that hosts scitex-dev’s own MCP tools.</p>
+</section>
+<section id="module-scitex_dev.dashboard">
+<span id="dashboard"></span><h2>Dashboard<a class="headerlink" href="#module-scitex_dev.dashboard" title="Link to this heading"></a></h2>
+<p>Flask dashboard for scitex version management.</p>
+<dl class="py function">
+<dt class="sig sig-object py" id="scitex_dev.dashboard.create_app">
+<span class="sig-prename descclassname"><span class="pre">scitex_dev.dashboard.</span></span><span class="sig-name descname"><span class="pre">create_app</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><span class="pre">Flask</span></span></span><a class="reference internal" href="_modules/scitex_dev/dashboard/app.html#create_app"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scitex_dev.dashboard.create_app" title="Link to this definition"></a></dt>
+<dd><p>Create and configure the Flask application.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Configured Flask application.</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p>Flask</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="scitex_dev.dashboard.run_dashboard">
+<span class="sig-prename descclassname"><span class="pre">scitex_dev.dashboard.</span></span><span class="sig-name descname"><span class="pre">run_dashboard</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">host</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><span class="pre">str</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">'0.0.0.0'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">port</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><span class="pre">int</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">5000</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">debug</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><span class="pre">bool</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">open_browser</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><span class="pre">bool</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">True</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">force</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><span class="pre">bool</span></a></span><span class="w"> </span><span class="o"><span class="pre">=</span></span><span class="w"> </span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span> <span class="sig-return"><span class="sig-return-icon">&#x2192;</span> <span class="sig-return-typehint"><a class="reference external" href="https://docs.python.org/3/library/constants.html#None" title="(in Python v3.14)"><span class="pre">None</span></a></span></span><a class="reference internal" href="_modules/scitex_dev/dashboard/app.html#run_dashboard"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#scitex_dev.dashboard.run_dashboard" title="Link to this definition"></a></dt>
+<dd><p>Run the Flask dashboard server.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>host</strong> (<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.14)"><em>str</em></a>) – Host to bind to. Default “127.0.0.1”.</p></li>
+<li><p><strong>port</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.14)"><em>int</em></a>) – Port to listen on. Default 5000.</p></li>
+<li><p><strong>debug</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>) – Enable Flask debug mode.</p></li>
+<li><p><strong>open_browser</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>) – Open browser automatically.</p></li>
+<li><p><strong>force</strong> (<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.14)"><em>bool</em></a>) – Kill existing process using the port if any.</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+</section>
+</section>
+
+
+           </div>
+          </div>
+          <footer><div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+        <a href="quickstart.html" class="btn btn-neutral float-left" title="Quick Start" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+        <a href="search.html" class="btn btn-neutral float-right" title="Unified Search" accesskey="n" rel="next">Next <span class="fa fa-arrow-circle-right" aria-hidden="true"></span></a>
+    </div>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, Yusuke Watanabe.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

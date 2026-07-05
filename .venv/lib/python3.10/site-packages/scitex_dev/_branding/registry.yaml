@@ -1,0 +1,41 @@
+# Ecosystem branding / translation registry.
+#
+# Spec: GITIGNORED/BRANDING_TRANSLATION_REGISTRY_PLAN.md
+#
+# Scope (minimal, first cut): only the two rebrand-pairs that actually need
+# runtime help. Other ecosystem packages use plain literals; extend later if
+# we want ecosystem-wide alias consistency.
+brands:
+  figrecipe:
+    pypi: figrecipe
+    import: figrecipe
+    alias: fr
+    display: FigRecipe
+    method_prefix: fr_
+    umbrella_brand: scitex-plt
+
+  scitex-plt:
+    pypi: scitex-plt
+    import: scitex_plt
+    umbrella_attr: scitex.plt
+    alias: splt
+    display: SciTeX Plot
+    method_prefix: stx_
+    native_brand: figrecipe
+
+  socialia:
+    pypi: socialia
+    import: socialia
+    alias: soc
+    display: socialia
+    env_prefix: SOCIALIA
+    umbrella_brand: scitex-social
+
+  scitex-social:
+    pypi: scitex-social
+    import: scitex_social
+    umbrella_attr: scitex.social
+    alias: ssoc
+    display: SciTeX Social
+    env_prefix: SCITEX
+    native_brand: socialia

@@ -1,0 +1,684 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>scitex_dev._ecosystem._core &mdash; scitex-dev  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/copybutton.css?v=76b2166b" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+      <script src="../../../_static/clipboard.min.js?v=a7894cd8"></script>
+      <script src="../../../_static/copybutton.js?v=f281be69"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            scitex-dev
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quick Start</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../api.html">API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../search.html">Search Page</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../cli.html">CLI Mixin</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">scitex-dev</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">scitex_dev._ecosystem._core</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for scitex_dev._ecosystem._core</h1><div class="highlight"><pre>
+<span></span><span class="ch">#!/usr/bin/env python3</span>
+<span class="c1"># Timestamp: 2026-02-03</span>
+<span class="c1"># File: scitex_dev/ecosystem.py</span>
+
+<span class="sd">&quot;&quot;&quot;SciTeX ecosystem package registry.&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">typing</span><span class="w"> </span><span class="kn">import</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">List</span><span class="p">,</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">TypedDict</span>
+
+
+<span class="k">class</span><span class="w"> </span><span class="nc">PackageInfo</span><span class="p">(</span><span class="n">TypedDict</span><span class="p">,</span> <span class="n">total</span><span class="o">=</span><span class="kc">False</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Package information structure.</span>
+
+<span class="sd">    `category` controls how the auditor and ecosystem CLI treat the entry:</span>
+
+<span class="sd">    - ``umbrella``     — the top-level scitex package; full audit</span>
+<span class="sd">    - ``library``      — standard scitex-* leaf; full audit</span>
+<span class="sd">    - ``external-lib`` — non-scitex-prefixed lib in the ecosystem</span>
+<span class="sd">                          (figrecipe, socialia); full audit</span>
+<span class="sd">    - ``template``     — scaffolds; auditor skips §C5/§E/§L by default</span>
+<span class="sd">    - ``dataset``      — data-only repos (crossref-local, openalex-local);</span>
+<span class="sd">                          auditor skips §E (no SKILL.md required)</span>
+
+<span class="sd">    `archived` (optional, default False) — set ``True`` for repos that have</span>
+<span class="sd">    been GitHub-archived (read-only) and superseded. The CLA / quality /</span>
+<span class="sd">    publish auditors should skip archived entries by default; the entry is</span>
+<span class="sd">    kept in the registry so historical references resolve.</span>
+
+<span class="sd">    `umbrella_subcommand` (optional) — the name this package mounts as</span>
+<span class="sd">    under the umbrella ``scitex`` CLI / MCP server. For ``scitex-&lt;x&gt;`` the</span>
+<span class="sd">    default is the part after ``scitex-`` (so ``scitex-dataset`` →</span>
+<span class="sd">    ``dataset``). Branded packages without the prefix (``socialia`` →</span>
+<span class="sd">    ``social``, ``figrecipe`` → ``plt``) MUST set this explicitly; the</span>
+<span class="sd">    umbrella shim and ``audit-cli §5b`` / ``audit-mcp-tools §1`` read it</span>
+<span class="sd">    to know how to rewrite the program name and validate the mount</span>
+<span class="sd">    namespace. See</span>
+<span class="sd">    ``_skills/general/03_interface/02_cli/05a_umbrella-passthrough.md``.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">local_path</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">pypi_name</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">github_repo</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">import_name</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">category</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="n">archived</span><span class="p">:</span> <span class="nb">bool</span>
+    <span class="n">umbrella_subcommand</span><span class="p">:</span> <span class="nb">str</span>
+
+
+<span class="c1"># Ordered dict - order matters for display</span>
+<span class="n">ECOSYSTEM</span><span class="p">:</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">PackageInfo</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;scitex&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-python&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-python&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;umbrella&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-io&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-io&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-io&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-io&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_io&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-stats&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-stats&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-stats&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-stats&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_stats&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-clew&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-clew&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-clew&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-clew&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_clew&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-hub&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-hub&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-hub&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-hub&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_hub&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;figrecipe&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/figrecipe&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;figrecipe&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/figrecipe&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;figrecipe&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;external-lib&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;newb&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/newb&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;newb&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/newb&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;newb&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;external-lib&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;openalex-local&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/openalex-local&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;openalex-local&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/openalex-local&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;openalex_local&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;dataset&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;crossref-local&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/crossref-local&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;crossref-local&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/crossref-local&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;crossref_local&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;dataset&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-writer&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-writer&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-writer&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-writer&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_writer&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-dataset&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-dataset&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-dataset&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-dataset&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_dataset&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;socialia&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/socialia&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;socialia&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/socialia&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;socialia&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;external-lib&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-container&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-container&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-container&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-container&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_container&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-ssh&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-ssh&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-ssh&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-ssh&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_ssh&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-ui&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-ui&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-ui&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-ui&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_ui&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-app&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-app&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-app&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-app&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_app&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-audio&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-audio&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-audio&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-audio&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_audio&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-parallel&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-parallel&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-parallel&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-parallel&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_parallel&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-types&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-types&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-types&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-types&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_types&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-path&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-path&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-path&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-path&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_path&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-repro&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-repro&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-repro&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-repro&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_repro&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-compat&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-compat&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-compat&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-compat&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_compat&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-etc&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-etc&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-etc&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-etc&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_etc&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-gists&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-gists&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-gists&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-gists&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_gists&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-db&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-db&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-db&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-db&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_db&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-scholar&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-scholar&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-scholar&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-scholar&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_scholar&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-seizure-metrics&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-seizure-metrics&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-seizure-metrics&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-seizure-metrics&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_seizure_metrics&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-template&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-template&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-template&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-template&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_template&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;template&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-dev&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-dev&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-dev&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-dev&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_dev&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-agent-container&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-agent-container&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-agent-container&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-agent-container&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_agent_container&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-orochi&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-orochi&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-orochi&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-orochi&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_orochi&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-str&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-str&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-str&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-str&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_str&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-logging&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-logging&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-logging&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-logging&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_logging&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-dict&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-dict&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-dict&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-dict&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_dict&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-browser&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-browser&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-browser&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-browser&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_browser&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-config&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-config&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-config&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-config&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_config&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-events&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-events&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-events&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-events&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_events&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-hpc&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-hpc&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-hpc&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-hpc&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_hpc&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-decorators&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-decorators&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-decorators&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-decorators&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_decorators&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-pd&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-pd&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-pd&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-pd&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_pd&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-plt&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-plt&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-plt&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-plt&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_plt&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-nn&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-nn&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-nn&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-nn&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_nn&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-ml&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-ml&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-ml&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-ml&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_ml&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-genai&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-genai&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-genai&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-genai&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_genai&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-gen&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-gen&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-gen&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-gen&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_gen&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-dsp&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-dsp&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-dsp&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-dsp&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_dsp&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-benchmark&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-benchmark&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-benchmark&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-benchmark&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_benchmark&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-bridge&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-bridge&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-bridge&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-bridge&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_bridge&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-capture&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-capture&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-capture&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-capture&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_capture&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-context&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-context&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-context&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-context&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_context&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-cv&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-cv&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-cv&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-cv&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_cv&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-datetime&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-datetime&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-datetime&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-datetime&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_datetime&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-git&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-git&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-git&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-git&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_git&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-introspect&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-introspect&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-introspect&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-introspect&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_introspect&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-linalg&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-linalg&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-linalg&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-linalg&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_linalg&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-msword&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-msword&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-msword&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-msword&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_msword&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-notebook&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-notebook&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-notebook&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-notebook&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_notebook&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-notification&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-notification&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-notification&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-notification&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_notification&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-os&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-os&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-os&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-os&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_os&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-resource&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-resource&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-resource&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-resource&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_resource&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-security&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-security&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-security&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-security&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_security&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-session&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-session&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-session&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-session&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_session&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-sh&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-sh&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-sh&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-sh&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_sh&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-tex&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-tex&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-tex&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-tex&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_tex&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-todo&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-todo&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-todo&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-todo&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_todo&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;scitex-web&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;local_path&quot;</span><span class="p">:</span> <span class="s2">&quot;~/proj/scitex-web&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;pypi_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex-web&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;github_repo&quot;</span><span class="p">:</span> <span class="s2">&quot;ywatanabe1989/scitex-web&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;import_name&quot;</span><span class="p">:</span> <span class="s2">&quot;scitex_web&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;category&quot;</span><span class="p">:</span> <span class="s2">&quot;library&quot;</span><span class="p">,</span>
+    <span class="p">},</span>
+<span class="p">}</span>
+
+
+<div class="viewcode-block" id="get_local_path">
+<a class="viewcode-back" href="../../../api.html#scitex_dev._ecosystem.get_local_path">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_local_path</span><span class="p">(</span><span class="n">package</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Path</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Get expanded local path for a package.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">package</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">ECOSYSTEM</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="k">return</span> <span class="n">Path</span><span class="p">(</span><span class="n">ECOSYSTEM</span><span class="p">[</span><span class="n">package</span><span class="p">][</span><span class="s2">&quot;local_path&quot;</span><span class="p">])</span><span class="o">.</span><span class="n">expanduser</span><span class="p">()</span></div>
+
+
+
+<div class="viewcode-block" id="get_all_packages">
+<a class="viewcode-back" href="../../../api.html#scitex_dev._ecosystem.get_all_packages">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">get_all_packages</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Get list of all ecosystem package names.&quot;&quot;&quot;</span>
+    <span class="k">return</span> <span class="nb">list</span><span class="p">(</span><span class="n">ECOSYSTEM</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span></div>
+
+
+
+<span class="c1"># --------------------------------------------------------------------- #</span>
+<span class="c1"># Category-aware audit skip                                              #</span>
+<span class="c1"># --------------------------------------------------------------------- #</span>
+
+<span class="c1"># Per-auditor list of ECOSYSTEM categories that don&#39;t apply.</span>
+<span class="c1"># `archived` is short-circuited separately (every auditor skips archived).</span>
+<span class="n">_CATEGORY_SKIP</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">frozenset</span><span class="p">[</span><span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;audit-cli&quot;</span><span class="p">:</span> <span class="nb">frozenset</span><span class="p">({</span><span class="s2">&quot;template&quot;</span><span class="p">}),</span>
+    <span class="s2">&quot;audit-mcp-tools&quot;</span><span class="p">:</span> <span class="nb">frozenset</span><span class="p">({</span><span class="s2">&quot;template&quot;</span><span class="p">,</span> <span class="s2">&quot;dataset&quot;</span><span class="p">,</span> <span class="s2">&quot;umbrella&quot;</span><span class="p">}),</span>
+    <span class="s2">&quot;audit-skills&quot;</span><span class="p">:</span> <span class="nb">frozenset</span><span class="p">(),</span>
+    <span class="s2">&quot;audit-python-apis&quot;</span><span class="p">:</span> <span class="nb">frozenset</span><span class="p">({</span><span class="s2">&quot;template&quot;</span><span class="p">}),</span>
+    <span class="s2">&quot;audit-project&quot;</span><span class="p">:</span> <span class="nb">frozenset</span><span class="p">(),</span>
+<span class="p">}</span>
+
+
+<div class="viewcode-block" id="should_skip_audit">
+<a class="viewcode-back" href="../../../api.html#scitex_dev._ecosystem.should_skip_audit">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">should_skip_audit</span><span class="p">(</span><span class="n">package</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">auditor</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">bool</span><span class="p">,</span> <span class="nb">str</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return (skip, reason) for running `auditor` on `package`.</span>
+
+<span class="sd">    `auditor` is one of the keys in `_CATEGORY_SKIP`. Unknown auditors</span>
+<span class="sd">    return (False, &quot;&quot;) — fail open so a typo doesn&#39;t silently skip.</span>
+
+<span class="sd">    Skip semantics:</span>
+
+<span class="sd">    - archived packages are skipped for *every* auditor.</span>
+<span class="sd">    - per-auditor categories listed in _CATEGORY_SKIP are skipped.</span>
+<span class="sd">    - unknown package (not in ECOSYSTEM) is NOT skipped — the auditor&#39;s</span>
+<span class="sd">      own not-found path will handle it.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">info</span> <span class="o">=</span> <span class="n">ECOSYSTEM</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">package</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">info</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">False</span><span class="p">,</span> <span class="s2">&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">info</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;archived&quot;</span><span class="p">):</span>
+        <span class="k">return</span> <span class="kc">True</span><span class="p">,</span> <span class="s2">&quot;archived&quot;</span>
+    <span class="n">cat</span> <span class="o">=</span> <span class="n">info</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;category&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+    <span class="n">skip_set</span> <span class="o">=</span> <span class="n">_CATEGORY_SKIP</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">auditor</span><span class="p">,</span> <span class="nb">frozenset</span><span class="p">())</span>
+    <span class="k">if</span> <span class="n">cat</span> <span class="ow">in</span> <span class="n">skip_set</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">True</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;category=</span><span class="si">{</span><span class="n">cat</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="k">return</span> <span class="kc">False</span><span class="p">,</span> <span class="s2">&quot;&quot;</span></div>
+
+
+
+<span class="c1"># EOF</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, Yusuke Watanabe.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

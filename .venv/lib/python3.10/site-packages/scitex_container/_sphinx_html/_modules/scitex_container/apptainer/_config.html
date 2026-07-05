@@ -1,0 +1,281 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>scitex_container.apptainer._config &mdash; scitex-container 0.2.1 documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/copybutton.css?v=76b2166b" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=37f418d5"></script>
+      <script src="../../../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+      <script src="../../../_static/clipboard.min.js?v=a7894cd8"></script>
+      <script src="../../../_static/copybutton.js?v=f281be69"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            scitex-container
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Getting Started</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quickstart</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../cli_reference.html">CLI Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../mcp_reference.html">MCP Reference</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../api/scitex_container.html">API Reference</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">scitex-container</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">scitex_container.apptainer._config</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for scitex_container.apptainer._config</h1><div class="highlight"><pre>
+<span></span><span class="ch">#!/usr/bin/env python3</span>
+<span class="c1"># Timestamp: &quot;2026-05-24&quot;</span>
+<span class="c1"># File: src/scitex_container/apptainer/_config.py</span>
+<span class="sd">&quot;&quot;&quot;Reproducible-image build config.</span>
+
+<span class="sd">The config file lives at ``&lt;root&gt;/config.yaml`` where ``&lt;root&gt;`` is the</span>
+<span class="sd">output base directory (path-injection — scitex-container takes the base</span>
+<span class="sd">dir as an argument so a consumer such as scitex-agent-container can point</span>
+<span class="sd">it at its own root).</span>
+
+<span class="sd">Standalone scitex-container defaults its root to ``~/.scitex/container/``,</span>
+<span class="sd">so the default config path is ``~/.scitex/container/config.yaml``.</span>
+
+<span class="sd">Schema (every key optional; defaults applied when absent)::</span>
+
+<span class="sd">    images:</span>
+<span class="sd">      retain: 10               # keep last N (sif+lock) pairs per layer</span>
+<span class="sd">      require_verified: false  # true = hard-error when using an .unverified image</span>
+
+<span class="sd">A project-scope override is honoured: if a ``config.yaml`` exists in the</span>
+<span class="sd">project scope for the ``container`` package (``&lt;project&gt;/.scitex/container/</span>
+<span class="sd">config.yaml``), it wins over the user-scope file.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">dataclasses</span><span class="w"> </span><span class="kn">import</span> <span class="n">dataclass</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">scitex_container._compat</span><span class="w"> </span><span class="kn">import</span> <span class="n">supports_return_as</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+
+<span class="c1"># Defaults — the single source of truth for &quot;unspecified&quot; behaviour.</span>
+<span class="n">DEFAULT_RETAIN</span> <span class="o">=</span> <span class="mi">10</span>
+<span class="n">DEFAULT_REQUIRE_VERIFIED</span> <span class="o">=</span> <span class="kc">False</span>
+
+
+<div class="viewcode-block" id="ImageConfig">
+<a class="viewcode-back" href="../../../api/scitex_container.html#scitex_container.apptainer.ImageConfig">[docs]</a>
+<span class="nd">@dataclass</span><span class="p">(</span><span class="n">frozen</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+<span class="k">class</span><span class="w"> </span><span class="nc">ImageConfig</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Resolved reproducible-image config.&quot;&quot;&quot;</span>
+
+    <span class="c1"># Keep the last N (sif, lock) pairs per layer; older builds are pruned</span>
+    <span class="c1"># (a build dir carrying a .keep marker is never pruned).</span>
+    <span class="n">retain</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="n">DEFAULT_RETAIN</span>
+    <span class="c1"># When True, the use-time check errors (instead of warning) on an</span>
+    <span class="c1"># .unverified image.</span>
+    <span class="n">require_verified</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="n">DEFAULT_REQUIRE_VERIFIED</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">default_config_path</span><span class="p">(</span><span class="n">root</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="n">Path</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Path</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return the config-file path for a given output ``root``.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    root : str or Path, optional</span>
+<span class="sd">        Output base directory. When *None*, resolves to the standalone</span>
+<span class="sd">        scitex-container default ``~/.scitex/container/`` (via</span>
+<span class="sd">        ``local_state.user_path``).</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    Path</span>
+<span class="sd">        ``&lt;root&gt;/config.yaml``.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">root</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">Path</span><span class="p">(</span><span class="n">root</span><span class="p">)</span> <span class="o">/</span> <span class="s2">&quot;config.yaml&quot;</span>
+
+    <span class="c1"># Standalone default: ~/.scitex/container/config.yaml</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">scitex_config._ecosystem</span><span class="w"> </span><span class="kn">import</span> <span class="n">local_state</span>
+
+    <span class="k">return</span> <span class="n">local_state</span><span class="o">.</span><span class="n">user_path</span><span class="p">(</span><span class="s2">&quot;container&quot;</span><span class="p">,</span> <span class="s2">&quot;config.yaml&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_project_override_path</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">Path</span> <span class="o">|</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Return the project-scope ``config.yaml`` for ``container`` if present.&quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">scitex_config._ecosystem</span><span class="w"> </span><span class="kn">import</span> <span class="n">local_state</span>
+
+    <span class="n">scope</span> <span class="o">=</span> <span class="n">local_state</span><span class="o">.</span><span class="n">find_project_scope</span><span class="p">(</span><span class="s2">&quot;container&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">scope</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">None</span>
+    <span class="n">candidate</span> <span class="o">=</span> <span class="n">scope</span> <span class="o">/</span> <span class="s2">&quot;config.yaml&quot;</span>
+    <span class="k">return</span> <span class="n">candidate</span> <span class="k">if</span> <span class="n">candidate</span><span class="o">.</span><span class="n">is_file</span><span class="p">()</span> <span class="k">else</span> <span class="kc">None</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_coerce_image_config</span><span class="p">(</span><span class="n">images</span><span class="p">:</span> <span class="nb">object</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ImageConfig</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Build an ``ImageConfig`` from a parsed ``images:`` mapping.</span>
+
+<span class="sd">    Unknown keys are ignored; missing keys fall back to defaults. A</span>
+<span class="sd">    malformed ``retain`` (non-int / negative) falls back to the default</span>
+<span class="sd">    rather than crashing the build — a misconfigured retain must never</span>
+<span class="sd">    take down the round-trip.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">images</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">ImageConfig</span><span class="p">()</span>
+
+    <span class="n">retain</span> <span class="o">=</span> <span class="n">images</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;retain&quot;</span><span class="p">,</span> <span class="n">DEFAULT_RETAIN</span><span class="p">)</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">retain</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">retain</span><span class="p">)</span>
+    <span class="k">except</span> <span class="p">(</span><span class="ne">TypeError</span><span class="p">,</span> <span class="ne">ValueError</span><span class="p">):</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+            <span class="s2">&quot;Invalid images.retain=</span><span class="si">%r</span><span class="s2">; using default </span><span class="si">%d</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">retain</span><span class="p">,</span> <span class="n">DEFAULT_RETAIN</span>
+        <span class="p">)</span>
+        <span class="n">retain</span> <span class="o">=</span> <span class="n">DEFAULT_RETAIN</span>
+    <span class="k">if</span> <span class="n">retain</span> <span class="o">&lt;</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">&quot;images.retain=</span><span class="si">%d</span><span class="s2"> &lt; 1; using default </span><span class="si">%d</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">retain</span><span class="p">,</span> <span class="n">DEFAULT_RETAIN</span><span class="p">)</span>
+        <span class="n">retain</span> <span class="o">=</span> <span class="n">DEFAULT_RETAIN</span>
+
+    <span class="n">require_verified</span> <span class="o">=</span> <span class="nb">bool</span><span class="p">(</span><span class="n">images</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;require_verified&quot;</span><span class="p">,</span> <span class="n">DEFAULT_REQUIRE_VERIFIED</span><span class="p">))</span>
+
+    <span class="k">return</span> <span class="n">ImageConfig</span><span class="p">(</span><span class="n">retain</span><span class="o">=</span><span class="n">retain</span><span class="p">,</span> <span class="n">require_verified</span><span class="o">=</span><span class="n">require_verified</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="load_config">
+<a class="viewcode-back" href="../../../api/scitex_container.html#scitex_container.apptainer.load_config">[docs]</a>
+<span class="nd">@supports_return_as</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">load_config</span><span class="p">(</span><span class="n">root</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="n">Path</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ImageConfig</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Load the reproducible-image config.</span>
+
+<span class="sd">    Resolution order (highest priority first):</span>
+
+<span class="sd">    1. Project-scope override (``&lt;project&gt;/.scitex/container/config.yaml``).</span>
+<span class="sd">    2. The ``&lt;root&gt;/config.yaml`` file (user-scope by default).</span>
+<span class="sd">    3. Built-in defaults.</span>
+
+<span class="sd">    Always returns a valid ``ImageConfig`` — a missing or unreadable</span>
+<span class="sd">    config falls back to defaults rather than raising, because the</span>
+<span class="sd">    config is an optional tuning knob, not a build precondition.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    root : str or Path, optional</span>
+<span class="sd">        Output base directory. ``None`` → standalone default</span>
+<span class="sd">        ``~/.scitex/container/``.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    ImageConfig</span>
+<span class="sd">        The resolved config.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">path</span> <span class="o">=</span> <span class="n">_project_override_path</span><span class="p">()</span> <span class="ow">or</span> <span class="n">default_config_path</span><span class="p">(</span><span class="n">root</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">path</span><span class="o">.</span><span class="n">is_file</span><span class="p">():</span>
+        <span class="k">return</span> <span class="n">ImageConfig</span><span class="p">()</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">scitex_config</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_yaml</span>
+
+        <span class="n">data</span> <span class="o">=</span> <span class="n">load_yaml</span><span class="p">(</span><span class="n">path</span><span class="p">)</span> <span class="ow">or</span> <span class="p">{}</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>  <span class="c1"># malformed yaml / missing pyyaml — fall back loudly</span>
+        <span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span>
+            <span class="s2">&quot;Failed to load image config from </span><span class="si">%s</span><span class="s2">: </span><span class="si">%s</span><span class="s2">; using defaults&quot;</span><span class="p">,</span> <span class="n">path</span><span class="p">,</span> <span class="n">exc</span>
+        <span class="p">)</span>
+        <span class="k">return</span> <span class="n">ImageConfig</span><span class="p">()</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+        <span class="k">return</span> <span class="n">ImageConfig</span><span class="p">()</span>
+
+    <span class="k">return</span> <span class="n">_coerce_image_config</span><span class="p">(</span><span class="n">data</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;images&quot;</span><span class="p">))</span></div>
+
+
+
+<span class="c1"># EOF</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, Yusuke Watanabe.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

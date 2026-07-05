@@ -1,0 +1,242 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>scitex_dev.testing._audit_conformance &mdash; scitex-dev  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/copybutton.css?v=76b2166b" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+      <script src="../../../_static/clipboard.min.js?v=a7894cd8"></script>
+      <script src="../../../_static/copybutton.js?v=f281be69"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            scitex-dev
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quick Start</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../api.html">API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../search.html">Search Page</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../cli.html">CLI Mixin</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">scitex-dev</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">scitex_dev.testing._audit_conformance</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for scitex_dev.testing._audit_conformance</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;`audit_all_for_package` — pytest assertion that `audit-all &lt;pkg&gt;` is clean.</span>
+
+<span class="sd">Each ecosystem package drops a one-liner `tests/test_audit.py` that</span>
+<span class="sd">calls this helper. A non-zero exit (any error-severity violation,</span>
+<span class="sd">not-auditable status, or sub-process launch failure) raises</span>
+<span class="sd">AssertionError so pytest reports it as a normal test failure.</span>
+
+<span class="sd">Subprocess invocation, not in-process, because:</span>
+
+<span class="sd">  - The umbrella `scitex-dev ecosystem audit-all` is what users actually</span>
+<span class="sd">    run; the test mirrors it byte-for-byte.</span>
+<span class="sd">  - Each sub-auditor isolates stdio (some packages close fd 1 on import).</span>
+<span class="sd">    Re-entering them in-process from pytest would interact badly with</span>
+<span class="sd">    pytest&#39;s own capture machinery.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">shutil</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">subprocess</span>
+
+
+<span class="n">SKIP_ENV_VAR</span> <span class="o">=</span> <span class="s2">&quot;SCITEX_DEV_SKIP_AUDIT&quot;</span>
+
+
+<div class="viewcode-block" id="audit_all_for_package">
+<a class="viewcode-back" href="../../../api.html#scitex_dev.testing.audit_all_for_package">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">audit_all_for_package</span><span class="p">(</span>
+    <span class="n">distribution</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+    <span class="o">*</span><span class="p">,</span>
+    <span class="n">timeout</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">120.0</span><span class="p">,</span>
+    <span class="n">skip_rules</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">=</span> <span class="p">(),</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Run `scitex-dev ecosystem audit-all &lt;distribution&gt;` and assert exit 0.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    distribution</span>
+<span class="sd">        ECOSYSTEM key (e.g. ``&quot;scitex-io&quot;``, ``&quot;scitex-stats&quot;``,</span>
+<span class="sd">        ``&quot;socialia&quot;``).</span>
+<span class="sd">    timeout</span>
+<span class="sd">        Per-test wall-clock cap; covers a slow PyPI install in CI.</span>
+
+<span class="sd">    Bypass</span>
+<span class="sd">    ------</span>
+<span class="sd">    Set ``SCITEX_DEV_SKIP_AUDIT=1`` in the environment to skip the</span>
+<span class="sd">    audit (the test calls ``pytest.skip`` instead of running the</span>
+<span class="sd">    subprocess). Use during a remediation push when pre-existing</span>
+<span class="sd">    violations would block unrelated test runs, or when developing</span>
+<span class="sd">    locally without scitex-dev&#39;s audit corpus available. CI for</span>
+<span class="sd">    release branches MUST NOT set this — drift goes silent.</span>
+
+<span class="sd">    Raises</span>
+<span class="sd">    ------</span>
+<span class="sd">    AssertionError</span>
+<span class="sd">        If the subprocess returns non-zero. The full stdout + stderr</span>
+<span class="sd">        are included in the message so the failing rule is visible in</span>
+<span class="sd">        the test report without re-running the audit by hand.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">SKIP_ENV_VAR</span><span class="p">):</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">pytest</span>
+
+        <span class="n">pytest</span><span class="o">.</span><span class="n">skip</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;audit-all skipped via </span><span class="si">{</span><span class="n">SKIP_ENV_VAR</span><span class="si">}</span><span class="s2">=1 (unset to re-enable the gate)&quot;</span>
+        <span class="p">)</span>
+    <span class="n">bin_path</span> <span class="o">=</span> <span class="n">shutil</span><span class="o">.</span><span class="n">which</span><span class="p">(</span><span class="s2">&quot;scitex-dev&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;scitex-dev&quot;</span>
+    <span class="n">proc</span> <span class="o">=</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">run</span><span class="p">(</span>
+        <span class="p">[</span><span class="n">bin_path</span><span class="p">,</span> <span class="s2">&quot;ecosystem&quot;</span><span class="p">,</span> <span class="s2">&quot;audit-all&quot;</span><span class="p">,</span> <span class="n">distribution</span><span class="p">],</span>
+        <span class="n">capture_output</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+        <span class="n">text</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+        <span class="n">timeout</span><span class="o">=</span><span class="n">timeout</span><span class="p">,</span>
+        <span class="n">env</span><span class="o">=</span><span class="p">{</span><span class="o">**</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">,</span> <span class="s2">&quot;SCITEX_DEV_NO_AUDIT_DISCLAIMER&quot;</span><span class="p">:</span> <span class="s2">&quot;1&quot;</span><span class="p">},</span>
+    <span class="p">)</span>
+    <span class="k">if</span> <span class="n">proc</span><span class="o">.</span><span class="n">returncode</span> <span class="o">!=</span> <span class="mi">0</span> <span class="ow">and</span> <span class="n">skip_rules</span><span class="p">:</span>
+        <span class="c1"># Re-classify: if every contributing violation in stdout is on</span>
+        <span class="c1"># the caller&#39;s allow-list, treat as clean. Auditors print rule</span>
+        <span class="c1"># lines in two shapes:</span>
+        <span class="c1">#   `  [E] [PSnnn §M] …`       (legacy, from audit-summary)</span>
+        <span class="c1">#   `  [PSnnn §M] &lt;where&gt;: …`  (canonical, used by every current auditor)</span>
+        <span class="c1"># Match by rule id alone — the surrounding marker is incidental.</span>
+        <span class="n">skipped</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">non_skipped</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="p">(</span><span class="n">proc</span><span class="o">.</span><span class="n">stdout</span> <span class="o">+</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="n">proc</span><span class="o">.</span><span class="n">stderr</span><span class="p">)</span><span class="o">.</span><span class="n">splitlines</span><span class="p">():</span>
+            <span class="n">stripped</span> <span class="o">=</span> <span class="n">line</span><span class="o">.</span><span class="n">lstrip</span><span class="p">()</span>
+            <span class="c1"># Accept any line whose first bracketed token contains a rule id.</span>
+            <span class="c1"># Current auditors prefix with a coloured level word (`ERRO: `,</span>
+            <span class="c1"># `WARN: `) — strip a trailing-colon word before the bracket</span>
+            <span class="c1"># check so the rule id is reachable.</span>
+            <span class="n">head</span> <span class="o">=</span> <span class="n">stripped</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;:&quot;</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+            <span class="n">payload</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="n">head</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">.</span><span class="n">lstrip</span><span class="p">()</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">head</span><span class="p">)</span> <span class="o">==</span> <span class="mi">2</span> <span class="ow">and</span> <span class="n">head</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">isalpha</span><span class="p">()</span> <span class="k">else</span> <span class="n">stripped</span>
+            <span class="p">)</span>
+            <span class="k">if</span> <span class="ow">not</span> <span class="p">(</span><span class="n">payload</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;[&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="n">payload</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;[E]&quot;</span><span class="p">)):</span>
+                <span class="k">continue</span>
+            <span class="n">matched</span> <span class="o">=</span> <span class="p">[</span><span class="n">r</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">skip_rules</span> <span class="k">if</span> <span class="sa">f</span><span class="s2">&quot;[</span><span class="si">{</span><span class="n">r</span><span class="si">}</span><span class="s2"> &quot;</span> <span class="ow">in</span> <span class="n">line</span> <span class="ow">or</span> <span class="sa">f</span><span class="s2">&quot;[</span><span class="si">{</span><span class="n">r</span><span class="si">}</span><span class="s2">]&quot;</span> <span class="ow">in</span> <span class="n">line</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">matched</span><span class="p">:</span>
+                <span class="n">skipped</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">stripped</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">non_skipped</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">line</span><span class="p">)</span>
+        <span class="c1"># Only mask the failure when skip_rules ACTUALLY matched something.</span>
+        <span class="c1"># Without that guard, any non-zero exit (e.g. a warn-level sub-auditor</span>
+        <span class="c1"># with no [E] lines) gets silently swallowed simply because the caller</span>
+        <span class="c1"># passed *some* skip_rules — the previous behaviour and a real</span>
+        <span class="c1"># visibility bug.</span>
+        <span class="k">if</span> <span class="n">skipped</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">non_skipped</span><span class="p">:</span>
+            <span class="c1"># Surface a UserWarning so reviewers see exactly what&#39;s masked.</span>
+            <span class="c1"># Tests still pass; the warning is what catches regression of an</span>
+            <span class="c1"># in-progress cleanup that should now be removable from skip_rules.</span>
+            <span class="kn">import</span><span class="w"> </span><span class="nn">warnings</span>
+
+            <span class="n">head</span> <span class="o">=</span> <span class="n">skipped</span><span class="p">[</span><span class="mi">0</span><span class="p">][:</span><span class="mi">120</span><span class="p">]</span><span class="o">.</span><span class="n">rstrip</span><span class="p">()</span>
+            <span class="n">more</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot; (+</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">skipped</span><span class="p">)</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">1</span><span class="si">}</span><span class="s2"> more)&quot;</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">skipped</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span>
+            <span class="n">warnings</span><span class="o">.</span><span class="n">warn</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;audit-all: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">skipped</span><span class="p">)</span><span class="si">}</span><span class="s2"> violation(s) masked by &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;skip_rules=</span><span class="si">{</span><span class="nb">list</span><span class="p">(</span><span class="n">skip_rules</span><span class="p">)</span><span class="si">}</span><span class="s2"> on </span><span class="si">{</span><span class="n">distribution</span><span class="si">}</span><span class="s2">: &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">head</span><span class="si">}{</span><span class="n">more</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+                <span class="ne">UserWarning</span><span class="p">,</span>
+                <span class="n">stacklevel</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="k">return</span>
+    <span class="k">if</span> <span class="n">proc</span><span class="o">.</span><span class="n">returncode</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="n">cmd</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">bin_path</span><span class="si">}</span><span class="s2"> ecosystem audit-all </span><span class="si">{</span><span class="n">distribution</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="n">msg</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;audit-all reported violations for </span><span class="si">{</span><span class="n">distribution</span><span class="si">!r}</span><span class="s2"> &quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;(exit=</span><span class="si">{</span><span class="n">proc</span><span class="o">.</span><span class="n">returncode</span><span class="si">}</span><span class="s2">).</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;  $ </span><span class="si">{</span><span class="n">cmd</span><span class="si">}</span><span class="se">\n\n</span><span class="s2">&quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;--- stdout ---</span><span class="se">\n</span><span class="si">{</span><span class="n">proc</span><span class="o">.</span><span class="n">stdout</span><span class="si">}</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;--- stderr ---</span><span class="se">\n</span><span class="si">{</span><span class="n">proc</span><span class="o">.</span><span class="n">stderr</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="p">)</span>
+        <span class="k">raise</span> <span class="ne">AssertionError</span><span class="p">(</span><span class="n">msg</span><span class="p">)</span></div>
+
+
+
+<span class="n">__all__</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;audit_all_for_package&quot;</span><span class="p">]</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, Yusuke Watanabe.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

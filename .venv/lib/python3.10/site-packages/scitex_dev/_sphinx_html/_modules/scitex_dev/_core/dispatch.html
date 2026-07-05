@@ -1,0 +1,794 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" data-content_root="../../../">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>scitex_dev._core.dispatch &mdash; scitex-dev  documentation</title>
+      <link rel="stylesheet" type="text/css" href="../../../_static/pygments.css?v=b86133f3" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/css/theme.css?v=9edc463e" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/copybutton.css?v=76b2166b" />
+
+  
+      <script src="../../../_static/jquery.js?v=5d32c60e"></script>
+      <script src="../../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+      <script src="../../../_static/documentation_options.js?v=5929fcd5"></script>
+      <script src="../../../_static/doctools.js?v=fd6eb6e6"></script>
+      <script src="../../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+      <script src="../../../_static/clipboard.min.js?v=a7894cd8"></script>
+      <script src="../../../_static/copybutton.js?v=f281be69"></script>
+    <script src="../../../_static/js/theme.js"></script>
+    <link rel="index" title="Index" href="../../../genindex.html" />
+    <link rel="search" title="Search" href="../../../search.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+
+          
+          
+          <a href="../../../index.html" class="icon icon-home">
+            scitex-dev
+          </a>
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="../../../search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+        </div><div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+              <p class="caption" role="heading"><span class="caption-text">Contents</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../quickstart.html">Quick Start</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../api.html">API Reference</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../search.html">Search Page</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../cli.html">CLI Mixin</a></li>
+</ul>
+
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap"><nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../../index.html">scitex-dev</a>
+      </nav>
+
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+  <ul class="wy-breadcrumbs">
+      <li><a href="../../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+          <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+      <li class="breadcrumb-item active">scitex_dev._core.dispatch</li>
+      <li class="wy-breadcrumbs-aside">
+      </li>
+  </ul>
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+             
+  <h1>Source code for scitex_dev._core.dispatch</h1><div class="highlight"><pre>
+<span></span><span class="ch">#!/usr/bin/env python3</span>
+<span class="c1"># -*- coding: utf-8 -*-</span>
+<span class="sd">&quot;&quot;&quot;Reusable CLI mixins for ``docs`` and ``skills`` subcommands.</span>
+
+<span class="sd">Each package adds subcommands with minimal boilerplate::</span>
+
+<span class="sd">    # In scitex_writer/_cli/__init__.py (argparse)</span>
+<span class="sd">    from scitex_dev.cli import register_docs_subcommand, register_skills_subcommand</span>
+<span class="sd">    register_docs_subcommand(subparsers, package=&quot;scitex-writer&quot;)</span>
+<span class="sd">    register_skills_subcommand(subparsers, package=&quot;scitex-writer&quot;)</span>
+
+<span class="sd">    # Or with Click</span>
+<span class="sd">    from scitex_dev.cli import docs_click_group</span>
+<span class="sd">    cli.add_command(docs_click_group(package=&quot;scitex-writer&quot;))</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">__future__</span><span class="w"> </span><span class="kn">import</span> <span class="n">annotations</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">argparse</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">sys</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+
+<div class="viewcode-block" id="register_docs_subcommand">
+<a class="viewcode-back" href="../../../cli.html#scitex_dev.cli.register_docs_subcommand">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">register_docs_subcommand</span><span class="p">(</span>
+    <span class="n">subparsers</span><span class="p">:</span> <span class="n">argparse</span><span class="o">.</span><span class="n">_SubParsersAction</span><span class="p">,</span>
+    <span class="n">package</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Register ``docs`` with ``list`` and ``get`` verb subcommands.</span>
+
+<span class="sd">    Usage::</span>
+<span class="sd">        scitex-stats docs list            # List doc pages</span>
+<span class="sd">        scitex-stats docs get             # Show available pages</span>
+<span class="sd">        scitex-stats docs get api         # Show specific page</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">prog</span> <span class="o">=</span> <span class="n">package</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;_&quot;</span><span class="p">,</span> <span class="s2">&quot;-&quot;</span><span class="p">)</span>
+    <span class="n">parser</span> <span class="o">=</span> <span class="n">subparsers</span><span class="o">.</span><span class="n">add_parser</span><span class="p">(</span>
+        <span class="s2">&quot;docs&quot;</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;View documentation for </span><span class="si">{</span><span class="n">package</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+        <span class="n">description</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;Browse and query </span><span class="si">{</span><span class="n">package</span><span class="si">}</span><span class="s2"> documentation.&quot;</span><span class="p">,</span>
+        <span class="n">epilog</span><span class="o">=</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;Examples:</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> docs list            # List doc pages</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> docs list --json     # JSON output</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> docs get             # Show available pages</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> docs get api         # Show specific page</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> docs get api --json  # Page as JSON</span><span class="se">\n</span><span class="s2">&quot;</span>
+        <span class="p">),</span>
+        <span class="n">formatter_class</span><span class="o">=</span><span class="n">argparse</span><span class="o">.</span><span class="n">RawDescriptionHelpFormatter</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+        <span class="s2">&quot;--help-recursive&quot;</span><span class="p">,</span>
+        <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Show help for all subcommands&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">docs_sub</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">add_subparsers</span><span class="p">(</span><span class="n">dest</span><span class="o">=</span><span class="s2">&quot;docs_command&quot;</span><span class="p">,</span> <span class="n">title</span><span class="o">=</span><span class="s2">&quot;Commands&quot;</span><span class="p">)</span>
+
+    <span class="c1"># docs list</span>
+    <span class="n">list_p</span> <span class="o">=</span> <span class="n">docs_sub</span><span class="o">.</span><span class="n">add_parser</span><span class="p">(</span>
+        <span class="s2">&quot;list&quot;</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;List available documentation pages&quot;</span><span class="p">,</span>
+        <span class="n">epilog</span><span class="o">=</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Examples:</span><span class="se">\n</span><span class="s2">  </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> docs list</span><span class="se">\n</span><span class="s2">  </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> docs list --json</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">),</span>
+        <span class="n">formatter_class</span><span class="o">=</span><span class="n">argparse</span><span class="o">.</span><span class="n">RawDescriptionHelpFormatter</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">list_p</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--json&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span> <span class="n">dest</span><span class="o">=</span><span class="s2">&quot;as_json&quot;</span><span class="p">)</span>
+    <span class="n">list_p</span><span class="o">.</span><span class="n">set_defaults</span><span class="p">(</span>
+        <span class="n">func</span><span class="o">=</span><span class="k">lambda</span> <span class="n">args</span><span class="p">:</span> <span class="n">_run_docs_command</span><span class="p">(</span>
+            <span class="n">argparse</span><span class="o">.</span><span class="n">Namespace</span><span class="p">(</span>
+                <span class="n">list_pages</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                <span class="n">page</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                <span class="n">as_json</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">as_json</span><span class="p">,</span>
+                <span class="n">tldr</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                <span class="nb">format</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+            <span class="p">),</span>
+            <span class="n">package</span><span class="o">=</span><span class="n">package</span><span class="p">,</span>
+        <span class="p">)</span>
+    <span class="p">)</span>
+
+    <span class="c1"># docs get [page]</span>
+    <span class="n">get_p</span> <span class="o">=</span> <span class="n">docs_sub</span><span class="o">.</span><span class="n">add_parser</span><span class="p">(</span>
+        <span class="s2">&quot;get&quot;</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Show a documentation page&quot;</span><span class="p">,</span>
+        <span class="n">epilog</span><span class="o">=</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;Examples:</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> docs get               # show overview</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> docs get api           # specific page</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> docs get api --json</span><span class="se">\n</span><span class="s2">&quot;</span>
+        <span class="p">),</span>
+        <span class="n">formatter_class</span><span class="o">=</span><span class="n">argparse</span><span class="o">.</span><span class="n">RawDescriptionHelpFormatter</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">get_p</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+        <span class="s2">&quot;name&quot;</span><span class="p">,</span> <span class="n">nargs</span><span class="o">=</span><span class="s2">&quot;?&quot;</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Page name (see &#39;docs list&#39;)&quot;</span>
+    <span class="p">)</span>
+    <span class="n">get_p</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--json&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span> <span class="n">dest</span><span class="o">=</span><span class="s2">&quot;as_json&quot;</span><span class="p">)</span>
+    <span class="n">get_p</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--format&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="nb">str</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">choices</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;html&quot;</span><span class="p">,</span> <span class="s2">&quot;json&quot;</span><span class="p">])</span>
+    <span class="n">get_p</span><span class="o">.</span><span class="n">set_defaults</span><span class="p">(</span><span class="n">func</span><span class="o">=</span><span class="k">lambda</span> <span class="n">args</span><span class="p">:</span> <span class="n">_run_docs_get</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="n">package</span><span class="o">=</span><span class="n">package</span><span class="p">))</span>
+
+    <span class="c1"># bare `docs` → show help</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">_default_handler</span><span class="p">(</span><span class="n">args</span><span class="p">):</span>
+        <span class="k">if</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="s2">&quot;help_recursive&quot;</span><span class="p">,</span> <span class="kc">False</span><span class="p">):</span>
+            <span class="n">parser</span><span class="o">.</span><span class="n">print_help</span><span class="p">()</span>
+            <span class="nb">print</span><span class="p">()</span>
+            <span class="k">for</span> <span class="n">sub_name</span><span class="p">,</span> <span class="n">sub_p</span> <span class="ow">in</span> <span class="p">[(</span><span class="s2">&quot;list&quot;</span><span class="p">,</span> <span class="n">list_p</span><span class="p">),</span> <span class="p">(</span><span class="s2">&quot;get&quot;</span><span class="p">,</span> <span class="n">get_p</span><span class="p">)]:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;--- </span><span class="si">{</span><span class="n">sub_name</span><span class="si">}</span><span class="s2"> ---&quot;</span><span class="p">)</span>
+                <span class="n">sub_p</span><span class="o">.</span><span class="n">print_help</span><span class="p">()</span>
+                <span class="nb">print</span><span class="p">()</span>
+            <span class="k">return</span>
+        <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">docs_command</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">parser</span><span class="o">.</span><span class="n">print_help</span><span class="p">()</span>
+
+    <span class="n">parser</span><span class="o">.</span><span class="n">set_defaults</span><span class="p">(</span><span class="n">func</span><span class="o">=</span><span class="n">_default_handler</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">parser</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_run_docs_get</span><span class="p">(</span><span class="n">args</span><span class="p">:</span> <span class="n">argparse</span><span class="o">.</span><span class="n">Namespace</span><span class="p">,</span> <span class="n">package</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Handle &#39;docs get [name]&#39; — show page or list available pages.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">name</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">ns</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">Namespace</span><span class="p">(</span>
+            <span class="n">list_pages</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">page</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+            <span class="n">as_json</span><span class="o">=</span><span class="nb">getattr</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="s2">&quot;as_json&quot;</span><span class="p">,</span> <span class="kc">False</span><span class="p">),</span>
+            <span class="n">tldr</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+            <span class="nb">format</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+        <span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">ns</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">Namespace</span><span class="p">(</span>
+            <span class="n">list_pages</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+            <span class="n">page</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">name</span><span class="p">,</span>
+            <span class="n">as_json</span><span class="o">=</span><span class="nb">getattr</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="s2">&quot;as_json&quot;</span><span class="p">,</span> <span class="kc">False</span><span class="p">),</span>
+            <span class="n">tldr</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+            <span class="nb">format</span><span class="o">=</span><span class="nb">getattr</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="s2">&quot;format&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">),</span>
+        <span class="p">)</span>
+    <span class="n">_run_docs_command</span><span class="p">(</span><span class="n">ns</span><span class="p">,</span> <span class="n">package</span><span class="o">=</span><span class="n">package</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_run_docs_command</span><span class="p">(</span><span class="n">args</span><span class="p">:</span> <span class="n">argparse</span><span class="o">.</span><span class="n">Namespace</span><span class="p">,</span> <span class="n">package</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Execute the docs subcommand.&quot;&quot;&quot;</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
+
+    <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s2">&quot;scitex_dev._core.discovery&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">ERROR</span><span class="p">)</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">.._docs.docs</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_docs</span>
+
+    <span class="c1"># --tldr: concise quick-start</span>
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">tldr</span><span class="p">:</span>
+        <span class="n">tldr</span> <span class="o">=</span> <span class="n">_get_tldr</span><span class="p">(</span><span class="n">package</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">as_json</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">({</span><span class="s2">&quot;package&quot;</span><span class="p">:</span> <span class="n">package</span><span class="p">,</span> <span class="s2">&quot;tldr&quot;</span><span class="p">:</span> <span class="n">tldr</span><span class="p">}))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="n">tldr</span><span class="p">)</span>
+        <span class="k">return</span>
+
+    <span class="c1"># Determine format. Note: page listings always use the rich manifest</span>
+    <span class="c1"># (format=None) so the text and --json paths show the same data —</span>
+    <span class="c1"># downgrading to format=&quot;json&quot; here would drop page titles.</span>
+    <span class="n">fmt</span> <span class="o">=</span> <span class="n">args</span><span class="o">.</span><span class="n">format</span>
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">list_pages</span><span class="p">:</span>
+        <span class="n">fetch_fmt</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="k">elif</span> <span class="n">args</span><span class="o">.</span><span class="n">as_json</span> <span class="ow">and</span> <span class="n">fmt</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">fetch_fmt</span> <span class="o">=</span> <span class="s2">&quot;json&quot;</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">fetch_fmt</span> <span class="o">=</span> <span class="n">fmt</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">get_docs</span><span class="p">(</span><span class="n">package</span><span class="o">=</span><span class="n">package</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="n">fetch_fmt</span><span class="p">,</span> <span class="n">page</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">page</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">LookupError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">)</span>
+        <span class="n">sys</span><span class="o">.</span><span class="n">exit</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+
+    <span class="c1"># --list: show page index</span>
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">list_pages</span><span class="p">:</span>
+        <span class="n">_print_page_list</span><span class="p">(</span><span class="n">result</span><span class="p">,</span> <span class="n">as_json</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">as_json</span><span class="p">)</span>
+        <span class="k">return</span>
+
+    <span class="c1"># Default output</span>
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">as_json</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">result</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="nb">str</span><span class="p">))</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">result</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">result</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="nb">str</span><span class="p">))</span>
+    <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">result</span><span class="p">,</span> <span class="n">Path</span><span class="p">)</span> <span class="ow">and</span> <span class="n">result</span><span class="o">.</span><span class="n">is_file</span><span class="p">():</span>
+        <span class="c1"># --page returns a file path — print its content</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">read_text</span><span class="p">(</span><span class="n">encoding</span><span class="o">=</span><span class="s2">&quot;utf-8&quot;</span><span class="p">))</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_print_page_list</span><span class="p">(</span><span class="n">result</span><span class="p">,</span> <span class="n">as_json</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Print a page listing from a manifest or page dict.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">result</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+        <span class="n">pages</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;pages&quot;</span><span class="p">,</span> <span class="p">[])</span>
+        <span class="k">if</span> <span class="n">as_json</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">({</span><span class="s2">&quot;pages&quot;</span><span class="p">:</span> <span class="n">pages</span><span class="p">}))</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">pages</span><span class="p">,</span> <span class="nb">list</span><span class="p">)</span> <span class="ow">and</span> <span class="n">pages</span> <span class="ow">and</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">pages</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="nb">dict</span><span class="p">):</span>
+                <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">pages</span><span class="p">:</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">p</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;name&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;?&#39;</span><span class="p">)</span><span class="si">:</span><span class="s2">20s</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">p</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;title&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">elif</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">pages</span><span class="p">,</span> <span class="nb">list</span><span class="p">):</span>
+                <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">pages</span><span class="p">:</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  (no pages found)&quot;</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_get_tldr</span><span class="p">(</span><span class="n">package</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Get a concise quick-start summary for a package.</span>
+
+<span class="sd">    Tries to extract from built docs, falls back to a generic template.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">.._docs.docs</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_docs</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">get_docs</span><span class="p">(</span><span class="n">package</span><span class="o">=</span><span class="n">package</span><span class="p">)</span>
+    <span class="k">except</span> <span class="ne">LookupError</span><span class="p">:</span>
+        <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">package</span><span class="si">}</span><span class="s2">: package not found in scitex ecosystem.&quot;</span>
+
+    <span class="c1"># Try to find a quick-start section in the docs</span>
+    <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">result</span><span class="p">,</span> <span class="nb">dict</span><span class="p">):</span>
+        <span class="n">description</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;description&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span>
+        <span class="n">version</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;version&quot;</span><span class="p">,</span> <span class="s2">&quot;?&quot;</span><span class="p">)</span>
+        <span class="n">pages</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;pages&quot;</span><span class="p">,</span> <span class="p">[])</span>
+        <span class="n">page_names</span> <span class="o">=</span> <span class="p">[</span><span class="n">p</span><span class="p">[</span><span class="s2">&quot;name&quot;</span><span class="p">]</span> <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="nb">dict</span><span class="p">)</span> <span class="k">else</span> <span class="n">p</span> <span class="k">for</span> <span class="n">p</span> <span class="ow">in</span> <span class="n">pages</span><span class="p">[:</span><span class="mi">5</span><span class="p">]]</span>
+
+        <span class="n">lines</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">package</span><span class="si">}</span><span class="s2"> v</span><span class="si">{</span><span class="n">version</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+            <span class="n">description</span><span class="p">[:</span><span class="mi">100</span><span class="p">]</span> <span class="k">if</span> <span class="n">description</span> <span class="k">else</span> <span class="s2">&quot;(no description)&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;&quot;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s2">&quot;  pip install </span><span class="si">{</span><span class="n">package</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+            <span class="sa">f</span><span class="s1">&#39;  python -c &quot;import </span><span class="si">{</span><span class="n">package</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;-&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;_&quot;</span><span class="p">)</span><span class="si">}</span><span class="s1">&quot;&#39;</span><span class="p">,</span>
+        <span class="p">]</span>
+        <span class="k">if</span> <span class="n">page_names</span><span class="p">:</span>
+            <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">)</span>
+            <span class="n">lines</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Docs pages: </span><span class="si">{</span><span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">page_names</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">lines</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">package</span><span class="si">}</span><span class="s2">: documentation available via get_docs(package=&#39;</span><span class="si">{</span><span class="n">package</span><span class="si">}</span><span class="s2">&#39;)&quot;</span>
+
+
+<div class="viewcode-block" id="docs_click_group">
+<a class="viewcode-back" href="../../../cli.html#scitex_dev.cli.docs_click_group">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">docs_click_group</span><span class="p">(</span><span class="n">package</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;docs&quot;</span><span class="p">):</span>  <span class="c1"># noqa: D401</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Create a Click command group for docs (requires Click installed).</span>
+
+<span class="sd">    Usage::</span>
+<span class="sd">        from scitex_dev.cli import docs_click_group</span>
+<span class="sd">        cli.add_command(docs_click_group(package=&quot;scitex-writer&quot;))</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">click</span>
+    <span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ImportError</span><span class="p">(</span><span class="s2">&quot;Click is required for docs_click_group. pip install click&quot;</span><span class="p">)</span>
+
+    <span class="n">prog</span> <span class="o">=</span> <span class="n">package</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;_&quot;</span><span class="p">,</span> <span class="s2">&quot;-&quot;</span><span class="p">)</span>
+
+    <span class="nd">@click</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="n">name</span><span class="p">,</span> <span class="n">invoke_without_command</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="nd">@click</span><span class="o">.</span><span class="n">pass_context</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">docs_grp</span><span class="p">(</span><span class="n">ctx</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;View package documentation (list / get / search).&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">ctx</span><span class="o">.</span><span class="n">invoked_subcommand</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">click</span><span class="o">.</span><span class="n">echo</span><span class="p">(</span><span class="n">ctx</span><span class="o">.</span><span class="n">get_help</span><span class="p">())</span>
+
+    <span class="c1"># Click reads the function docstring for short help; the f-string above</span>
+    <span class="c1"># used to silently evaluate to None (f-strings are not docstrings).</span>
+    <span class="n">docs_grp</span><span class="o">.</span><span class="n">help</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="s2">&quot;View package documentation.</span><span class="se">\n\n</span><span class="s2">&quot;</span>
+        <span class="s2">&quot;</span><span class="se">\b\n</span><span class="s2">&quot;</span>
+        <span class="s2">&quot;Examples:</span><span class="se">\n</span><span class="s2">&quot;</span>
+        <span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> docs list            # List doc pages</span><span class="se">\n</span><span class="s2">&quot;</span>
+        <span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> docs get             # Show available pages</span><span class="se">\n</span><span class="s2">&quot;</span>
+        <span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> docs get api         # Show specific page</span><span class="se">\n</span><span class="s2">&quot;</span>
+        <span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> docs search QUERY    # Search across docs/APIs/CLI/MCP</span><span class="se">\n</span><span class="s2">&quot;</span>
+    <span class="p">)</span>
+
+    <span class="nd">@docs_grp</span><span class="o">.</span><span class="n">command</span><span class="p">(</span>
+        <span class="s2">&quot;list&quot;</span><span class="p">,</span>
+        <span class="n">epilog</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;Examples:</span><span class="se">\n</span><span class="s2">  $ </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> docs list</span><span class="se">\n</span><span class="s2">  $ </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> docs list --json&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span><span class="s2">&quot;--json&quot;</span><span class="p">,</span> <span class="s2">&quot;as_json&quot;</span><span class="p">,</span> <span class="n">is_flag</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;JSON output&quot;</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">docs_list</span><span class="p">(</span><span class="n">as_json</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;List available documentation pages.&quot;&quot;&quot;</span>
+        <span class="n">ns</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">Namespace</span><span class="p">(</span>
+            <span class="n">list_pages</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">page</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+            <span class="n">as_json</span><span class="o">=</span><span class="n">as_json</span><span class="p">,</span>
+            <span class="n">tldr</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+            <span class="nb">format</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="n">_run_docs_command</span><span class="p">(</span><span class="n">ns</span><span class="p">,</span> <span class="n">package</span><span class="o">=</span><span class="n">package</span><span class="p">)</span>
+
+    <span class="nd">@docs_grp</span><span class="o">.</span><span class="n">command</span><span class="p">(</span>
+        <span class="s2">&quot;get&quot;</span><span class="p">,</span>
+        <span class="n">epilog</span><span class="o">=</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;Examples:</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;  $ </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> docs get                # show overview</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;  $ </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> docs get api            # specific page</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;  $ </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> docs get api --format json&quot;</span>
+        <span class="p">),</span>
+    <span class="p">)</span>
+    <span class="nd">@click</span><span class="o">.</span><span class="n">argument</span><span class="p">(</span><span class="s2">&quot;page_name&quot;</span><span class="p">,</span> <span class="n">required</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+    <span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span><span class="s2">&quot;--json&quot;</span><span class="p">,</span> <span class="s2">&quot;as_json&quot;</span><span class="p">,</span> <span class="n">is_flag</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;JSON output&quot;</span><span class="p">)</span>
+    <span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span><span class="s2">&quot;--format&quot;</span><span class="p">,</span> <span class="s2">&quot;fmt&quot;</span><span class="p">,</span> <span class="nb">type</span><span class="o">=</span><span class="n">click</span><span class="o">.</span><span class="n">Choice</span><span class="p">([</span><span class="s2">&quot;html&quot;</span><span class="p">,</span> <span class="s2">&quot;json&quot;</span><span class="p">]),</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">docs_get</span><span class="p">(</span><span class="n">page_name</span><span class="p">,</span> <span class="n">as_json</span><span class="p">,</span> <span class="n">fmt</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Show documentation. Without PAGE_NAME, shows package overview.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">page_name</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># No page given — show available pages</span>
+            <span class="n">ns</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">Namespace</span><span class="p">(</span>
+                <span class="n">list_pages</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                <span class="n">page</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+                <span class="n">as_json</span><span class="o">=</span><span class="n">as_json</span><span class="p">,</span>
+                <span class="n">tldr</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                <span class="nb">format</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">ns</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">Namespace</span><span class="p">(</span>
+                <span class="n">list_pages</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                <span class="n">page</span><span class="o">=</span><span class="n">page_name</span><span class="p">,</span>
+                <span class="n">as_json</span><span class="o">=</span><span class="n">as_json</span><span class="p">,</span>
+                <span class="n">tldr</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
+                <span class="nb">format</span><span class="o">=</span><span class="n">fmt</span><span class="p">,</span>
+            <span class="p">)</span>
+        <span class="n">_run_docs_command</span><span class="p">(</span><span class="n">ns</span><span class="p">,</span> <span class="n">package</span><span class="o">=</span><span class="n">package</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">docs_grp</span></div>
+
+
+
+<div class="viewcode-block" id="skills_click_group">
+<a class="viewcode-back" href="../../../api.html#scitex_dev.cli.skills_click_group">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">skills_click_group</span><span class="p">(</span><span class="n">package</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;skills&quot;</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Create a Click command group for skills (requires Click installed).</span>
+
+<span class="sd">    Usage::</span>
+<span class="sd">        from scitex_dev.cli import skills_click_group</span>
+<span class="sd">        cli.add_command(skills_click_group(package=&quot;scitex-app&quot;))</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">import</span><span class="w"> </span><span class="nn">click</span>
+    <span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ImportError</span><span class="p">(</span><span class="s2">&quot;Click is required. pip install click&quot;</span><span class="p">)</span>
+
+    <span class="n">prog</span> <span class="o">=</span> <span class="n">package</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;_&quot;</span><span class="p">,</span> <span class="s2">&quot;-&quot;</span><span class="p">)</span>
+
+    <span class="nd">@click</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="n">name</span><span class="p">,</span> <span class="n">invoke_without_command</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="nd">@click</span><span class="o">.</span><span class="n">pass_context</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">skills_grp</span><span class="p">(</span><span class="n">ctx</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;View package skills (workflow-oriented guides).&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">ctx</span><span class="o">.</span><span class="n">invoked_subcommand</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">click</span><span class="o">.</span><span class="n">echo</span><span class="p">(</span><span class="n">ctx</span><span class="o">.</span><span class="n">get_help</span><span class="p">())</span>
+
+    <span class="nd">@skills_grp</span><span class="o">.</span><span class="n">command</span><span class="p">(</span>
+        <span class="s2">&quot;list&quot;</span><span class="p">,</span>
+        <span class="n">epilog</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;Examples:</span><span class="se">\n</span><span class="s2">  $ </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> skills list</span><span class="se">\n</span><span class="s2">  $ </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> skills list --json&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span><span class="s2">&quot;--json&quot;</span><span class="p">,</span> <span class="s2">&quot;as_json&quot;</span><span class="p">,</span> <span class="n">is_flag</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;JSON output&quot;</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">skills_list</span><span class="p">(</span><span class="n">as_json</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;List available skill pages.&quot;&quot;&quot;</span>
+        <span class="n">ns</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">Namespace</span><span class="p">(</span><span class="n">as_json</span><span class="o">=</span><span class="n">as_json</span><span class="p">)</span>
+        <span class="n">_skills_list</span><span class="p">(</span><span class="n">ns</span><span class="p">,</span> <span class="n">package</span><span class="o">=</span><span class="n">package</span><span class="p">)</span>
+
+    <span class="nd">@skills_grp</span><span class="o">.</span><span class="n">command</span><span class="p">(</span>
+        <span class="s2">&quot;get&quot;</span><span class="p">,</span>
+        <span class="n">epilog</span><span class="o">=</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;Examples:</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;  $ </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> skills get                    # list available</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;  $ </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> skills get python-scitex      # show specific</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;  $ </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> skills get python-scitex --json&quot;</span>
+        <span class="p">),</span>
+    <span class="p">)</span>
+    <span class="nd">@click</span><span class="o">.</span><span class="n">argument</span><span class="p">(</span><span class="s2">&quot;skill_name&quot;</span><span class="p">,</span> <span class="n">required</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+    <span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span><span class="s2">&quot;--json&quot;</span><span class="p">,</span> <span class="s2">&quot;as_json&quot;</span><span class="p">,</span> <span class="n">is_flag</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;JSON output&quot;</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">skills_get</span><span class="p">(</span><span class="n">skill_name</span><span class="p">,</span> <span class="n">as_json</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Show a specific skill page.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">skill_name</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="c1"># No name given — show available skills</span>
+            <span class="n">ns</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">Namespace</span><span class="p">(</span><span class="n">as_json</span><span class="o">=</span><span class="n">as_json</span><span class="p">)</span>
+            <span class="n">_skills_list</span><span class="p">(</span><span class="n">ns</span><span class="p">,</span> <span class="n">package</span><span class="o">=</span><span class="n">package</span><span class="p">)</span>
+            <span class="k">return</span>
+        <span class="n">ns</span> <span class="o">=</span> <span class="n">argparse</span><span class="o">.</span><span class="n">Namespace</span><span class="p">(</span><span class="n">name</span><span class="o">=</span><span class="n">skill_name</span><span class="p">,</span> <span class="n">as_json</span><span class="o">=</span><span class="n">as_json</span><span class="p">)</span>
+        <span class="n">_skills_get</span><span class="p">(</span><span class="n">ns</span><span class="p">,</span> <span class="n">package</span><span class="o">=</span><span class="n">package</span><span class="p">)</span>
+
+    <span class="c1"># hook-bypass: line-limit — adding export subcommand; cli.py split</span>
+    <span class="c1"># refactor tracked in GITIGNORED/REFACTORING.md, follow-up work item.</span>
+    <span class="nd">@skills_grp</span><span class="o">.</span><span class="n">command</span><span class="p">(</span>
+        <span class="s2">&quot;export&quot;</span><span class="p">,</span>
+        <span class="n">epilog</span><span class="o">=</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;Examples:</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;  $ </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> skills export                       # default dest</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;  $ </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> skills export --dest /tmp/skills</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;  $ </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> skills export --dry-run --json      # preview&quot;</span>
+        <span class="p">),</span>
+    <span class="p">)</span>
+    <span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span>
+        <span class="s2">&quot;--dest&quot;</span><span class="p">,</span>
+        <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Destination dir (default: ~/.claude/skills/scitex/).&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span>
+        <span class="s2">&quot;--source&quot;</span><span class="p">,</span>
+        <span class="nb">type</span><span class="o">=</span><span class="n">click</span><span class="o">.</span><span class="n">Choice</span><span class="p">([</span><span class="s2">&quot;package&quot;</span><span class="p">,</span> <span class="s2">&quot;dev&quot;</span><span class="p">,</span> <span class="s2">&quot;auto&quot;</span><span class="p">]),</span>
+        <span class="n">default</span><span class="o">=</span><span class="s2">&quot;auto&quot;</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Which source to export from.&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span><span class="s2">&quot;--clean&quot;</span><span class="p">,</span> <span class="n">is_flag</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Delete pkg subdir first.&quot;</span><span class="p">)</span>
+    <span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span><span class="s2">&quot;--dry-run&quot;</span><span class="p">,</span> <span class="n">is_flag</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Preview without writing.&quot;</span><span class="p">)</span>
+    <span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span>
+        <span class="s2">&quot;--yes&quot;</span><span class="p">,</span> <span class="s2">&quot;-y&quot;</span><span class="p">,</span> <span class="n">is_flag</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Skip confirmation when overwriting.&quot;</span>
+    <span class="p">)</span>
+    <span class="nd">@click</span><span class="o">.</span><span class="n">option</span><span class="p">(</span><span class="s2">&quot;--json&quot;</span><span class="p">,</span> <span class="s2">&quot;as_json&quot;</span><span class="p">,</span> <span class="n">is_flag</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">help</span><span class="o">=</span><span class="s2">&quot;JSON output&quot;</span><span class="p">)</span>
+    <span class="k">def</span><span class="w"> </span><span class="nf">skills_export</span><span class="p">(</span><span class="n">dest</span><span class="p">,</span> <span class="n">source</span><span class="p">,</span> <span class="n">clean</span><span class="p">,</span> <span class="n">dry_run</span><span class="p">,</span> <span class="n">yes</span><span class="p">,</span> <span class="n">as_json</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Export this package&#39;s skills to &lt;dest&gt;.&quot;&quot;&quot;</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span> <span class="k">as</span> <span class="n">_P</span>
+
+        <span class="kn">from</span><span class="w"> </span><span class="nn">.._ecosystem._skills.skills</span><span class="w"> </span><span class="kn">import</span> <span class="p">(</span>
+            <span class="n">_get_default_export_dest</span><span class="p">,</span>
+            <span class="n">export_skills</span><span class="p">,</span>
+            <span class="n">list_skills</span><span class="p">,</span>
+        <span class="p">)</span>
+
+        <span class="n">target</span> <span class="o">=</span> <span class="n">_P</span><span class="p">(</span><span class="n">dest</span><span class="p">)</span> <span class="k">if</span> <span class="n">dest</span> <span class="k">else</span> <span class="n">_get_default_export_dest</span><span class="p">()</span>
+
+        <span class="c1"># hook-bypass: line-limit (tracked in GITIGNORED/REFACTORING.md)</span>
+        <span class="k">if</span> <span class="n">dry_run</span><span class="p">:</span>
+            <span class="n">sl_by_pkg</span> <span class="o">=</span> <span class="n">list_skills</span><span class="p">(</span><span class="n">package</span><span class="o">=</span><span class="n">package</span><span class="p">)</span>
+            <span class="n">flat</span> <span class="o">=</span> <span class="p">[</span><span class="n">s</span> <span class="k">for</span> <span class="n">lst</span> <span class="ow">in</span> <span class="n">sl_by_pkg</span><span class="o">.</span><span class="n">values</span><span class="p">()</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">lst</span><span class="p">]</span>
+            <span class="k">if</span> <span class="n">as_json</span><span class="p">:</span>
+                <span class="kn">import</span><span class="w"> </span><span class="nn">json</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">_json</span>
+
+                <span class="n">click</span><span class="o">.</span><span class="n">echo</span><span class="p">(</span>
+                    <span class="n">_json</span><span class="o">.</span><span class="n">dumps</span><span class="p">({</span><span class="nb">str</span><span class="p">(</span><span class="n">target</span><span class="p">):</span> <span class="p">[</span><span class="n">s</span><span class="p">[</span><span class="s2">&quot;name&quot;</span><span class="p">]</span> <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">flat</span><span class="p">]},</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+                <span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">click</span><span class="o">.</span><span class="n">echo</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;Would export </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">flat</span><span class="p">)</span><span class="si">}</span><span class="s2"> files for </span><span class="si">{</span><span class="n">package</span><span class="si">}</span><span class="s2"> &quot;</span>
+                    <span class="sa">f</span><span class="s2">&quot;to </span><span class="si">{</span><span class="n">target</span><span class="si">}</span><span class="s2">/ (source=</span><span class="si">{</span><span class="n">source</span><span class="si">}</span><span class="s2">)&quot;</span>
+                <span class="p">)</span>
+                <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">flat</span><span class="p">:</span>
+                    <span class="n">click</span><span class="o">.</span><span class="n">echo</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  - </span><span class="si">{</span><span class="n">s</span><span class="p">[</span><span class="s1">&#39;name&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">return</span>
+
+        <span class="n">exported</span> <span class="o">=</span> <span class="n">export_skills</span><span class="p">(</span><span class="n">target</span><span class="p">,</span> <span class="n">package</span><span class="o">=</span><span class="n">package</span><span class="p">,</span> <span class="n">clean</span><span class="o">=</span><span class="n">clean</span><span class="p">,</span> <span class="n">source</span><span class="o">=</span><span class="n">source</span><span class="p">)</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">exported</span><span class="p">:</span>
+            <span class="n">click</span><span class="o">.</span><span class="n">echo</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No skills found to export for </span><span class="si">{</span><span class="n">package</span><span class="si">}</span><span class="s2">.&quot;</span><span class="p">)</span>
+            <span class="k">return</span>
+        <span class="k">if</span> <span class="n">as_json</span><span class="p">:</span>
+            <span class="kn">import</span><span class="w"> </span><span class="nn">json</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">_json</span>
+
+            <span class="n">click</span><span class="o">.</span><span class="n">echo</span><span class="p">(</span>
+                <span class="n">_json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span>
+                    <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">f</span><span class="p">)</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">v</span><span class="p">]</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">exported</span><span class="o">.</span><span class="n">items</span><span class="p">()},</span>
+                    <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span>
+                <span class="p">)</span>
+            <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">total</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">exported</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
+            <span class="n">click</span><span class="o">.</span><span class="n">echo</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Exported </span><span class="si">{</span><span class="n">total</span><span class="si">}</span><span class="s2"> files for </span><span class="si">{</span><span class="n">package</span><span class="si">}</span><span class="s2"> to </span><span class="si">{</span><span class="n">target</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># `install` is the audit-cli §3 canonical verb name for materialising</span>
+    <span class="c1"># cached resources to the user&#39;s filesystem; we keep `export` as a</span>
+    <span class="c1"># back-compat alias and bind both to the same callback so existing</span>
+    <span class="c1"># docs / muscle memory keep working.</span>
+    <span class="n">skills_grp</span><span class="o">.</span><span class="n">add_command</span><span class="p">(</span><span class="n">skills_export</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">&quot;install&quot;</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">skills_grp</span></div>
+
+
+
+<span class="c1"># =============================================================================</span>
+<span class="c1"># Skills subcommand (argparse)</span>
+<span class="c1"># =============================================================================</span>
+
+
+<div class="viewcode-block" id="register_skills_subcommand">
+<a class="viewcode-back" href="../../../api.html#scitex_dev.cli.register_skills_subcommand">[docs]</a>
+<span class="k">def</span><span class="w"> </span><span class="nf">register_skills_subcommand</span><span class="p">(</span>
+    <span class="n">subparsers</span><span class="p">:</span> <span class="n">argparse</span><span class="o">.</span><span class="n">_SubParsersAction</span><span class="p">,</span>
+    <span class="n">package</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">argparse</span><span class="o">.</span><span class="n">ArgumentParser</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Register ``skills`` with ``list`` and ``get`` verb subcommands.</span>
+
+<span class="sd">    Usage::</span>
+<span class="sd">        scitex-stats skills list              # List skill pages</span>
+<span class="sd">        scitex-stats skills get               # Show main SKILL.md</span>
+<span class="sd">        scitex-stats skills get test-selection # Show a reference page</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">prog</span> <span class="o">=</span> <span class="n">package</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;_&quot;</span><span class="p">,</span> <span class="s2">&quot;-&quot;</span><span class="p">)</span>
+    <span class="n">parser</span> <span class="o">=</span> <span class="n">subparsers</span><span class="o">.</span><span class="n">add_parser</span><span class="p">(</span>
+        <span class="s2">&quot;skills&quot;</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;View skills for </span><span class="si">{</span><span class="n">package</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+        <span class="n">description</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;Browse </span><span class="si">{</span><span class="n">package</span><span class="si">}</span><span class="s2"> skills (workflow-oriented guides).&quot;</span><span class="p">,</span>
+        <span class="n">epilog</span><span class="o">=</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;Examples:</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> skills list</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> skills get test-selection</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> skills export --dry-run</span><span class="se">\n</span><span class="s2">&quot;</span>
+        <span class="p">),</span>
+        <span class="n">formatter_class</span><span class="o">=</span><span class="n">argparse</span><span class="o">.</span><span class="n">RawDescriptionHelpFormatter</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">parser</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+        <span class="s2">&quot;--help-recursive&quot;</span><span class="p">,</span>
+        <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Show help for all subcommands&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">skills_sub</span> <span class="o">=</span> <span class="n">parser</span><span class="o">.</span><span class="n">add_subparsers</span><span class="p">(</span><span class="n">dest</span><span class="o">=</span><span class="s2">&quot;skills_command&quot;</span><span class="p">,</span> <span class="n">title</span><span class="o">=</span><span class="s2">&quot;Commands&quot;</span><span class="p">)</span>
+
+    <span class="c1"># skills list</span>
+    <span class="n">list_p</span> <span class="o">=</span> <span class="n">skills_sub</span><span class="o">.</span><span class="n">add_parser</span><span class="p">(</span>
+        <span class="s2">&quot;list&quot;</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;List available skill pages&quot;</span><span class="p">,</span>
+        <span class="n">epilog</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;Examples:</span><span class="se">\n</span><span class="s2">  </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> skills list</span><span class="se">\n</span><span class="s2">  </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> skills list --json</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">,</span>
+        <span class="n">formatter_class</span><span class="o">=</span><span class="n">argparse</span><span class="o">.</span><span class="n">RawDescriptionHelpFormatter</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">list_p</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--json&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span> <span class="n">dest</span><span class="o">=</span><span class="s2">&quot;as_json&quot;</span><span class="p">)</span>
+    <span class="n">list_p</span><span class="o">.</span><span class="n">set_defaults</span><span class="p">(</span><span class="n">func</span><span class="o">=</span><span class="k">lambda</span> <span class="n">args</span><span class="p">:</span> <span class="n">_skills_list</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="n">package</span><span class="p">))</span>
+
+    <span class="c1"># skills get [name]</span>
+    <span class="n">get_p</span> <span class="o">=</span> <span class="n">skills_sub</span><span class="o">.</span><span class="n">add_parser</span><span class="p">(</span>
+        <span class="s2">&quot;get&quot;</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Show a skill page&quot;</span><span class="p">,</span>
+        <span class="n">epilog</span><span class="o">=</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;Examples:</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> skills get                  # list available</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> skills get test-selection   # show specific</span><span class="se">\n</span><span class="s2">&quot;</span>
+        <span class="p">),</span>
+        <span class="n">formatter_class</span><span class="o">=</span><span class="n">argparse</span><span class="o">.</span><span class="n">RawDescriptionHelpFormatter</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">get_p</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+        <span class="s2">&quot;name&quot;</span><span class="p">,</span>
+        <span class="n">nargs</span><span class="o">=</span><span class="s2">&quot;?&quot;</span><span class="p">,</span>
+        <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Skill name (see &#39;skills list&#39;)&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">get_p</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span><span class="s2">&quot;--json&quot;</span><span class="p">,</span> <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span> <span class="n">dest</span><span class="o">=</span><span class="s2">&quot;as_json&quot;</span><span class="p">)</span>
+    <span class="n">get_p</span><span class="o">.</span><span class="n">set_defaults</span><span class="p">(</span><span class="n">func</span><span class="o">=</span><span class="k">lambda</span> <span class="n">args</span><span class="p">:</span> <span class="n">_skills_get</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="n">package</span><span class="p">))</span>
+
+    <span class="c1"># skills export</span>
+    <span class="n">export_p</span> <span class="o">=</span> <span class="n">skills_sub</span><span class="o">.</span><span class="n">add_parser</span><span class="p">(</span>
+        <span class="s2">&quot;export&quot;</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Export skills to ~/.claude/skills/scitex/&quot;</span><span class="p">,</span>
+        <span class="n">epilog</span><span class="o">=</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">&quot;Examples:</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> skills export                 # default dest</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> skills export --dest /tmp/skills</span><span class="se">\n</span><span class="s2">&quot;</span>
+            <span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> skills export --dry-run --json</span><span class="se">\n</span><span class="s2">&quot;</span>
+        <span class="p">),</span>
+        <span class="n">formatter_class</span><span class="o">=</span><span class="n">argparse</span><span class="o">.</span><span class="n">RawDescriptionHelpFormatter</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">export_p</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+        <span class="s2">&quot;--dest&quot;</span><span class="p">,</span>
+        <span class="n">default</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Exact target directory (default: ~/.claude/skills/scitex/)&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">export_p</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+        <span class="s2">&quot;--source&quot;</span><span class="p">,</span>
+        <span class="n">choices</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;installed&quot;</span><span class="p">,</span> <span class="s2">&quot;pypi&quot;</span><span class="p">],</span>
+        <span class="n">default</span><span class="o">=</span><span class="s2">&quot;installed&quot;</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;local (installed packages) or pypi (download wheels)&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">export_p</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+        <span class="s2">&quot;--clean&quot;</span><span class="p">,</span>
+        <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Delete package subdirs before exporting&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">export_p</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+        <span class="s2">&quot;--dry-run&quot;</span><span class="p">,</span>
+        <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Preview what would be exported without writing&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">export_p</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+        <span class="s2">&quot;--yes&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;-y&quot;</span><span class="p">,</span>
+        <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Skip confirmation when overwriting destination&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">export_p</span><span class="o">.</span><span class="n">add_argument</span><span class="p">(</span>
+        <span class="s2">&quot;--json&quot;</span><span class="p">,</span>
+        <span class="n">action</span><span class="o">=</span><span class="s2">&quot;store_true&quot;</span><span class="p">,</span>
+        <span class="n">dest</span><span class="o">=</span><span class="s2">&quot;as_json&quot;</span><span class="p">,</span>
+        <span class="n">help</span><span class="o">=</span><span class="s2">&quot;Output as JSON&quot;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="n">export_p</span><span class="o">.</span><span class="n">set_defaults</span><span class="p">(</span><span class="n">func</span><span class="o">=</span><span class="k">lambda</span> <span class="n">args</span><span class="p">:</span> <span class="n">_skills_export</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="n">package</span><span class="p">))</span>
+
+    <span class="n">parser</span><span class="o">.</span><span class="n">set_defaults</span><span class="p">(</span>
+        <span class="n">func</span><span class="o">=</span><span class="k">lambda</span> <span class="n">args</span><span class="p">:</span> <span class="n">parser</span><span class="o">.</span><span class="n">print_help</span><span class="p">()</span> <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">skills_command</span> <span class="ow">is</span> <span class="kc">None</span> <span class="k">else</span> <span class="kc">None</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="n">parser</span></div>
+
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_skills_list</span><span class="p">(</span><span class="n">args</span><span class="p">:</span> <span class="n">argparse</span><span class="o">.</span><span class="n">Namespace</span><span class="p">,</span> <span class="n">package</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
+
+    <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s2">&quot;scitex_dev._core.discovery&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">ERROR</span><span class="p">)</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">.._ecosystem._skills.skills</span><span class="w"> </span><span class="kn">import</span> <span class="n">list_skills</span>
+
+    <span class="n">result</span> <span class="o">=</span> <span class="n">list_skills</span><span class="p">(</span><span class="n">package</span><span class="o">=</span><span class="n">package</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">as_json</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">result</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">))</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">items</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">package</span><span class="p">,</span> <span class="p">[])</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">items</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No skills found for </span><span class="si">{</span><span class="n">package</span><span class="si">}</span><span class="s2">.&quot;</span><span class="p">)</span>
+            <span class="k">return</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Available skills for </span><span class="si">{</span><span class="n">package</span><span class="si">}</span><span class="s2">:</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">s</span> <span class="ow">in</span> <span class="n">items</span><span class="p">:</span>
+            <span class="n">desc</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">s</span><span class="p">[</span><span class="s1">&#39;description&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span> <span class="k">if</span> <span class="n">s</span><span class="p">[</span><span class="s2">&quot;description&quot;</span><span class="p">]</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">s</span><span class="p">[</span><span class="s1">&#39;name&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">desc</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">s</span><span class="p">[</span><span class="s1">&#39;description&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">prog</span> <span class="o">=</span> <span class="n">package</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;_&quot;</span><span class="p">,</span> <span class="s2">&quot;-&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Usage: </span><span class="si">{</span><span class="n">prog</span><span class="si">}</span><span class="s2"> skills get &lt;name&gt;&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_skills_export</span><span class="p">(</span><span class="n">args</span><span class="p">:</span> <span class="n">argparse</span><span class="o">.</span><span class="n">Namespace</span><span class="p">,</span> <span class="n">package</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
+
+    <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s2">&quot;scitex_dev._core.discovery&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">ERROR</span><span class="p">)</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">.._ecosystem._skills.skills</span><span class="w"> </span><span class="kn">import</span> <span class="n">export_skills</span>
+
+    <span class="kn">from</span><span class="w"> </span><span class="nn">.._ecosystem._skills.skills</span><span class="w"> </span><span class="kn">import</span> <span class="n">_get_default_export_dest</span>
+
+    <span class="n">dest</span> <span class="o">=</span> <span class="p">(</span>
+        <span class="n">Path</span><span class="p">(</span><span class="n">args</span><span class="o">.</span><span class="n">dest</span><span class="p">)</span> <span class="k">if</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="s2">&quot;dest&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span> <span class="k">else</span> <span class="n">_get_default_export_dest</span><span class="p">()</span>
+    <span class="p">)</span>
+    <span class="n">source</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="s2">&quot;source&quot;</span><span class="p">,</span> <span class="s2">&quot;installed&quot;</span><span class="p">)</span>
+    <span class="n">clean</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="s2">&quot;clean&quot;</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="s2">&quot;dry_run&quot;</span><span class="p">,</span> <span class="kc">False</span><span class="p">):</span>
+        <span class="kn">from</span><span class="w"> </span><span class="nn">.._ecosystem._skills.skills</span><span class="w"> </span><span class="kn">import</span> <span class="n">list_skills</span>
+
+        <span class="n">result</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="n">k</span><span class="p">:</span> <span class="p">[</span><span class="n">e</span><span class="p">[</span><span class="s2">&quot;name&quot;</span><span class="p">]</span> <span class="o">+</span> <span class="s2">&quot;.md&quot;</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">v</span><span class="p">]</span>
+            <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">list_skills</span><span class="p">(</span><span class="n">package</span><span class="o">=</span><span class="n">package</span><span class="p">)</span><span class="o">.</span><span class="n">items</span><span class="p">()</span>
+        <span class="p">}</span>
+        <span class="n">total</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">result</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
+        <span class="k">if</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="s2">&quot;as_json&quot;</span><span class="p">,</span> <span class="kc">False</span><span class="p">):</span>
+            <span class="nb">print</span><span class="p">(</span>
+                <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span>
+                    <span class="p">{</span><span class="s2">&quot;dest&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">dest</span><span class="p">),</span> <span class="s2">&quot;source&quot;</span><span class="p">:</span> <span class="n">source</span><span class="p">,</span> <span class="s2">&quot;packages&quot;</span><span class="p">:</span> <span class="n">result</span><span class="p">},</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span>
+                <span class="p">)</span>
+            <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Would export </span><span class="si">{</span><span class="n">total</span><span class="si">}</span><span class="s2"> files to </span><span class="si">{</span><span class="n">dest</span><span class="si">}</span><span class="s2">/ (source=</span><span class="si">{</span><span class="n">source</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">items</span><span class="p">()):</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">k</span><span class="si">}</span><span class="s2">/: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">v</span><span class="p">)</span><span class="si">}</span><span class="s2"> files&quot;</span><span class="p">)</span>
+        <span class="k">return</span>
+    <span class="n">exported</span> <span class="o">=</span> <span class="n">export_skills</span><span class="p">(</span><span class="n">dest</span><span class="p">,</span> <span class="n">package</span><span class="o">=</span><span class="n">package</span><span class="p">,</span> <span class="n">clean</span><span class="o">=</span><span class="n">clean</span><span class="p">,</span> <span class="n">source</span><span class="o">=</span><span class="n">source</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">exported</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;No skills found for </span><span class="si">{</span><span class="n">package</span><span class="si">}</span><span class="s2">.&quot;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">)</span>
+        <span class="n">sys</span><span class="o">.</span><span class="n">exit</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">args</span><span class="p">,</span> <span class="s2">&quot;as_json&quot;</span><span class="p">,</span> <span class="kc">False</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span>
+            <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">({</span><span class="n">k</span><span class="p">:</span> <span class="p">[</span><span class="nb">str</span><span class="p">(</span><span class="n">f</span><span class="p">)</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">v</span><span class="p">]</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">exported</span><span class="o">.</span><span class="n">items</span><span class="p">()},</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+        <span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">total</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">v</span><span class="p">)</span> <span class="k">for</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">exported</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Exported </span><span class="si">{</span><span class="n">total</span><span class="si">}</span><span class="s2"> files across </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">exported</span><span class="p">)</span><span class="si">}</span><span class="s2"> packages&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">exported</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">k</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">v</span><span class="p">)</span><span class="si">}</span><span class="s2"> files&quot;</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">_skills_get</span><span class="p">(</span><span class="n">args</span><span class="p">:</span> <span class="n">argparse</span><span class="o">.</span><span class="n">Namespace</span><span class="p">,</span> <span class="n">package</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
+    <span class="kn">import</span><span class="w"> </span><span class="nn">logging</span>
+
+    <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="s2">&quot;scitex_dev._core.discovery&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">setLevel</span><span class="p">(</span><span class="n">logging</span><span class="o">.</span><span class="n">ERROR</span><span class="p">)</span>
+
+    <span class="c1"># No name given → show available names</span>
+    <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">name</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">_skills_list</span><span class="p">(</span><span class="n">argparse</span><span class="o">.</span><span class="n">Namespace</span><span class="p">(</span><span class="n">as_json</span><span class="o">=</span><span class="kc">False</span><span class="p">),</span> <span class="n">package</span><span class="p">)</span>
+        <span class="k">return</span>
+
+    <span class="kn">from</span><span class="w"> </span><span class="nn">.._ecosystem._skills.skills</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_skill</span>
+
+    <span class="n">content</span> <span class="o">=</span> <span class="n">get_skill</span><span class="p">(</span><span class="n">package</span><span class="o">=</span><span class="n">package</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="n">args</span><span class="o">.</span><span class="n">name</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">content</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">args</span><span class="o">.</span><span class="n">as_json</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span>
+                <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">({</span><span class="s2">&quot;package&quot;</span><span class="p">:</span> <span class="n">package</span><span class="p">,</span> <span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="n">args</span><span class="o">.</span><span class="n">name</span><span class="p">,</span> <span class="s2">&quot;content&quot;</span><span class="p">:</span> <span class="n">content</span><span class="p">})</span>
+            <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="n">content</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Skill &#39;</span><span class="si">{</span><span class="n">args</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">&#39; not found in </span><span class="si">{</span><span class="n">package</span><span class="si">}</span><span class="s2">.&quot;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Run: </span><span class="si">{</span><span class="n">package</span><span class="si">}</span><span class="s2"> skills list&quot;</span><span class="p">,</span> <span class="n">file</span><span class="o">=</span><span class="n">sys</span><span class="o">.</span><span class="n">stderr</span><span class="p">)</span>
+        <span class="n">sys</span><span class="o">.</span><span class="n">exit</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+</pre></div>
+
+           </div>
+          </div>
+          <footer>
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>&#169; Copyright 2026, Yusuke Watanabe.</p>
+  </div>
+
+  Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+    <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+    provided by <a href="https://readthedocs.org">Read the Docs</a>.
+   
+
+</footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+
+</body>
+</html>

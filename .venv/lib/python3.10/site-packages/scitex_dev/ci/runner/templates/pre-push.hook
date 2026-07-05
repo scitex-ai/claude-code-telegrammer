@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# scitex-dev CI pre-push gate (fail-loud — operator directive 2026-06-16:
+# "fail fast, fail loud, no silent fallbacks" + "pre push might want to check
+# if ci runner is online").
+#
+# Blocks the push when the self-hosted Spartan CI cannot run the resulting
+# workflow (no RUNNING lease, or no online runner with the required label),
+# so the run does not sit queued forever — and never silently falls back to a
+# github-hosted runner.
+#
+# Install (per repo):
+#   ln -sf ../../src/scitex_dev/ci/runner/templates/pre-push.hook \
+#          .git/hooks/pre-push
+# or set a shared hooks dir:
+#   git config core.hooksPath .githooks   # then drop this file in .githooks/
+#
+# Bypass a single push (the run will NOT execute on Spartan):
+#   git push --no-verify
+set -euo pipefail
+
+# Resolve the CLI: prefer an installed console script, else the repo venv.
+if command -v scitex-dev >/dev/null 2>&1; then
+    SCITEX_DEV=(scitex-dev)
+elif [ -x ".venv/bin/scitex-dev" ]; then
+    SCITEX_DEV=(.venv/bin/scitex-dev)
+else
+    echo "pre-push: scitex-dev CLI not found — skipping CI preflight" >&2
+    echo "          (install scitex-dev[cli] to enable the fail-loud gate)" >&2
+    exit 0
+fi
+
+exec "${SCITEX_DEV[@]}" ci runner preflight

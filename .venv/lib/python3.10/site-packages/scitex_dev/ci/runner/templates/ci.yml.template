@@ -1,0 +1,108 @@
+# Reusable scitex-ci self-hosted runner workflow (scitex-dev ships this).
+# A repo onboards by copying this verbatim into .github/workflows/ci.yml.
+# Only test paths and per-repo pyproject.toml deps differ.
+#
+# Design:
+#  * runs-on driven by repo Actions Variable CI_RUNS_ON. Default
+#    '["self-hosted","scitex-ci"]'. Watchdog auto-flips to '"ubuntu-latest"'
+#    on runner-offline (manual override via `scitex-dev ci runner use ...`).
+#  * Inside-SIF execution: NO per-job setup-python extraction on self-hosted.
+#    The SIF carries the common scitex base + apt deps.
+#  * Per-project deps installed at job start via `uv pip install` against
+#    a writable $TMPDIR/site target (HPC compute-node HOME is RO inside the
+#    SIF; project pyproject.toml is the source of truth for project deps).
+#  * Adaptive xdist worker count: heuristic by collected_tests, capped to
+#    nproc//2 (physical cores) so future bigger nodes scale automatically.
+#    Per-repo override via [tool.scitex.ci].xdist_workers.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+# Sec: repo Settings → Actions → "Require approval for all outside
+# collaborators". Self-hosted runners NEVER auto-run untrusted fork code.
+
+jobs:
+  pytest:
+    name: pytest
+    runs-on: ${{ fromJSON(vars.CI_RUNS_ON || '["self-hosted","scitex-ci"]') }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # Hosted fallback path — only fires when watchdog has flipped to
+      # ubuntu-latest, or on a fresh repo with vars.CI_RUNS_ON unset.
+      - if: runner.environment == 'github-hosted'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - if: runner.environment == 'github-hosted'
+        run: |
+          python -m pip install --upgrade pip pytest pytest-xdist
+          python -m pip install -e .
+          python -m pytest tests/ -n auto --tb=short
+
+      # Self-hosted in-SIF path. APPTAINER + SIF come from repo Actions
+      # Variables; the workflow YAML carries no HPC paths.
+      - if: runner.environment == 'self-hosted'
+        env:
+          APPTAINER: ${{ vars.SCITEX_CI_APPTAINER }}
+          SIF: ${{ vars.SCITEX_CI_SIF }}
+          # Adaptive xdist worker count.
+          # Cap is nproc//2 (the //2 strips HT inflation — works on any
+          # future node size, no hardcoded core count).
+          # Per-repo override: [tool.scitex.ci].xdist_workers = N in pyproject.toml
+          # Heuristic (default):
+          #   ≤32 tests   → n=16
+          #   ≤128 tests  → n=32
+          #   >128 tests  → n=min(64, nproc//2)
+          PYTEST_N_FALLBACK: '16'
+        run: |
+          set -euo pipefail
+          mkdir -p "$TMPDIR/site"
+
+          # Install project deps from THIS repo's pyproject.toml into a
+          # writable target. --target avoids HPC-compute-HOME-RO and
+          # SIF-/opt/venv-RO. --no-deps because pyproject pin-resolves
+          # against the SIF base already; we only layer the project's own
+          # source + its declared extras.
+          "$APPTAINER" exec "$SIF" bash -c '
+            uv pip install --target='"$TMPDIR"'/site --no-deps -e . \
+              || pip install --target='"$TMPDIR"'/site --no-deps -e .
+          '
+
+          # Adaptive worker pick: read [tool.scitex.ci].xdist_workers
+          # override; else use heuristic on collected test count.
+          N=$("$APPTAINER" exec "$SIF" python -c "
+import tomllib, os, subprocess, sys
+try:
+    cfg = tomllib.loads(open('pyproject.toml').read()).get('tool',{}).get('scitex',{}).get('ci',{})
+except Exception:
+    cfg = {}
+override = cfg.get('xdist_workers')
+if override:
+    print(int(override)); sys.exit()
+r = subprocess.run(['python','-m','pytest','--collect-only','-q','tests/'],
+                   capture_output=True, text=True)
+n_tests = sum(1 for line in r.stdout.splitlines() if '::' in line)
+nproc = os.cpu_count() or 4
+phys_cap = max(1, nproc // 2)
+if n_tests <= 32:
+    print(min(16, phys_cap))
+elif n_tests <= 128:
+    print(min(32, phys_cap))
+else:
+    print(phys_cap)
+" 2>/dev/null || echo "$PYTEST_N_FALLBACK")
+
+          echo "::notice::scitex-ci xdist N=$N (cap=nproc//2)"
+
+          "$APPTAINER" exec "$SIF" bash -c '
+            export PYTHONPATH='"$TMPDIR"'/site:${PYTHONPATH:-}
+            python -m pytest tests/ -n '"$N"' --tb=short -p no:cacheprovider
+          '

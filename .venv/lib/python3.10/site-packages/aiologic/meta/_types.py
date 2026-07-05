@@ -1,0 +1,508 @@
+#!/usr/bin/env python3
+
+# SPDX-FileCopyrightText: 2025 Ilya Egorov <0x42005e1f@gmail.com>
+# SPDX-License-Identifier: ISC
+
+from __future__ import annotations
+
+import sys
+
+from functools import update_wrapper
+from inspect import (
+    CO_ASYNC_GENERATOR,
+    CO_COROUTINE,
+    CO_GENERATOR,
+    CO_ITERABLE_COROUTINE,
+    isfunction,
+)
+from types import CoroutineType, GeneratorType
+from typing import TYPE_CHECKING, Any, TypeVar, get_args, get_origin
+
+from ._helpers import GeneratorCoroutineWrapper
+from ._inspect import isasyncgenfactory, iscoroutinefactory, isgeneratorfactory
+
+if TYPE_CHECKING:
+    from typing import Final
+
+    if sys.version_info >= (3, 9):  # PEP 585
+        from collections.abc import Awaitable, Callable
+    else:
+        from typing import Awaitable, Callable
+
+if sys.version_info >= (3, 9):  # PEP 585
+    from collections.abc import Coroutine, Generator
+else:
+    from typing import Coroutine, Generator
+
+if TYPE_CHECKING:
+    if sys.version_info >= (3, 10):  # PEP 612
+        from typing import ParamSpec
+    else:  # typing-extensions>=3.10.0
+        from typing_extensions import ParamSpec
+
+if sys.version_info >= (3, 11):  # runtime introspection support
+    from typing import overload
+else:  # typing-extensions>=4.2.0
+    from typing_extensions import overload
+
+if TYPE_CHECKING:
+    _T = TypeVar("_T")
+    _CallableT = TypeVar("_CallableT", bound=Callable[..., Any])
+
+if TYPE_CHECKING:
+    _ReturnT = TypeVar("_ReturnT")
+    _SendT = TypeVar("_SendT")
+    _YieldT = TypeVar("_YieldT")
+    _P = ParamSpec("_P")
+
+_COPY_ANNOTATIONS: Final[bool] = sys.version_info < (3, 14)  # PEP 649
+
+_generator_origins: tuple[type, ...] = (
+    GeneratorType,
+    Generator,  # is also the origin of `typing.Generator` (a generic alias)
+)
+_coroutine_origins: tuple[type, ...] = (
+    CoroutineType,
+    Coroutine,  # is also the origin of `typing.Coroutine` (a generic alias)
+)
+_generatortype_names: set[str] = {
+    "types.GeneratorType",
+    "collections.abc.Generator",
+    "typing.Generator",
+    "typing_extensions.Generator",
+    "GeneratorType",
+    "Generator",
+}
+_coroutinetype_names: set[str] = {
+    "types.CoroutineType",
+    "collections.abc.Coroutine",
+    "typing.Coroutine",
+    "typing_extensions.Coroutine",
+    "CoroutineType",
+    "Coroutine",
+}
+_generatortype_prefixes: tuple[str, ...] = tuple(
+    f"{name}[" for name in _generatortype_names
+)
+_coroutinetype_prefixes: tuple[str, ...] = tuple(
+    f"{name}[" for name in _coroutinetype_names
+)
+
+
+@overload
+def _get_generictype_args(
+    annotation: str,
+    /,
+    origins: tuple[type, ...] | type,
+    prefixes: tuple[str, ...],
+    length: int,
+) -> tuple[str, ...]: ...
+@overload
+def _get_generictype_args(
+    annotation: Any,
+    /,
+    origins: tuple[type, ...] | type,
+    prefixes: tuple[str, ...],
+    length: int,
+) -> tuple[Any, ...]: ...
+def _get_generictype_args(annotation, /, origins, prefixes, length):
+    if isinstance(annotation, str):
+        default_args = ("Any",) * length
+
+        if not annotation.endswith("]"):
+            return default_args
+
+        if not annotation.startswith(prefixes):
+            return default_args
+
+        args_string = annotation.partition("[")[2][:-1]
+
+        if args_string.count("[") != args_string.count("]"):
+            return default_args
+
+        if args_string.find("[") > args_string.find("]"):  # a union type
+            return default_args
+
+        args = args_string.split(",")
+
+        for i, arg in enumerate(args):
+            while arg.count("[") != arg.count("]"):
+                arg = ",".join(args[i : i + 2])  # noqa: PLW2901
+                args[i : i + 2] = [arg]  # noqa: B909
+
+        return (
+            *(arg.strip() or "Any" for arg in args),
+            *(["Any"] * length),
+        )[:length]
+    else:
+        default_args = (Any,) * length
+
+        if not isinstance(origin := get_origin(annotation), type):
+            return default_args
+
+        if not issubclass(origin, origins):
+            return default_args
+
+        return (*get_args(annotation), *([Any] * length))[:length]
+
+
+@overload
+def _get_generatortype_args(annotation: str, /) -> tuple[str, str, str]: ...
+@overload
+def _get_generatortype_args(annotation: Any, /) -> tuple[Any, Any, Any]: ...
+def _get_generatortype_args(annotation, /):
+    return _get_generictype_args(
+        annotation,
+        _generator_origins,
+        _generatortype_prefixes,
+        3,
+    )
+
+
+@overload
+def _get_coroutinetype_args(annotation: str, /) -> tuple[str, str, str]: ...
+@overload
+def _get_coroutinetype_args(annotation: Any, /) -> tuple[Any, Any, Any]: ...
+def _get_coroutinetype_args(annotation, /):
+    return _get_generictype_args(
+        annotation,
+        _coroutine_origins,
+        _coroutinetype_prefixes,
+        3,
+    )
+
+
+def _update_returntype(
+    func: _CallableT,
+    /,
+    transform: Callable[[Any], Any],
+) -> _CallableT:
+    annotate = getattr(func, "__annotate__", None)  # PEP 649
+
+    if callable(annotate):
+
+        def annotate_wrapper(format):
+            annotations = annotate(format)
+
+            if "return" in annotations:
+                annotations["return"] = transform(annotations["return"])
+
+            return annotations
+
+        func.__annotate__ = update_wrapper(annotate_wrapper, annotate)
+    else:
+        annotations = getattr(func, "__annotations__", None)
+
+        if isinstance(annotations, dict):
+            if "return" in annotations:
+                annotations = annotations.copy()
+
+                annotations["return"] = transform(annotations["return"])
+
+                func.__annotations__ = annotations
+
+    try:
+        del func.__wrapped__  # avoid unwrapping to preserve the signature
+    except AttributeError:
+        pass
+
+    return func
+
+
+def _copy_with_flags(func: _CallableT, /, flags: int) -> _CallableT:
+    copy = func.__class__(
+        code=func.__code__.replace(co_flags=flags),
+        closure=func.__closure__,
+        globals=func.__globals__,
+        name=func.__name__,
+    )
+    copy.__defaults__ = func.__defaults__
+    copy.__kwdefaults__ = func.__kwdefaults__  # python/cpython#112640
+
+    update_wrapper(copy, func, updated=())
+
+    if isinstance(copy.__kwdefaults__, dict):
+        copy.__kwdefaults__ = copy.__kwdefaults__.copy()
+
+    if _COPY_ANNOTATIONS:
+        copy.__annotations__ = copy.__annotations__.copy()
+
+    del copy.__wrapped__  # avoid unwrapping to preserve the signature
+
+    return copy
+
+
+@overload
+def _generator(
+    func: Callable[_P, Generator[_YieldT, _SendT, _ReturnT]],
+    /,
+) -> Callable[_P, Generator[_YieldT, _SendT, _ReturnT]]: ...
+@overload
+def _generator(
+    func: Callable[_P, Coroutine[_YieldT, _SendT, _ReturnT]],
+    /,
+) -> Callable[_P, Generator[_YieldT, _SendT, _ReturnT]]: ...
+@overload
+def _generator(
+    func: Callable[_P, Awaitable[_T]],
+    /,
+) -> Callable[_P, Generator[Any, Any, _T]]: ...
+@overload
+def _generator(
+    func: Callable[_P, object],
+    /,
+) -> Callable[_P, Generator[Any, Any, Any]]: ...
+@overload
+def _generator(
+    func: object,
+    /,
+) -> Callable[..., Generator[Any, Any, Any]]: ...
+def _generator(func, /):
+    if not callable(func):
+        msg = "the first argument must be callable"
+        raise TypeError(msg)
+
+    if isfunction(func) and not hasattr(func, "__compiled__"):  # non-Nuitka
+        flags = func.__code__.co_flags
+
+        if flags & CO_GENERATOR:
+            return _copy_with_flags(func, flags & ~CO_ITERABLE_COROUTINE)
+
+        if flags & CO_COROUTINE:
+            return _copy_with_flags(func, flags & ~CO_COROUTINE | CO_GENERATOR)
+
+        if flags & CO_ASYNC_GENERATOR:
+            msg = (
+                "cannot transform an asynchronous generator function into a"
+                " generator function"
+            )
+            raise TypeError(msg)
+
+    if isgeneratorfactory(func):
+
+        def wrapper(*args, **kwargs):
+            return (yield from func(*args, **kwargs))
+
+    elif iscoroutinefactory(func):
+        if isfunction(_generator) and not hasattr(_generator, "__compiled__"):
+
+            @_generator
+            async def wrapper(*args, **kwargs):
+                return await func(*args, **kwargs)
+
+        else:
+
+            def wrapper(*args, **kwargs):
+                return (
+                    yield from GeneratorCoroutineWrapper(func(*args, **kwargs))
+                )
+
+    elif isasyncgenfactory(func):
+        msg = (
+            "cannot transform an asynchronous generator factory into a"
+            " generator function"
+        )
+        raise TypeError(msg)
+    else:
+        msg = (
+            "cannot transform an unknown object into a generator function. Did"
+            " you forget to mark the object?"
+        )
+        raise TypeError(msg)
+
+    return update_wrapper(wrapper, func, updated=())
+
+
+@overload
+def _coroutine(
+    func: Callable[_P, Generator[_YieldT, _SendT, _ReturnT]],
+    /,
+) -> Callable[_P, Coroutine[_YieldT, _SendT, _ReturnT]]: ...
+@overload
+def _coroutine(
+    func: Callable[_P, Coroutine[_YieldT, _SendT, _ReturnT]],
+    /,
+) -> Callable[_P, Coroutine[_YieldT, _SendT, _ReturnT]]: ...
+@overload
+def _coroutine(
+    func: Callable[_P, Awaitable[_T]],
+    /,
+) -> Callable[_P, Coroutine[Any, Any, _T]]: ...
+@overload
+def _coroutine(
+    func: Callable[_P, object],
+    /,
+) -> Callable[_P, Coroutine[Any, Any, Any]]: ...
+@overload
+def _coroutine(
+    func: object,
+    /,
+) -> Callable[..., Coroutine[Any, Any, Any]]: ...
+def _coroutine(func, /):
+    if not callable(func):
+        msg = "the first argument must be callable"
+        raise TypeError(msg)
+
+    if isfunction(func) and not hasattr(func, "__compiled__"):  # non-Nuitka
+        flags = func.__code__.co_flags
+
+        if flags & CO_GENERATOR:
+            return _copy_with_flags(
+                func,
+                flags & ~(CO_GENERATOR | CO_ITERABLE_COROUTINE) | CO_COROUTINE,
+            )
+
+        if flags & CO_COROUTINE:
+            return _copy_with_flags(func, flags)
+
+        if flags & CO_ASYNC_GENERATOR:
+            msg = (
+                "cannot transform an asynchronous generator function into a"
+                " coroutine function"
+            )
+            raise TypeError(msg)
+
+    if iscoroutinefactory(func):
+
+        async def wrapper(*args, **kwargs):
+            return await func(*args, **kwargs)
+
+    elif isgeneratorfactory(func):
+        if isfunction(_coroutine) and not hasattr(_coroutine, "__compiled__"):
+
+            @_coroutine
+            def wrapper(*args, **kwargs):
+                return (yield from func(*args, **kwargs))
+
+        else:
+
+            async def wrapper(*args, **kwargs):
+                return await GeneratorCoroutineWrapper(func(*args, **kwargs))
+
+    elif isasyncgenfactory(func):
+        msg = (
+            "cannot transform an asynchronous generator factory into a"
+            " coroutine function"
+        )
+        raise TypeError(msg)
+    else:
+        msg = (
+            "cannot transform an unknown object into a coroutine function. Did"
+            " you forget to mark the object?"
+        )
+        raise TypeError(msg)
+
+    return update_wrapper(wrapper, func, updated=())
+
+
+@overload
+def generator(
+    func: Callable[_P, Generator[_YieldT, _SendT, _ReturnT]],
+    /,
+) -> Callable[_P, Generator[_YieldT, _SendT, _ReturnT]]: ...
+@overload
+def generator(
+    func: Callable[_P, Coroutine[_YieldT, _SendT, _ReturnT]],
+    /,
+) -> Callable[_P, Generator[_YieldT, _SendT, _ReturnT]]: ...
+@overload
+def generator(
+    func: Callable[_P, Awaitable[_T]],
+    /,
+) -> Callable[_P, Generator[Any, Any, _T]]: ...
+@overload
+def generator(
+    func: Callable[_P, object],
+    /,
+) -> Callable[_P, Generator[Any, Any, Any]]: ...
+@overload
+def generator(
+    func: object,
+    /,
+) -> Callable[..., Generator[Any, Any, Any]]: ...
+def generator(func, /):
+    """..."""
+
+    genfunc = _generator(func)
+
+    flags = getattr(getattr(func, "__code__", None), "co_flags", 0)
+
+    if flags & CO_GENERATOR or isgeneratorfactory(func):
+
+        def transform(annotation):
+            args = _get_generatortype_args(annotation)
+
+            if isinstance(annotation, str):
+                return f"Generator[{', '.join(args)}]"
+
+            return Generator[args[0], args[1], args[2]]
+
+    elif flags & CO_COROUTINE:
+
+        def transform(annotation):
+            if isinstance(annotation, str):
+                return f"Generator[Any, Any, {annotation}]"
+
+            return Generator[Any, Any, annotation]
+
+    else:  # a coroutine factory
+
+        def transform(annotation):
+            args = _get_coroutinetype_args(annotation)
+
+            if isinstance(annotation, str):
+                return f"Generator[{', '.join(args)}]"
+
+            return Generator[args[0], args[1], args[2]]
+
+    return _update_returntype(genfunc, transform)
+
+
+@overload
+def coroutine(
+    func: Callable[_P, Generator[_YieldT, _SendT, _ReturnT]],
+    /,
+) -> Callable[_P, Coroutine[_YieldT, _SendT, _ReturnT]]: ...
+@overload
+def coroutine(
+    func: Callable[_P, Coroutine[_YieldT, _SendT, _ReturnT]],
+    /,
+) -> Callable[_P, Coroutine[_YieldT, _SendT, _ReturnT]]: ...
+@overload
+def coroutine(
+    func: Callable[_P, Awaitable[_T]],
+    /,
+) -> Callable[_P, Coroutine[Any, Any, _T]]: ...
+@overload
+def coroutine(
+    func: Callable[_P, object],
+    /,
+) -> Callable[_P, Coroutine[Any, Any, Any]]: ...
+@overload
+def coroutine(
+    func: object,
+    /,
+) -> Callable[..., Coroutine[Any, Any, Any]]: ...
+def coroutine(func, /):
+    """..."""
+
+    corofunc = _coroutine(func)
+
+    flags = getattr(getattr(func, "__code__", None), "co_flags", 0)
+
+    if flags & CO_GENERATOR or isgeneratorfactory(func):
+
+        def transform(annotation):
+            return _get_generatortype_args(annotation)[-1]
+
+    elif flags & CO_COROUTINE:
+
+        def transform(annotation):
+            return annotation
+
+    else:  # a coroutine factory
+
+        def transform(annotation):
+            return _get_coroutinetype_args(annotation)[-1]
+
+    return _update_returntype(corofunc, transform)
