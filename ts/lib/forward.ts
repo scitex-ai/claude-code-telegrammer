@@ -288,3 +288,32 @@ export function buildInboundText(msg: any): string {
   }
   return text;
 }
+
+/**
+ * Render the bracketed attachment descriptor appended to the DELIVERED
+ * content line for media messages (incident
+ * cct-inbound-images-20260707).
+ *
+ * Why this must ride in the CONTENT string and not only in meta: the
+ * Claude Code harness renders a WHITELIST of meta keys (source, chat_id,
+ * message_id, row_id, user, ts) into the <channel> tag — the
+ * attachment_kind / attachment_file_id meta poller.ts sets is silently
+ * dropped (live-verified 2026-07-07: a real photo rendered as bare
+ * "(photo)"). The content string is always rendered, so the file_id and
+ * the retrieval instruction travel there. meta keeps the structured
+ * copy for forward-compat.
+ *
+ * One line, deterministic, greppable:
+ *   [attachment kind=photo file_id=AgACAg... — call
+ *    download_attachment(file_id) for the local path]
+ * file name + mime are included when present (documents).
+ */
+export function attachmentDescriptor(
+  kind: string,
+  att: { file_id: string; file_name?: string; mime_type?: string },
+): string {
+  const parts = [`kind=${kind}`, `file_id=${att.file_id}`];
+  if (att.file_name) parts.push(`name=${att.file_name}`);
+  if (att.mime_type) parts.push(`mime=${att.mime_type}`);
+  return `[attachment ${parts.join(" ")} — call download_attachment(file_id) for the local path]`;
+}
