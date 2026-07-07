@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Generate fleet-style Telegram bot avatar icons for SciTeX agents.
 
-Style: solid-color circle + short white label + small "SciTeX" wordmark,
-matching the fleet's existing bot avatars (Hub / TODO / SAC / NV / pClew).
-Set the output on the bot via @BotFather -> /setuserpic (the Bot API cannot
-change a bot's own avatar, so this last step is manual).
+Style: solid-color FULL-BLEED SQUARE + short white label + small "SciTeX"
+wordmark, matching the fleet's existing bot avatars (Hub / TODO / SAC / NV /
+pClew). Square on purpose: Telegram crops avatars to a circle client-side, so
+a square yields a perfectly smooth circle in every client — while a
+self-drawn circle both aliases at the edge (PIL ellipses are unantialiased)
+and would get double-cropped. Set the output on the bot via @BotFather ->
+/setuserpic (the Bot API cannot change a bot's own avatar, so that last step
+is manual).
 
 Usage:
     python3 generate_bot_icons.py [--font /path/to/font.ttf] [--out DIR]
@@ -51,9 +55,10 @@ def resolve_font(explicit: str | None) -> str:
 
 
 def make_icon(label: str, color: str, font_path: str) -> Image.Image:
-    img = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 0))
+    # Full-bleed square — Telegram's client-side circle crop supplies the
+    # smooth round mask; text is kept inside the inscribed circle's safe area.
+    img = Image.new("RGB", (SIZE, SIZE), color)
     d = ImageDraw.Draw(img)
-    d.ellipse([0, 0, SIZE - 1, SIZE - 1], fill=color)
 
     # Long labels get a smaller face so they stay inside the circle; the
     # stroke fakes a bold weight so a regular-weight TTF is enough.
