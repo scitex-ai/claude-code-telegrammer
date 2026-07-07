@@ -30,6 +30,9 @@ let stmtGetHistory: Statement | null = null;
 let stmtSaveOffset: Statement | null = null;
 let stmtLoadOffset: Statement | null = null;
 let stmtInsertAttachment: Statement | null = null;
+let stmtAttachmentsForRow: Statement | null = null;
+let stmtAttachmentByFileId: Statement | null = null;
+let stmtMarkAttachmentDownloaded: Statement | null = null;
 let stmtSetRepliedAt: Statement | null = null;
 let stmtSearchAll: Statement | null = null;
 let stmtSearchChat: Statement | null = null;
@@ -188,6 +191,29 @@ export function initStore(): void {
   stmtInsertAttachment = db.prepare(`
     INSERT INTO attachments (message_row_id, kind, file_id, file_unique_id, file_name, mime_type, file_size)
     VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  // Attachment queries (incident cct-inbound-images-20260707): the join
+  // onto messages carries chat_id along so download_attachment(row_id)
+  // can route the download into the right per-chat directory without a
+  // second lookup.
+  stmtAttachmentsForRow = db.prepare(`
+    SELECT a.message_row_id, a.kind, a.file_id, a.file_name, a.mime_type,
+           a.local_path, a.downloaded_at, m.chat_id
+    FROM attachments a JOIN messages m ON m.id = a.message_row_id
+    WHERE a.message_row_id = ? ORDER BY a.id
+  `);
+
+  stmtAttachmentByFileId = db.prepare(`
+    SELECT a.message_row_id, a.kind, a.file_id, a.file_name, a.mime_type,
+           a.local_path, a.downloaded_at, m.chat_id
+    FROM attachments a JOIN messages m ON m.id = a.message_row_id
+    WHERE a.file_id = ? ORDER BY a.id DESC LIMIT 1
+  `);
+
+  stmtMarkAttachmentDownloaded = db.prepare(`
+    UPDATE attachments SET local_path = ?, downloaded_at = datetime('now')
+    WHERE message_row_id = ? AND file_id = ?
   `);
 
   stmtSearchAll = db.prepare(`
@@ -350,6 +376,65 @@ export function insertAttachment(
     attachment.mime_type ?? null,
     attachment.file_size ?? null,
   );
+}
+
+/**
+ * One row of the attachments table, joined with the owning message's
+ * chat_id. `local_path` / `downloaded_at` are null until the background
+ * auto-download (attachments.ts) or an explicit download_attachment call
+ * completes.
+ */
+export interface AttachmentRow {
+  message_row_id: number;
+  kind: string;
+  file_id: string;
+  file_name: string | null;
+  mime_type: string | null;
+  local_path: string | null;
+  downloaded_at: string | null;
+  chat_id: string;
+}
+
+/**
+ * Attachments for a set of message row ids (incident
+ * cct-inbound-images-20260707 — lets get_history / get_unread expose
+ * file_id + local_path per message). Loops one indexed lookup per row
+ * instead of a dynamic IN (…) because prepared statements are fixed-arity
+ * and a history page is ≤ ~20 rows — N tiny idx_att_message hits.
+ */
+export function attachmentsForRows(rowIds: number[]): AttachmentRow[] {
+  if (!stmtAttachmentsForRow) throw new Error("store not initialized");
+  const out: AttachmentRow[] = [];
+  for (const id of rowIds) {
+    out.push(...(stmtAttachmentsForRow.all(id) as AttachmentRow[]));
+  }
+  return out;
+}
+
+/**
+ * Newest attachment row for a Telegram file_id (or null if the file_id
+ * was never stored — e.g. a caller passing an id from another bot).
+ * Used by download_attachment to short-circuit to an existing
+ * local_path before hitting the network.
+ */
+export function findAttachmentByFileId(fileId: string): AttachmentRow | null {
+  if (!stmtAttachmentByFileId) throw new Error("store not initialized");
+  return (stmtAttachmentByFileId.get(fileId) as AttachmentRow) ?? null;
+}
+
+/**
+ * Record a completed download on the attachment row so later
+ * download_attachment calls (and get_history/get_unread consumers) see
+ * the local_path. Same UPDATE the background queue in attachments.ts
+ * performs — kept here too so the on-demand path is equally durable.
+ */
+export function markAttachmentDownloaded(
+  messageRowId: number,
+  fileId: string,
+  localPath: string,
+): void {
+  if (!stmtMarkAttachmentDownloaded) throw new Error("store not initialized");
+  stmtMarkAttachmentDownloaded.run(localPath, messageRowId, fileId);
 }
 
 // ── Search & Context ──────────────────────────────────────────────────────

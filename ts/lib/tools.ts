@@ -16,8 +16,6 @@ import {
 } from "./telegram-api.js";
 import {
   saveOutbound,
-  getHistory,
-  getUnread,
   markRead,
   markAllRead,
   searchMessages,
@@ -25,7 +23,11 @@ import {
 } from "./store.js";
 import { HOST_NAME, PROJECT, AGENT_ID, BOT_TOKEN_HASH } from "./config.js";
 import { log } from "./log.js";
-import { downloadNow } from "./attachments.js";
+import {
+  handleGetHistory,
+  handleGetUnread,
+  handleDownloadAttachment,
+} from "./tools-messages.js";
 import { runHealth, serializeHealthReport } from "./health-adapters.js";
 
 export function registerTools(mcp: Server): void {
@@ -96,7 +98,10 @@ export function registerTools(mcp: Server): void {
         name: "get_history",
         description:
           "Get message history for a chat from the local DB. " +
-          "Returns both inbound and outbound messages in chronological order.",
+          "Returns both inbound and outbound messages in chronological order. " +
+          "Messages with stored attachments include an `attachments` array " +
+          "({kind, file_id, file_name, mime_type, local_path, downloaded_at}); " +
+          "local_path is set once the background auto-download completed.",
         inputSchema: {
           type: "object" as const,
           properties: {
@@ -116,7 +121,9 @@ export function registerTools(mcp: Server): void {
       {
         name: "get_unread",
         description:
-          "Get unread inbound messages, optionally filtered by chat_id.",
+          "Get unread inbound messages, optionally filtered by chat_id. " +
+          "Messages with stored attachments include an `attachments` array " +
+          "(see get_history).",
         inputSchema: {
           type: "object" as const,
           properties: {
@@ -150,21 +157,34 @@ export function registerTools(mcp: Server): void {
       {
         name: "download_attachment",
         description:
-          "Download a Telegram file attachment immediately. Returns the local file path.",
+          "Get the local path of a Telegram file attachment. Pass EITHER " +
+          "file_id (from the inbound [attachment …] content line) OR row_id " +
+          "(the inbound message's DB row id). If the attachment was already " +
+          "downloaded (auto-download or a previous call) the existing local " +
+          "path is returned immediately without re-downloading; otherwise " +
+          "the file is fetched now. Errors clearly when row_id has no " +
+          "stored attachment.",
         inputSchema: {
           type: "object" as const,
           properties: {
             file_id: {
               type: "string",
-              description: "Telegram file_id from the attachment.",
+              description:
+                "Telegram file_id from the attachment. Optional when row_id is given.",
+            },
+            row_id: {
+              type: "number",
+              description:
+                "DB row id of the inbound message carrying the attachment " +
+                "(row_id from the <channel> meta or get_history).",
             },
             chat_id: {
               type: "string",
               description:
-                "Chat ID for organizing downloads. Defaults to 'unknown'.",
+                "Chat ID for organizing downloads. Defaults to the attachment's " +
+                "own chat when resolvable, else 'unknown'.",
             },
           },
-          required: ["file_id"],
         },
       },
       {
@@ -334,24 +354,12 @@ export function registerTools(mcp: Server): void {
             typeof result === "object" ? result.message_id : args.message_id;
           return { content: [{ type: "text", text: `edited (id: ${id})` }] };
         }
-        case "get_history": {
-          const chatId = args.chat_id as string;
-          const limit = (args.limit as number) ?? 20;
-          const offset = (args.offset as number) ?? 0;
-          assertAllowedChat(chatId);
-          const rows = getHistory(chatId, limit, offset);
-          return {
-            content: [{ type: "text", text: JSON.stringify(rows, null, 2) }],
-          };
-        }
-        case "get_unread": {
-          const chatId = args.chat_id as string | undefined;
-          if (chatId) assertAllowedChat(chatId);
-          const rows = getUnread(chatId);
-          return {
-            content: [{ type: "text", text: JSON.stringify(rows, null, 2) }],
-          };
-        }
+        // Handler bodies live in tools-messages.ts (unit-testable without
+        // an MCP server; keeps this file under the repo line cap).
+        case "get_history":
+          return handleGetHistory(args);
+        case "get_unread":
+          return handleGetUnread(args);
         case "mark_read": {
           const chatId = args.chat_id as string | undefined;
           const messageIds = args.message_ids as number[] | undefined;
@@ -390,14 +398,8 @@ export function registerTools(mcp: Server): void {
             isError: true,
           };
         }
-        case "download_attachment": {
-          const fileId = args.file_id as string;
-          const chatId = (args.chat_id as string) ?? "unknown";
-          const localPath = await downloadNow(fileId, chatId);
-          return {
-            content: [{ type: "text", text: `downloaded to: ${localPath}` }],
-          };
-        }
+        case "download_attachment":
+          return await handleDownloadAttachment(args);
         case "send_document": {
           const chatId = args.chat_id as string;
           const filePath = args.file_path as string;

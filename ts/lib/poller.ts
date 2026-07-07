@@ -29,7 +29,11 @@ import {
   markRead,
 } from "./receipts.js";
 import { wakeTurn, wakeEnabled } from "./wake.js";
-import { parseForward, buildInboundText } from "./forward.js";
+import {
+  parseForward,
+  buildInboundText,
+  attachmentDescriptor,
+} from "./forward.js";
 import {
   claimAuthoritative,
   isAuthoritative,
@@ -448,13 +452,25 @@ async function handleUpdate(mcp: Server, update: any): Promise<void> {
     if (forwardInfo.signature) meta.forward_signature = forwardInfo.signature;
   }
 
-  // Add attachment metadata to channel notification
+  // Add attachment metadata to channel notification AND append the
+  // bracketed descriptor to the DELIVERED content line (incident
+  // cct-inbound-images-20260707). The meta keys are kept for
+  // forward-compat, but the Claude Code harness renders only a
+  // whitelist of meta keys into the <channel> tag — arbitrary meta is
+  // dropped (live-verified: a real photo rendered as bare "(photo)"
+  // despite attachment_file_id in meta). Only the content string is
+  // always rendered — and it is ALSO the only payload the /v1/turn
+  // wake POST carries — so kind + file_id + the retrieval instruction
+  // must ride there. One attachment per message is the current model
+  // (see the attachments array above), hence the `break`.
+  let deliveredText = text;
   for (const { kind, obj } of attachments) {
     if (obj) {
       meta.attachment_kind = kind;
       meta.attachment_file_id = obj.file_id;
       if (obj.file_name) meta.attachment_name = obj.file_name;
       if (obj.mime_type) meta.attachment_mime = obj.mime_type;
+      deliveredText = `${text} ${attachmentDescriptor(kind, obj)}`;
       break;
     }
   }
@@ -484,7 +500,7 @@ async function handleUpdate(mcp: Server, update: any): Promise<void> {
     mcp
       .notification({
         method: "notifications/claude/channel",
-        params: { content: text, meta },
+        params: { content: deliveredText, meta },
       })
       .catch((err) => {
         log("poller", "failed to deliver inbound to Claude", {
@@ -530,7 +546,7 @@ async function handleUpdate(mcp: Server, update: any): Promise<void> {
   // both "is the bridge alive?" (yes, 👀 fired) and "why didn't the
   // agent reply?" (the categorised reason).
   if (wakeEnabled()) {
-    void wakeTurn(text, meta).then((result) => {
+    void wakeTurn(deliveredText, meta).then((result) => {
       if (result.ok) {
         void markDone(chatId, String(msg.message_id));
       } else {

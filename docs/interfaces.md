@@ -17,10 +17,10 @@ delegate heavy work to background subagents, so the relay never blocks.
 | `reply` | Reply on Telegram. Supports threading (`reply_to`), auto-marks the inbound as read; inbound reply-to references are tracked and forwarded. |
 | `react` | Add an emoji reaction. Inbound reactions (`message_reaction`) are also delivered as channel notifications. |
 | `edit_message` | Edit a message the bot previously sent. |
-| `get_history` | Retrieve message history for a chat from local SQLite. |
-| `get_unread` | List unread inbound messages, optionally filtered by `chat_id`. |
+| `get_history` | Retrieve message history for a chat from local SQLite. Rows with stored attachments include an `attachments` array (kind, file_id, local_path, …). |
+| `get_unread` | List unread inbound messages, optionally filtered by `chat_id`. Includes the same `attachments` array. |
 | `mark_read` | Mark messages read by `chat_id` or `message_ids`. |
-| `download_attachment` | Download a Telegram file by `file_id`; returns a local path. |
+| `download_attachment` | Resolve a Telegram file to a local path by `file_id` **or** `row_id`. Returns the existing path without re-downloading when the auto-download already completed. |
 | `send_document` | Upload a local file to a Telegram chat. |
 | `search_messages` | Text search across stored messages. |
 | `get_context` | Recent conversation formatted as compact text for LLM context. |
@@ -29,6 +29,17 @@ delegate heavy work to background subagents, so the relay never blocks.
 Inbound messages arrive as `<channel source="claude-code-telegrammer" …>`
 notifications carrying `chat_id` / `message_id` / `row_id` / `user` — pass
 `chat_id` and `row_id` back to `reply`.
+
+### Inbound attachments
+
+Media messages (photo/document/voice/audio/video) render a bracketed
+descriptor directly in the content line — e.g.
+`(photo) [attachment kind=photo file_id=AgACAg… — call
+download_attachment(file_id) for the local path]` — because only the content
+string is guaranteed to reach the agent (the harness renders a whitelist of
+meta keys). Retrieve the file via `download_attachment` with that `file_id`
+or with the message's `row_id`; attachments are also auto-downloaded in the
+background, after which `get_history` / `get_unread` report the `local_path`.
 
 ## Skills (for AI agent discovery)
 
