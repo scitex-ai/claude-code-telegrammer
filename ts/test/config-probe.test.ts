@@ -33,10 +33,8 @@ describe("buildConfigProbe (local, no network)", () => {
     expect(probe.state_dir).toContain("cct-test-");
   });
 
-  test("channel_source is the bridge's -system label (distinct from agent id)", () => {
-    expect(buildConfigProbe().channel_source).toBe(
-      "claude-code-telegrammer-system",
-    );
+  test("channel_source is the fleet short sender-identity label", () => {
+    expect(buildConfigProbe().channel_source).toBe("cct");
   });
 
   test("agent_id is null when AGENT_ID is unset (not the 'telegram' default)", () => {

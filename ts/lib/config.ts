@@ -53,16 +53,20 @@ export const STATE_DIR = resolveStateDir();
 export const ACCESS_FILE = join(STATE_DIR, "access.json");
 export const LOCK_FILE = join(STATE_DIR, "claude-code-telegrammer-mcp.lock");
 
-// Inbound-message channel source label — the SYSTEM (this bridge), not an
-// agent. Deliberately distinct from both the MCP server name and any
-// CCT_AGENT_ID ("claude-code-telegrammer" is also an agent's id in the fleet,
-// so a bare source was ambiguous: bridge-origin vs that-agent-origin).
-// meta.source is a free attribution label, decoupled from routing — verified
-// empirically: the harness renders <channel source=X> for sources matching no
-// registered server, and replies route via the MCP tool + chat/row ids, never
-// via source. The generic platform label "telegram" stays banned for the
-// original provenance reason (it hid WHICH integration delivered the message).
-export const CHANNEL_SOURCE = "claude-code-telegrammer-system";
+// Inbound-message channel source label — the fleet's SHORT sender-identity
+// name for this bridge (operator naming agreement 2026-07-07, card
+// fleet-channel-source-sender-identity-naming-20260707): sac / cct / stodo,
+// with "daemon" reserved for daemon-origin messages (this bridge emits none —
+// it only relays operator messages). Supersedes the earlier
+// "claude-code-telegrammer-system" suffix: short labels read on a phone, and
+// staying distinct from the CCT_AGENT_ID "claude-code-telegrammer" removes the
+// bridge-origin vs that-agent-origin ambiguity. meta.source is a free
+// attribution label decoupled from routing (verified empirically: the harness
+// renders <channel source=X> for sources matching no registered server, and
+// replies route via the MCP tool + chat/row ids, never via source). The
+// generic platform label "telegram" stays banned — it hid WHICH integration
+// delivered the message.
+export const CHANNEL_SOURCE = "cct";
 export const INBOX_DIR = join(STATE_DIR, "inbox");
 export const ATTACHMENT_DIR =
   getenv("ATTACHMENT_DIR") ?? join(STATE_DIR, "attachments");
