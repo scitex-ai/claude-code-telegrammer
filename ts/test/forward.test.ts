@@ -288,6 +288,90 @@ describe("forwardBanner", () => {
       `[forwarded from Alice, ${new Date(1717564700 * 1000).toISOString()}]`,
     );
   });
+
+  test("anonymous drops the name → '[forwarded, <ts>]'", () => {
+    const info = parseForward({
+      forward_origin: {
+        type: "user",
+        date: 1717564700,
+        sender_user: { id: 789, first_name: "Alice" },
+      },
+    })!;
+    expect(forwardBanner(info, { anonymous: true })).toBe(
+      `[forwarded, ${new Date(1717564700 * 1000).toISOString()}]`,
+    );
+  });
+});
+
+// ── self-forward: operator forwards his OWN message → name dropped ─────────
+
+describe("buildInboundText — self-forward banner", () => {
+  const iso = (s: number) => new Date(s * 1000).toISOString();
+
+  test("self-forward (origin id == sender id) drops the name", () => {
+    const msg = {
+      from: { id: 8379369979, first_name: "Yusuke", last_name: "Watanabe" },
+      forward_origin: {
+        type: "user",
+        date: 1717564700,
+        sender_user: {
+          id: 8379369979,
+          first_name: "Yusuke",
+          last_name: "Watanabe",
+        },
+      },
+      text: "my own note",
+    };
+    expect(buildInboundText(msg)).toBe(
+      `[forwarded, ${iso(1717564700)}]\nmy own note`,
+    );
+  });
+
+  test("self-forward detected by name when id is absent (hidden_user)", () => {
+    const msg = {
+      from: { id: 8379369979, first_name: "Yusuke", last_name: "Watanabe" },
+      forward_origin: {
+        type: "hidden_user",
+        date: 1717564700,
+        sender_user_name: "Yusuke Watanabe",
+      },
+      text: "privacy-hidden self forward",
+    };
+    expect(buildInboundText(msg)).toBe(
+      `[forwarded, ${iso(1717564700)}]\nprivacy-hidden self forward`,
+    );
+  });
+
+  test("forward from a DIFFERENT user keeps the name", () => {
+    const msg = {
+      from: { id: 8379369979, first_name: "Yusuke", last_name: "Watanabe" },
+      forward_origin: {
+        type: "user",
+        date: 1717564700,
+        sender_user: { id: 789, first_name: "Alice" },
+      },
+      text: "someone else's message",
+    };
+    expect(buildInboundText(msg)).toBe(
+      `[forwarded from Alice, ${iso(1717564700)}]\nsomeone else's message`,
+    );
+  });
+
+  test("channel forward is never treated as self (name kept)", () => {
+    const msg = {
+      from: { id: 8379369979, first_name: "Yusuke", last_name: "Watanabe" },
+      forward_origin: {
+        type: "channel",
+        date: 1717564700,
+        chat: { id: -100, title: "Yusuke Watanabe", type: "channel" },
+        message_id: 5,
+      },
+      text: "channel post",
+    };
+    expect(buildInboundText(msg)).toContain(
+      `[forwarded from Yusuke Watanabe, ${iso(1717564700)}]`,
+    );
+  });
 });
 
 // ── buildInboundText: integration — caption + attachment + forward ───────
