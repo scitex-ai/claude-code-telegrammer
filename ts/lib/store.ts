@@ -8,7 +8,11 @@ import { join } from "path";
 import { STATE_DIR } from "./config.js";
 import { log } from "./log.js";
 
-export const DB_PATH = join(STATE_DIR, "messages.db");
+// Scitex-standard DB filename (was "messages.db"): self-describing in the
+// ~/.scitex/claude-code-telegrammer runtime tree. SQLite derives the -wal/-shm
+// sidecars from this stem; the startup auto-migration (lib/migrate-state.ts)
+// copies a legacy messages.db onto this name once so history is never lost.
+export const DB_PATH = join(STATE_DIR, "claude-code-telegrammer.db");
 
 // The schema version this code WRITES into meta.schema_version on init.
 // Exported as the single source of truth so the health check

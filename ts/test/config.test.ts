@@ -100,8 +100,17 @@ describe("config", () => {
   });
 });
 
-describe("resolveStateDir", () => {
-  const base = join(homedir(), ".claude-code-telegrammer");
+describe("resolveStateDir (scitex-standard default)", () => {
+  // The DEFAULT is now the deterministic per-agent runtime path
+  // ~/.scitex/claude-code-telegrammer/runtime/<agent-id> — stable across
+  // container restarts by construction, which is what eliminates the
+  // history-gap drift incident. Explicit AGENT_STATE_DIR still wins verbatim.
+  const runtime = join(
+    homedir(),
+    ".scitex",
+    "claude-code-telegrammer",
+    "runtime",
+  );
 
   test("explicit AGENT_STATE_DIR is honoured verbatim", () => {
     expect(resolveStateDir({ CCT_AGENT_STATE_DIR: "/tmp/explicit" })).toBe(
@@ -118,23 +127,25 @@ describe("resolveStateDir", () => {
     ).toBe("/tmp/explicit");
   });
 
-  test("derives per-agent dir from AGENT_ID when AGENT_STATE_DIR unset", () => {
+  test("derives per-agent runtime dir from AGENT_ID when AGENT_STATE_DIR unset", () => {
     expect(resolveStateDir({ CCT_AGENT_ID: "neurovista" })).toBe(
-      `${base}-neurovista`,
+      join(runtime, "neurovista"),
     );
   });
 
-  test("falls back to shared base when AGENT_ID unset", () => {
-    expect(resolveStateDir({})).toBe(base);
+  test("falls back to the 'telegram' runtime dir when AGENT_ID unset", () => {
+    expect(resolveStateDir({})).toBe(join(runtime, "telegram"));
   });
 
-  test("treats the default AGENT_ID 'telegram' as the shared base", () => {
-    expect(resolveStateDir({ CCT_AGENT_ID: "telegram" })).toBe(base);
+  test("the default AGENT_ID 'telegram' maps to the telegram runtime dir", () => {
+    expect(resolveStateDir({ CCT_AGENT_ID: "telegram" })).toBe(
+      join(runtime, "telegram"),
+    );
   });
 
   test("sanitizes path separators out of an exotic AGENT_ID", () => {
     expect(resolveStateDir({ CCT_AGENT_ID: "../evil" })).toBe(
-      `${base}-..-evil`,
+      join(runtime, "..-evil"),
     );
   });
 });
