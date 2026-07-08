@@ -227,10 +227,43 @@ export function parseForward(msg: any): ForwardInfo | null {
 }
 
 /**
+ * True when the forward's ORIGIN is the same person who just sent the
+ * message — i.e. the operator forwarding one of his OWN earlier messages.
+ * In that case "[forwarded from <his own name>]" is redundant noise
+ * (operator complaint 2026-07-07: "it often says Yusuke Watanabe"), so the
+ * banner drops the name (see forwardBanner `anonymous`). Detection:
+ *   - user-origin forwards carry from_id → exact id match vs msg.from.id;
+ *   - hidden_user / privacy-restricted self-forwards carry only a name →
+ *     fall back to matching the sender's full name / @username.
+ * Only person-kind forwards (user / hidden_user) are considered; a channel
+ * or chat forward is never "self".
+ */
+function isSelfForward(info: ForwardInfo, msg: any): boolean {
+  if (info.kind !== "user" && info.kind !== "hidden_user") return false;
+  const from = msg?.from;
+  if (!from) return false;
+  if (info.from_id && String(from.id) === info.from_id) return true;
+  if (info.from_name) {
+    if (fullName(from) === info.from_name) return true;
+    if (typeof from.username === "string" && from.username === info.from_name)
+      return true;
+  }
+  return false;
+}
+
+/**
  * Render the concise provenance banner the operator sees:
  *   "[forwarded from <name>, <iso-ts>]"
+ * `anonymous` drops the "from <name>" — used for SELF-forwards (the operator
+ * forwarding his own message), where the name is redundant. The forwarded-
+ * ness + original date are kept; the full name still lives in the DB
+ * forward_json + meta.forward_from for provenance.
  */
-export function forwardBanner(info: ForwardInfo): string {
+export function forwardBanner(
+  info: ForwardInfo,
+  opts?: { anonymous?: boolean },
+): string {
+  if (opts?.anonymous) return `[forwarded, ${info.date_iso}]`;
   return `[forwarded from ${info.from_name}, ${info.date_iso}]`;
 }
 
@@ -283,7 +316,9 @@ export function buildInboundText(msg: any): string {
 
   const fwd = parseForward(msg);
   if (fwd) {
-    const banner = forwardBanner(fwd);
+    // Self-forwards (operator forwarding his OWN message) drop the redundant
+    // "from <his name>" — keep only "[forwarded, <date>]".
+    const banner = forwardBanner(fwd, { anonymous: isSelfForward(fwd, msg) });
     text = text ? `${banner}\n${text}` : banner;
   }
   return text;
