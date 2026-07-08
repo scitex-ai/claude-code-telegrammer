@@ -8,8 +8,10 @@ import { getenv, READ_PREFIXES } from "./env.js";
 
 // Make an AGENT_ID safe as a single path segment: collapse any run of
 // characters outside [A-Za-z0-9._-] (notably "/") to one "-" so an exotic id
-// cannot inject a path separator and escape the home directory.
-function sanitizeAgentSegment(id: string): string {
+// cannot inject a path separator and escape the home directory. Exported so the
+// startup auto-migration (lib/migrate-state.ts) derives the OLD default dir with
+// the identical sanitizer — the two paths must agree segment-for-segment.
+export function sanitizeAgentSegment(id: string): string {
   return id.replace(/[^A-Za-z0-9._-]+/g, "-");
 }
 
@@ -24,28 +26,31 @@ function sanitizeAgentSegment(id: string): string {
  *      CLAUDE_CODE_TELEGRAMMER_STATE_DIR spellings were renamed and are now
  *      rejected fail-loud (findRenamedEnv) so a stale override is never silently
  *      ignored.
- *   2. Otherwise, when an AGENT_ID is set (and not the generic default
- *      "telegram"), derive a PER-AGENT directory `~/.claude-code-telegrammer-<id>`.
- *      Multiple agents sharing one host home would otherwise collide on the
- *      poller pidfile / messages.db, and the newest-wins takeover (lib/takeover.ts)
- *      would let only ONE agent hold the channel. Deriving the per-agent dir HERE
- *      — instead of having each launcher inject an explicit AGENT_STATE_DIR —
- *      keeps state-dir ownership inside the bridge, decoupled from the launcher
- *      (scitex-agent-container / dotfiles) templating.
- *   3. The lead's single interactive bridge leaves AGENT_ID unset (or "telegram")
- *      and keeps the shared `~/.claude-code-telegrammer`.
+ *   2. Otherwise the DEFAULT is the scitex-standard, DETERMINISTIC per-agent
+ *      path `~/.scitex/claude-code-telegrammer/runtime/<sanitized-agent-id>`
+ *      (agent-id = AGENT_ID, default "telegram"). Deriving it from the agent id
+ *      alone — with no launcher-supplied dir in the mix — makes the path STABLE
+ *      across container restarts by construction, which eliminates the history-
+ *      gap incident where a drifting default path opened a fresh empty DB and
+ *      lost the operator's message history. A one-time startup auto-migration
+ *      (lib/migrate-state.ts) carries any pre-existing history at the OLD default
+ *      location forward into this path. Per-agent segmentation still prevents the
+ *      poller-pidfile / DB collision that the newest-wins takeover (lib/takeover.ts)
+ *      would otherwise resolve by letting only ONE agent hold the channel.
  */
 export function resolveStateDir(
   env: Record<string, string | undefined> = process.env,
 ): string {
   const explicit = getenv("AGENT_STATE_DIR", undefined, env);
   if (explicit) return explicit;
-  const base = join(homedir(), ".claude-code-telegrammer");
-  const agentId = getenv("AGENT_ID", undefined, env);
-  if (agentId && agentId !== "telegram") {
-    return `${base}-${sanitizeAgentSegment(agentId)}`;
-  }
-  return base;
+  const agentId = getenv("AGENT_ID", undefined, env) ?? "telegram";
+  return join(
+    homedir(),
+    ".scitex",
+    "claude-code-telegrammer",
+    "runtime",
+    sanitizeAgentSegment(agentId),
+  );
 }
 
 export const STATE_DIR = resolveStateDir();

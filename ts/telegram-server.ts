@@ -46,6 +46,7 @@ import { acquireLock, releaseLock } from "./lib/lock.js";
 import { registerTools } from "./lib/tools.js";
 import { startPolling, stopPolling } from "./lib/poller.js";
 import { initStore } from "./lib/store.js";
+import { migrateLegacyStateDir, ensureCctAlias } from "./lib/migrate-state.js";
 import { loadAccess } from "./lib/access.js";
 import { releaseAuthoritative } from "./lib/takeover.js";
 import { resolveConfigProbe, wantsGetMe } from "./lib/config-probe.js";
@@ -259,6 +260,18 @@ process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
 
 // ── Main ────────────────────────────────────────────────────────────────────
+
+// ── State-dir migration (scitex-standard default) ──────────────────────────
+//
+// Before the store opens (which would CREATE a fresh empty DB at the new
+// default path), carry any pre-existing history at the OLD default location
+// forward into the scitex-standard path. This runs BEFORE acquireLock/initStore
+// so loadOffset() reads the migrated DB, not an empty one. Idempotent, copy-not-
+// move, and FAIL LOUD — a throw here aborts startup so a half-migration is never
+// masked by a fresh DB (see lib/migrate-state.ts). No-op when an explicit
+// AGENT_STATE_DIR is set, the new DB already exists, or there is nothing to move.
+migrateLegacyStateDir();
+ensureCctAlias();
 
 acquireLock();
 initStore();
