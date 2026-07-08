@@ -20,6 +20,7 @@ import {
   releaseAuthoritative,
 } from "./takeover.js";
 import { processBatch } from "./poller-batch.js";
+import { recordSuccessfulPoll, startStallWatchdog } from "./poll-watchdog.js";
 import { getenv } from "./env.js";
 
 /**
@@ -124,89 +125,111 @@ export async function startPolling(mcp: Server): Promise<void> {
 
   let consecutive409 = 0;
 
-  while (polling) {
-    // Per-iteration authoritativeness check. A newer poller would have
-    // overwritten our pidfile; we exit cleanly without ever issuing the
-    // next getUpdates so we never produce a 409 storm against the new
-    // incumbent. The fs check is cheap (~µs).
-    if (!isAuthoritative({ stateDir: STATE_DIR, tokenHash: BOT_TOKEN_HASH })) {
-      log(
-        "poller",
-        `preempted by newer poller (pidfile no longer records our PID) — exiting cleanly (token=${BOT_TOKEN_HASH} state_dir=${STATE_DIR})`,
-        { ourPid: process.pid },
-      );
-      polling = false;
-      // Do NOT release the pidfile — it belongs to the successor now.
-      return;
-    }
+  // Ingestion-stall watchdog: alarms LOUDLY if the process stays alive but
+  // getUpdates stops returning (wedged long-poll / hung socket / network
+  // black-hole) — the failure kill-0 liveness checks miss. Stopped in the
+  // finally below so it can never leak or alarm after a clean shutdown /
+  // preemption (isPolling() also gates it). See poll-watchdog.ts.
+  const watchdog = startStallWatchdog(mcp, () => polling);
 
-    try {
-      const updates = await tgApi("getUpdates", {
-        offset: updateOffset,
-        timeout: 30,
-        allowed_updates: ["message", "message_reaction"],
-      });
-      consecutive409 = 0;
-      if (!Array.isArray(updates)) continue;
-      if (updates.length > 0) {
-        // processBatch NEVER advances the offset past an un-persisted
-        // update: it returns update_id+1 for each durable ("ok" /
-        // "duplicate") update but STOPS at the first real "persistError"
-        // (returning that update's own update_id so Telegram redelivers
-        // it), emitting a loud channel notification so the failure is
-        // never silent. See poller-batch.ts.
-        updateOffset = await processBatch(mcp, updates, updateOffset);
-        try {
-          saveOffset(updateOffset);
-        } catch (err) {
-          log("poller", "failed to persist offset", { error: String(err) });
-        }
-      }
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      if (errMsg.includes("409")) {
-        consecutive409 += 1;
-        // 409 from Telegram = "another consumer is in a getUpdates
-        // call". Under "newest wins", the most common cause RIGHT after
-        // we took the pidfile is that the previous poller's long-poll
-        // hasn't finished yet — it'll exit on its next iteration when
-        // its isAuthoritative() check fires. Back off and retry; only
-        // give up after MAX_CONSECUTIVE_409 (covers a 30s long-poll
-        // cycle with margin).
+  try {
+    while (polling) {
+      // Per-iteration authoritativeness check. A newer poller would have
+      // overwritten our pidfile; we exit cleanly without ever issuing the
+      // next getUpdates so we never produce a 409 storm against the new
+      // incumbent. The fs check is cheap (~µs).
+      if (
+        !isAuthoritative({ stateDir: STATE_DIR, tokenHash: BOT_TOKEN_HASH })
+      ) {
         log(
           "poller",
-          `409 Conflict on getUpdates (${consecutive409}/${MAX_CONSECUTIVE_409}) — backing off ${ERROR_BACKOFF_MS}ms (likely the previous poller is still draining its long-poll; it should exit on its next isAuthoritative() tick)`,
+          `preempted by newer poller (pidfile no longer records our PID) — exiting cleanly (token=${BOT_TOKEN_HASH} state_dir=${STATE_DIR})`,
+          { ourPid: process.pid },
         );
-        if (consecutive409 >= MAX_CONSECUTIVE_409) {
-          const fatalMsg =
-            `FATAL: ${MAX_CONSECUTIVE_409} consecutive 409 Conflicts — another process is polling this bot token and has NOT yielded after backoff. ` +
-            "This is likely a foreign poller (not one of ours — ours obey the pidfile-takeover protocol) or a stuck webhook. " +
-            `Another consumer holds THIS bot token (hash=${BOT_TOKEN_HASH}, state_dir=${STATE_DIR}) — commonly multiple agents sharing one bot token. Each agent needs its OWN bot token + CCT_STATE_DIR. ` +
-            "Stop the other consumer (or call deleteWebhook) and restart the bridge.";
-          log("poller", fatalMsg);
-          mcp
-            .notification({
-              method: "notifications/claude/channel",
-              params: {
-                content: fatalMsg,
-                meta: { source: CHANNEL_SOURCE, type: "error" },
-              },
-            })
-            .catch(() => {});
-          polling = false;
-          // We DID hold the lease; release it so the operator's manual
-          // restart can re-claim cleanly.
-          releaseAuthoritative({
-            stateDir: STATE_DIR,
-            tokenHash: BOT_TOKEN_HASH,
-          });
-          return;
+        polling = false;
+        // Do NOT release the pidfile — it belongs to the successor now.
+        return;
+      }
+
+      try {
+        const updates = await tgApi("getUpdates", {
+          offset: updateOffset,
+          timeout: 30,
+          allowed_updates: ["message", "message_reaction"],
+        });
+        consecutive409 = 0;
+        // Heartbeat: getUpdates RETURNED (regardless of update count — a
+        // healthy long-poll returns at least every ~30s even with zero
+        // updates). Stamps the in-process + persisted "last successful poll"
+        // timestamp the stall watchdog reads. A wedged getUpdates never
+        // reaches here, so the heartbeat goes stale and the watchdog fires.
+        recordSuccessfulPoll();
+        if (!Array.isArray(updates)) continue;
+        if (updates.length > 0) {
+          // processBatch NEVER advances the offset past an un-persisted
+          // update: it returns update_id+1 for each durable ("ok" /
+          // "duplicate") update but STOPS at the first real "persistError"
+          // (returning that update's own update_id so Telegram redelivers
+          // it), emitting a loud channel notification so the failure is
+          // never silent. See poller-batch.ts.
+          updateOffset = await processBatch(mcp, updates, updateOffset);
+          try {
+            saveOffset(updateOffset);
+          } catch (err) {
+            log("poller", "failed to persist offset", { error: String(err) });
+          }
         }
-        await new Promise((r) => setTimeout(r, ERROR_BACKOFF_MS));
-      } else {
-        log("poller", `getUpdates error: ${errMsg}. Retrying in 3s...`);
-        await new Promise((r) => setTimeout(r, ERROR_BACKOFF_MS));
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        if (errMsg.includes("409")) {
+          consecutive409 += 1;
+          // 409 from Telegram = "another consumer is in a getUpdates
+          // call". Under "newest wins", the most common cause RIGHT after
+          // we took the pidfile is that the previous poller's long-poll
+          // hasn't finished yet — it'll exit on its next iteration when
+          // its isAuthoritative() check fires. Back off and retry; only
+          // give up after MAX_CONSECUTIVE_409 (covers a 30s long-poll
+          // cycle with margin).
+          log(
+            "poller",
+            `409 Conflict on getUpdates (${consecutive409}/${MAX_CONSECUTIVE_409}) — backing off ${ERROR_BACKOFF_MS}ms (likely the previous poller is still draining its long-poll; it should exit on its next isAuthoritative() tick)`,
+          );
+          if (consecutive409 >= MAX_CONSECUTIVE_409) {
+            const fatalMsg =
+              `FATAL: ${MAX_CONSECUTIVE_409} consecutive 409 Conflicts — another process is polling this bot token and has NOT yielded after backoff. ` +
+              "This is likely a foreign poller (not one of ours — ours obey the pidfile-takeover protocol) or a stuck webhook. " +
+              `Another consumer holds THIS bot token (hash=${BOT_TOKEN_HASH}, state_dir=${STATE_DIR}) — commonly multiple agents sharing one bot token. Each agent needs its OWN bot token + CCT_STATE_DIR. ` +
+              "Stop the other consumer (or call deleteWebhook) and restart the bridge.";
+            log("poller", fatalMsg);
+            mcp
+              .notification({
+                method: "notifications/claude/channel",
+                params: {
+                  content: fatalMsg,
+                  meta: { source: CHANNEL_SOURCE, type: "error" },
+                },
+              })
+              .catch(() => {});
+            polling = false;
+            // We DID hold the lease; release it so the operator's manual
+            // restart can re-claim cleanly.
+            releaseAuthoritative({
+              stateDir: STATE_DIR,
+              tokenHash: BOT_TOKEN_HASH,
+            });
+            return;
+          }
+          await new Promise((r) => setTimeout(r, ERROR_BACKOFF_MS));
+        } else {
+          log("poller", `getUpdates error: ${errMsg}. Retrying in 3s...`);
+          await new Promise((r) => setTimeout(r, ERROR_BACKOFF_MS));
+        }
       }
     }
+  } finally {
+    // Always stop the watchdog on ANY loop exit (normal stop, preemption,
+    // 409-fatal return) so its interval can neither leak nor alarm after
+    // the poller has released authority / shut down.
+    watchdog.stop();
   }
 }
