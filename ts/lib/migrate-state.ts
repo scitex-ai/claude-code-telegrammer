@@ -132,24 +132,50 @@ export function migrateLegacyStateDir(
   const oldDir =
     opts.oldDir !== undefined ? opts.oldDir : resolveOldDefaultDir(env, home);
 
+  const newDb = join(newDir, NEW_DB);
+
+  // EVERY return path below funnels through `summarize`, which emits ONE
+  // structured line naming the resolved paths, whether each DB existed, and
+  // the chosen reason. A NO-OP is therefore never silent: during an incident
+  // the operator can see WHY nothing migrated and WHERE it looked, instead of
+  // an empty log (constitution §2: fail loud, no silent, give the next step).
+  const summarize = (
+    reason: MigrateResult["reason"],
+    oldDb: string | null,
+    newDbExists: boolean,
+    oldDbExists: boolean,
+  ): MigrateResult => {
+    log("migrate-state", "state-dir migration check", {
+      newDir,
+      oldDir: oldDir ?? "none",
+      newDb,
+      oldDb: oldDb ?? "none",
+      newDbExists,
+      oldDbExists,
+      reason,
+    });
+    return { migrated: reason === "migrated", reason, newDir, oldDir };
+  };
+
   // Explicit AGENT_STATE_DIR → that dir IS the state dir; nothing to migrate.
   if (oldDir === null || getenv("AGENT_STATE_DIR", undefined, env)) {
-    return { migrated: false, reason: "explicit-state-dir", newDir, oldDir };
+    return summarize("explicit-state-dir", null, existsSync(newDb), false);
   }
 
-  const newDb = join(newDir, NEW_DB);
   const oldDb = join(oldDir, OLD_DB);
+  const newDbExists = existsSync(newDb);
+  const oldDbExists = existsSync(oldDb);
 
   // Already on the new path (or a previous migration completed) → no-op.
-  if (existsSync(newDb)) {
-    return { migrated: false, reason: "new-db-exists", newDir, oldDir };
+  if (newDbExists) {
+    return summarize("new-db-exists", oldDb, newDbExists, oldDbExists);
   }
   if (existsSync(join(newDir, MARKER_NEW))) {
-    return { migrated: false, reason: "already-migrated", newDir, oldDir };
+    return summarize("already-migrated", oldDb, newDbExists, oldDbExists);
   }
   // Nothing to carry forward.
-  if (!existsSync(oldDb)) {
-    return { migrated: false, reason: "old-db-absent", newDir, oldDir };
+  if (!oldDbExists) {
+    return summarize("old-db-absent", oldDb, newDbExists, oldDbExists);
   }
 
   log("migrate-state", "migrating legacy telegrammer state forward", {
@@ -222,7 +248,9 @@ export function migrateLegacyStateDir(
     to: newDir,
   });
 
-  return { migrated: true, reason: "migrated", newDir, oldDir };
+  // newDb now exists (just written as the final copy step); report the uniform
+  // summary line so the migrated outcome shares the same shape as every no-op.
+  return summarize("migrated", oldDb, true, oldDbExists);
 }
 
 /**
