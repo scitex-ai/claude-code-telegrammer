@@ -11,7 +11,14 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
 import { join } from "path";
 import { tmpdir } from "os";
-import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "fs";
+import {
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  rmSync,
+  copyFileSync,
+} from "fs";
 import {
   migrateLegacyStateDir,
   resolveOldDefaultDir,
@@ -221,6 +228,52 @@ describe("migrateLegacyStateDir", () => {
     // Fail loud: no success marker written, so a later run retries rather than
     // silently believing a half-migration succeeded.
     expect(existsSync(join(newDir, ".migrated-from"))).toBe(false);
+    // The main DB is copied LAST, so a failure leaves the new DB ABSENT — its
+    // presence is the "fully complete" sentinel. This guarantees the next
+    // startup re-runs the whole migration instead of skipping on new-db-exists.
+    expect(existsSync(join(newDir, "claude-code-telegrammer.db"))).toBe(false);
+  });
+
+  test("(7b) a failure AFTER the DB copy but the DB present still re-runs cleanly (order sentinel)", () => {
+    // Prove the sentinel property end-to-end: fail on the FINAL .db copy, then
+    // a re-run (with a working copyFile) completes the migration.
+    const oldDir = join(home, ".claude-code-telegrammer");
+    seedLegacy(oldDir);
+
+    let calls = 0;
+    const failOnDb = (src: string, dst: string) => {
+      // The main DB is the last copyFile call; throw on it specifically.
+      if (dst.endsWith("claude-code-telegrammer.db"))
+        throw new Error("disk full");
+      calls++;
+      // Delegate real copies for the earlier (sidecar/access) steps.
+      copyFileSync(src, dst);
+    };
+    expect(() =>
+      migrateLegacyStateDir({
+        env: {},
+        home,
+        newDir,
+        copyFile: failOnDb,
+        logFn: silent,
+      }),
+    ).toThrow("disk full");
+    expect(calls).toBeGreaterThan(0); // sidecar/access copies DID run first
+    expect(existsSync(join(newDir, "claude-code-telegrammer.db"))).toBe(false);
+    expect(existsSync(join(newDir, ".migrated-from"))).toBe(false);
+
+    // Re-run with a working copyFile completes cleanly.
+    const res = migrateLegacyStateDir({
+      env: {},
+      home,
+      newDir,
+      now: FIXED,
+      logFn: silent,
+    });
+    expect(res.migrated).toBe(true);
+    expect(
+      readFileSync(join(newDir, "claude-code-telegrammer.db"), "utf8"),
+    ).toBe("MAIN-DB-BYTES");
   });
 });
 

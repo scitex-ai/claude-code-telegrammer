@@ -161,8 +161,18 @@ export function migrateLegacyStateDir(
 
   // Copy phase — any failure here rethrows WITHOUT writing a marker, so a
   // half-migration is visible and the operator never sees a silent fresh DB.
+  //
+  // ORDER MATTERS: the main .db is copied LAST. The newDb-exists guard above
+  // treats the presence of the new .db as "migration fully complete", so the
+  // .db must be the FINAL artifact written — a crash mid-copy (e.g. disk full
+  // while copying attachments) then leaves newDb ABSENT, and the next startup
+  // re-runs the whole migration cleanly instead of skipping on a stray new .db
+  // and permanently stranding the un-copied attachments/access.json. The
+  // sidecar/attachment/access copies are overwrite/merge-safe, so a re-run is
+  // idempotent. A -wal/-shm copied WITHOUT its base .db (crash before the final
+  // step) is a harmless orphan the re-run overwrites — SQLite only reads the
+  // sidecars alongside the .db.
   try {
-    copyFile(oldDb, newDb);
     for (const suffix of DB_SIDECARS) {
       const src = oldDb + suffix;
       if (existsSync(src)) copyFile(src, newDb + suffix);
@@ -175,6 +185,8 @@ export function migrateLegacyStateDir(
     if (existsSync(oldAccess)) {
       copyFile(oldAccess, join(newDir, "access.json"));
     }
+    // Final step: the main DB. Its existence is the "fully complete" sentinel.
+    copyFile(oldDb, newDb);
   } catch (err) {
     log("migrate-state", "MIGRATION FAILED — leaving legacy state untouched", {
       from: oldDir,
