@@ -164,6 +164,45 @@ describe("migrateLegacyStateDir", () => {
     expect(existsSync(join(newDir, "claude-code-telegrammer.db"))).toBe(false);
   });
 
+  test("(4b) a no-op is NOT silent — it logs the outcome + resolved paths + reason", () => {
+    // Regression guard: a live incident was hard to diagnose because the no-op
+    // return paths logged NOTHING. Every outcome must now emit one structured
+    // line carrying the reason and the exact paths it inspected.
+    const calls: Array<{
+      component: string;
+      msg: string;
+      data?: Record<string, unknown>;
+    }> = [];
+    const spy = (
+      component: string,
+      msg: string,
+      data?: Record<string, unknown>,
+    ) => {
+      calls.push({ component, msg, data });
+    };
+
+    // old-db-absent: nothing to carry forward, but it must say so out loud.
+    const res = migrateLegacyStateDir({
+      env: {},
+      home,
+      newDir,
+      logFn: spy,
+    });
+    expect(res.reason).toBe("old-db-absent");
+
+    const summary = calls.find((c) => c.data?.reason === "old-db-absent");
+    expect(summary).toBeDefined();
+    expect(summary!.component).toBe("migrate-state");
+    // The resolved decision inputs are all present + actionable.
+    expect(summary!.data!.newDir).toBe(newDir);
+    expect(summary!.data!.oldDir).toBe(join(home, ".claude-code-telegrammer"));
+    expect(summary!.data!.oldDb).toBe(
+      join(home, ".claude-code-telegrammer", "messages.db"),
+    );
+    expect(summary!.data!.newDbExists).toBe(false);
+    expect(summary!.data!.oldDbExists).toBe(false);
+  });
+
   test("(5) explicit AGENT_STATE_DIR set → migration skipped entirely", () => {
     // Even with a full legacy dir present, an explicit state dir means "this
     // dir IS the state dir" — nothing to migrate.
