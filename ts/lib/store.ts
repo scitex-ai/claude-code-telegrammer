@@ -29,6 +29,8 @@ let stmtGetUnreadChat: Statement | null = null;
 let stmtGetHistory: Statement | null = null;
 let stmtSaveOffset: Statement | null = null;
 let stmtLoadOffset: Statement | null = null;
+let stmtSaveLastPollTs: Statement | null = null;
+let stmtLoadLastPollTs: Statement | null = null;
 let stmtInsertAttachment: Statement | null = null;
 let stmtAttachmentsForRow: Statement | null = null;
 let stmtAttachmentByFileId: Statement | null = null;
@@ -186,6 +188,15 @@ export function initStore(): void {
 
   stmtLoadOffset = db.prepare(`
     SELECT value FROM meta WHERE key = 'update_offset'
+  `);
+
+  stmtSaveLastPollTs = db.prepare(`
+    INSERT INTO meta (key, value) VALUES ('last_poll_ts', ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+  `);
+
+  stmtLoadLastPollTs = db.prepare(`
+    SELECT value FROM meta WHERE key = 'last_poll_ts'
   `);
 
   stmtInsertAttachment = db.prepare(`
@@ -350,6 +361,26 @@ export function saveOffset(offset: number): void {
 export function loadOffset(): number {
   if (!stmtLoadOffset) throw new Error("store not initialized");
   const row = stmtLoadOffset.get() as { value: string } | undefined;
+  return row ? parseInt(row.value, 10) : 0;
+}
+
+// ── Poll heartbeat persistence ─────────────────────────────────────────────
+//
+// Mirrors the offset kv pair above: a single meta row ('last_poll_ts')
+// stamped with the epoch-ms time of the most recent SUCCESSFUL getUpdates
+// return. Persisted (not just in-process) so an out-of-band health probe
+// can read poll-freshness after the fact — the wedged-but-alive poller
+// (process up, kill-0 passes, but getUpdates never returns) is otherwise
+// invisible to a liveness check. See poll-watchdog.ts.
+
+export function saveLastPollTs(epochMs: number): void {
+  if (!stmtSaveLastPollTs) throw new Error("store not initialized");
+  stmtSaveLastPollTs.run(String(epochMs));
+}
+
+export function loadLastPollTs(): number {
+  if (!stmtLoadLastPollTs) throw new Error("store not initialized");
+  const row = stmtLoadLastPollTs.get() as { value: string } | undefined;
   return row ? parseInt(row.value, 10) : 0;
 }
 
