@@ -1,0 +1,4 @@
+{
+  "stage": "screen -S e2e-telegrammer -X hardcopy /tmp/e2e-screen.txt",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

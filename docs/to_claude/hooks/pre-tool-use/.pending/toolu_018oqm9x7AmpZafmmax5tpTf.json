@@ -1,0 +1,4 @@
+{
+  "stage": "screen -S head-spartan -X stuff '\\r'\"",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

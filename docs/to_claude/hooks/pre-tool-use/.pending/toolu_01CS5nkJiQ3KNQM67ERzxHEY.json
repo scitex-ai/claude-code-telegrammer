@@ -1,0 +1,4 @@
+{
+  "stage": "print('APPEND_SLASH:', settings.APPEND_SLASH)\\\"\"",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

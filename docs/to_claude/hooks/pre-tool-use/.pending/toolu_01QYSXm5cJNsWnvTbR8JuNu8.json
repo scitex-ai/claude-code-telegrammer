@@ -1,0 +1,4 @@
+{
+  "stage": "fix: add trailing slash to webhook/telegram URL (APPEND_SLASH compat)",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

@@ -1,0 +1,4 @@
+{
+  "stage": "docker compose -f deployment/docker/docker-compose.stable.yml build --no-cache",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

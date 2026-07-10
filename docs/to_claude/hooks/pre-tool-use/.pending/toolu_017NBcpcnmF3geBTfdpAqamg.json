@@ -1,0 +1,4 @@
+{
+  "stage": "rm -f /home/ywatanabe/.claude-code-telegrammer/telegram-mcp.lock",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

@@ -1,0 +1,4 @@
+{
+  "stage": "scitex-agent-container stop ~/.scitex/orochi/agents/head-ywata-note-win/head-ywata-note-win.yaml",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

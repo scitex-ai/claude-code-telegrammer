@@ -7,7 +7,8 @@
 import { join } from "path";
 import { mkdirSync } from "fs";
 import { Database } from "bun:sqlite";
-import { ATTACHMENT_DIR, STATE_DIR } from "./config.js";
+import { ATTACHMENT_DIR } from "./config.js";
+import { DB_PATH } from "./store.js";
 import { getFile, downloadFile } from "./telegram-api.js";
 import { log } from "./log.js";
 
@@ -24,8 +25,7 @@ let processing = false;
 // ── DB access (reuse the same DB file as store.ts) ────────────────────────
 
 function getDb(): Database {
-  const dbPath = join(STATE_DIR, "messages.db");
-  return new Database(dbPath);
+  return new Database(DB_PATH);
 }
 
 // ── Public API ────────────────────────────────────────────────────────────

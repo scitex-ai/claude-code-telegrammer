@@ -1,0 +1,4 @@
+{
+  "stage": "- **409 Conflict fail-fast** — preflight check at startup, stops with agent notification",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

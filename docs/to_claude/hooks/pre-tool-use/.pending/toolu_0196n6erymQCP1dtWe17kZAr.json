@@ -1,0 +1,4 @@
+{
+  "stage": "The watchdog binary (`bin/claude-code-telegrammer-watchdog`) should also move to **scitex-agent-container**.",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

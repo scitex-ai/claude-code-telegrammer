@@ -1,0 +1,4 @@
+{
+  "stage": "/home/ywatanabe/.venv/bin/scitex-notification send-notification --backend audio \"$msg\"",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

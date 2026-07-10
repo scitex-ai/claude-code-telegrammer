@@ -8,7 +8,17 @@ import { join } from "path";
 import { STATE_DIR } from "./config.js";
 import { log } from "./log.js";
 
-const DB_PATH = join(STATE_DIR, "messages.db");
+// Scitex-standard DB filename (was "messages.db"): self-describing in the
+// ~/.scitex/claude-code-telegrammer runtime tree. SQLite derives the -wal/-shm
+// sidecars from this stem; the startup auto-migration (lib/migrate-state.ts)
+// copies a legacy messages.db onto this name once so history is never lost.
+export const DB_PATH = join(STATE_DIR, "claude-code-telegrammer.db");
+
+// The schema version this code WRITES into meta.schema_version on init.
+// Exported as the single source of truth so the health check
+// (lib/health-checks.ts::checkDbSchemaCurrent) compares against the same
+// constant instead of a drifting copy.
+export const SCHEMA_VERSION = "2";
 
 let db: Database | null = null;
 
@@ -23,7 +33,12 @@ let stmtGetUnreadChat: Statement | null = null;
 let stmtGetHistory: Statement | null = null;
 let stmtSaveOffset: Statement | null = null;
 let stmtLoadOffset: Statement | null = null;
+let stmtSaveLastPollTs: Statement | null = null;
+let stmtLoadLastPollTs: Statement | null = null;
 let stmtInsertAttachment: Statement | null = null;
+let stmtAttachmentsForRow: Statement | null = null;
+let stmtAttachmentByFileId: Statement | null = null;
+let stmtMarkAttachmentDownloaded: Statement | null = null;
 let stmtSetRepliedAt: Statement | null = null;
 let stmtSearchAll: Statement | null = null;
 let stmtSearchChat: Statement | null = null;
@@ -56,6 +71,7 @@ CREATE TABLE IF NOT EXISTS messages (
     replied_at TEXT,
     reply_to_message_id TEXT,
     reply_to_row_id INTEGER REFERENCES messages(id),
+    forward_json TEXT,
     host TEXT,
     project TEXT,
     agent_id TEXT,
@@ -89,6 +105,30 @@ CREATE TABLE IF NOT EXISTS attachments (
 CREATE INDEX IF NOT EXISTS idx_att_message ON attachments(message_row_id);
 `;
 
+// ── Migration helpers ──────────────────────────────────────────────────────
+
+/**
+ * Idempotent ALTER TABLE ADD COLUMN.
+ *
+ * SQLite's CREATE TABLE IF NOT EXISTS does NOT update existing tables
+ * when columns are added to the schema. We use this helper to bring
+ * older databases forward without dropping data. Guarded by
+ * PRAGMA table_info so it never throws on a re-run.
+ */
+export function ensureColumn(
+  database: Database,
+  table: string,
+  column: string,
+  decl: string,
+): void {
+  const cols = database.prepare(`PRAGMA table_info(${table})`).all() as Array<{
+    name: string;
+  }>;
+  if (!cols.some((c) => c.name === column)) {
+    database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${decl}`);
+  }
+}
+
 // ── Init ───────────────────────────────────────────────────────────────────
 
 export function initStore(): void {
@@ -97,15 +137,21 @@ export function initStore(): void {
 
   // Seed meta with schema version
   db.prepare(
-    "INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', '2')",
-  ).run();
+    "INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?)",
+  ).run(SCHEMA_VERSION);
+
+  // ── Migration: forward_json column (added 2026-06) ──────────────────
+  // CREATE TABLE IF NOT EXISTS does NOT alter existing tables, so older
+  // databases need an explicit ALTER. Guarded by table_info check so
+  // it's idempotent and safe to re-run on every startup.
+  ensureColumn(db, "messages", "forward_json", "TEXT");
 
   // Cache prepared statements
   stmtInsertInbound = db.prepare(`
     INSERT OR IGNORE INTO messages
-      (direction, chat_id, message_id, user_id, username, text, telegram_ts, received_at, reply_to_message_id, host, project, agent_id, bot_token_hash, raw_json)
+      (direction, chat_id, message_id, user_id, username, text, telegram_ts, received_at, reply_to_message_id, forward_json, host, project, agent_id, bot_token_hash, raw_json)
     VALUES
-      ('inbound', ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?)
+      ('inbound', ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?)
   `);
 
   stmtInsertOutbound = db.prepare(`
@@ -148,9 +194,41 @@ export function initStore(): void {
     SELECT value FROM meta WHERE key = 'update_offset'
   `);
 
+  stmtSaveLastPollTs = db.prepare(`
+    INSERT INTO meta (key, value) VALUES ('last_poll_ts', ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value
+  `);
+
+  stmtLoadLastPollTs = db.prepare(`
+    SELECT value FROM meta WHERE key = 'last_poll_ts'
+  `);
+
   stmtInsertAttachment = db.prepare(`
     INSERT INTO attachments (message_row_id, kind, file_id, file_unique_id, file_name, mime_type, file_size)
     VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  // Attachment queries (incident cct-inbound-images-20260707): the join
+  // onto messages carries chat_id along so download_attachment(row_id)
+  // can route the download into the right per-chat directory without a
+  // second lookup.
+  stmtAttachmentsForRow = db.prepare(`
+    SELECT a.message_row_id, a.kind, a.file_id, a.file_name, a.mime_type,
+           a.local_path, a.downloaded_at, m.chat_id
+    FROM attachments a JOIN messages m ON m.id = a.message_row_id
+    WHERE a.message_row_id = ? ORDER BY a.id
+  `);
+
+  stmtAttachmentByFileId = db.prepare(`
+    SELECT a.message_row_id, a.kind, a.file_id, a.file_name, a.mime_type,
+           a.local_path, a.downloaded_at, m.chat_id
+    FROM attachments a JOIN messages m ON m.id = a.message_row_id
+    WHERE a.file_id = ? ORDER BY a.id DESC LIMIT 1
+  `);
+
+  stmtMarkAttachmentDownloaded = db.prepare(`
+    UPDATE attachments SET local_path = ?, downloaded_at = datetime('now')
+    WHERE message_row_id = ? AND file_id = ?
   `);
 
   stmtSearchAll = db.prepare(`
@@ -165,7 +243,7 @@ export function initStore(): void {
     SELECT * FROM messages WHERE chat_id = ? ORDER BY id DESC LIMIT ?
   `);
 
-  log("store", `initialized at ${DB_PATH} (schema v2)`);
+  log("store", `initialized at ${DB_PATH} (schema v${SCHEMA_VERSION})`);
 }
 
 // ── Inbound ────────────────────────────────────────────────────────────────
@@ -178,6 +256,7 @@ export function saveInbound(msg: {
   text: string;
   telegram_ts: string;
   reply_to_message_id?: string;
+  forward_json?: string;
   host: string;
   project: string;
   agent_id: string;
@@ -193,6 +272,7 @@ export function saveInbound(msg: {
     msg.text,
     msg.telegram_ts,
     msg.reply_to_message_id ?? null,
+    msg.forward_json ?? null,
     msg.host,
     msg.project,
     msg.agent_id,
@@ -288,6 +368,26 @@ export function loadOffset(): number {
   return row ? parseInt(row.value, 10) : 0;
 }
 
+// ── Poll heartbeat persistence ─────────────────────────────────────────────
+//
+// Mirrors the offset kv pair above: a single meta row ('last_poll_ts')
+// stamped with the epoch-ms time of the most recent SUCCESSFUL getUpdates
+// return. Persisted (not just in-process) so an out-of-band health probe
+// can read poll-freshness after the fact — the wedged-but-alive poller
+// (process up, kill-0 passes, but getUpdates never returns) is otherwise
+// invisible to a liveness check. See poll-watchdog.ts.
+
+export function saveLastPollTs(epochMs: number): void {
+  if (!stmtSaveLastPollTs) throw new Error("store not initialized");
+  stmtSaveLastPollTs.run(String(epochMs));
+}
+
+export function loadLastPollTs(): number {
+  if (!stmtLoadLastPollTs) throw new Error("store not initialized");
+  const row = stmtLoadLastPollTs.get() as { value: string } | undefined;
+  return row ? parseInt(row.value, 10) : 0;
+}
+
 // ── Attachments ────────────────────────────────────────────────────────────
 
 export function insertAttachment(
@@ -311,6 +411,65 @@ export function insertAttachment(
     attachment.mime_type ?? null,
     attachment.file_size ?? null,
   );
+}
+
+/**
+ * One row of the attachments table, joined with the owning message's
+ * chat_id. `local_path` / `downloaded_at` are null until the background
+ * auto-download (attachments.ts) or an explicit download_attachment call
+ * completes.
+ */
+export interface AttachmentRow {
+  message_row_id: number;
+  kind: string;
+  file_id: string;
+  file_name: string | null;
+  mime_type: string | null;
+  local_path: string | null;
+  downloaded_at: string | null;
+  chat_id: string;
+}
+
+/**
+ * Attachments for a set of message row ids (incident
+ * cct-inbound-images-20260707 — lets get_history / get_unread expose
+ * file_id + local_path per message). Loops one indexed lookup per row
+ * instead of a dynamic IN (…) because prepared statements are fixed-arity
+ * and a history page is ≤ ~20 rows — N tiny idx_att_message hits.
+ */
+export function attachmentsForRows(rowIds: number[]): AttachmentRow[] {
+  if (!stmtAttachmentsForRow) throw new Error("store not initialized");
+  const out: AttachmentRow[] = [];
+  for (const id of rowIds) {
+    out.push(...(stmtAttachmentsForRow.all(id) as AttachmentRow[]));
+  }
+  return out;
+}
+
+/**
+ * Newest attachment row for a Telegram file_id (or null if the file_id
+ * was never stored — e.g. a caller passing an id from another bot).
+ * Used by download_attachment to short-circuit to an existing
+ * local_path before hitting the network.
+ */
+export function findAttachmentByFileId(fileId: string): AttachmentRow | null {
+  if (!stmtAttachmentByFileId) throw new Error("store not initialized");
+  return (stmtAttachmentByFileId.get(fileId) as AttachmentRow) ?? null;
+}
+
+/**
+ * Record a completed download on the attachment row so later
+ * download_attachment calls (and get_history/get_unread consumers) see
+ * the local_path. Same UPDATE the background queue in attachments.ts
+ * performs — kept here too so the on-demand path is equally durable.
+ */
+export function markAttachmentDownloaded(
+  messageRowId: number,
+  fileId: string,
+  localPath: string,
+): void {
+  if (!stmtMarkAttachmentDownloaded) throw new Error("store not initialized");
+  stmtMarkAttachmentDownloaded.run(localPath, messageRowId, fileId);
 }
 
 // ── Search & Context ──────────────────────────────────────────────────────

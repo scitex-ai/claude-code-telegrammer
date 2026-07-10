@@ -1,0 +1,4 @@
+{
+  "stage": "npm install playwright",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

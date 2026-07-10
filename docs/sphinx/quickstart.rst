@@ -50,9 +50,9 @@ Then edit ``.mcp.json`` with your values:
           "command": "bun",
           "args": ["run", "/path/to/claude-code-telegrammer/ts/telegram-server.ts"],
           "env": {
-            "CLAUDE_CODE_TELEGRAMMER_TELEGRAM_BOT_TOKEN": "123456789:AAH...",
-            "CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ALLOWED_USERS": "YOUR_TELEGRAM_USER_ID",
-            "CLAUDE_CODE_TELEGRAMMER_TELEGRAM_STATE_DIR": "~/.claude-code-telegrammer"
+            "CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN": "123456789:AAH...",
+            "CLAUDE_CODE_TELEGRAMMER_ALLOWED_USERS": "YOUR_TELEGRAM_USER_ID",
+            "CLAUDE_CODE_TELEGRAMMER_AGENT_STATE_DIR": "~/.claude-code-telegrammer"
           }
         }
       }
@@ -72,7 +72,7 @@ Access Control
 The MCP server uses an allowlist model. There are two layers:
 
 1. **Environment variable** --
-   ``CLAUDE_CODE_TELEGRAMMER_TELEGRAM_ALLOWED_USERS`` accepts a
+   ``CLAUDE_CODE_TELEGRAMMER_ALLOWED_USERS`` accepts a
    comma-separated list of Telegram user IDs that are allowed to DM the
    bot.
 

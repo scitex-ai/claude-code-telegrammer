@@ -1,0 +1,4 @@
+{
+  "stage": "- **refactor**: Remove all Orochi-specific code (orochi_connector.py, orochi_mcp.py)",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

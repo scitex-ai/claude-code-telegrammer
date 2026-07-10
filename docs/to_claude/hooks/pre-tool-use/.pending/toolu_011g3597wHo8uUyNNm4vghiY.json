@@ -1,0 +1,4 @@
+{
+  "stage": "scp /tmp/screenshot.js mba:/tmp/screenshot.js",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

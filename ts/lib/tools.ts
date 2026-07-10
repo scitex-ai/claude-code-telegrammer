@@ -8,11 +8,14 @@ import {
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { assertAllowedChat } from "./access.js";
-import { tgApi, sendMessage, sendDocument } from "./telegram-api.js";
+import {
+  tgApi,
+  sendMessage,
+  sendDocument,
+  editMessageText,
+} from "./telegram-api.js";
 import {
   saveOutbound,
-  getHistory,
-  getUnread,
   markRead,
   markAllRead,
   searchMessages,
@@ -20,7 +23,12 @@ import {
 } from "./store.js";
 import { HOST_NAME, PROJECT, AGENT_ID, BOT_TOKEN_HASH } from "./config.js";
 import { log } from "./log.js";
-import { downloadNow } from "./attachments.js";
+import {
+  handleGetHistory,
+  handleGetUnread,
+  handleDownloadAttachment,
+} from "./tools-messages.js";
+import { runHealth, serializeHealthReport } from "./health-adapters.js";
 
 export function registerTools(mcp: Server): void {
   mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -90,7 +98,10 @@ export function registerTools(mcp: Server): void {
         name: "get_history",
         description:
           "Get message history for a chat from the local DB. " +
-          "Returns both inbound and outbound messages in chronological order.",
+          "Returns both inbound and outbound messages in chronological order. " +
+          "Messages with stored attachments include an `attachments` array " +
+          "({kind, file_id, file_name, mime_type, local_path, downloaded_at}); " +
+          "local_path is set once the background auto-download completed.",
         inputSchema: {
           type: "object" as const,
           properties: {
@@ -110,7 +121,9 @@ export function registerTools(mcp: Server): void {
       {
         name: "get_unread",
         description:
-          "Get unread inbound messages, optionally filtered by chat_id.",
+          "Get unread inbound messages, optionally filtered by chat_id. " +
+          "Messages with stored attachments include an `attachments` array " +
+          "(see get_history).",
         inputSchema: {
           type: "object" as const,
           properties: {
@@ -144,21 +157,34 @@ export function registerTools(mcp: Server): void {
       {
         name: "download_attachment",
         description:
-          "Download a Telegram file attachment immediately. Returns the local file path.",
+          "Get the local path of a Telegram file attachment. Pass EITHER " +
+          "file_id (from the inbound [attachment …] content line) OR row_id " +
+          "(the inbound message's DB row id). If the attachment was already " +
+          "downloaded (auto-download or a previous call) the existing local " +
+          "path is returned immediately without re-downloading; otherwise " +
+          "the file is fetched now. Errors clearly when row_id has no " +
+          "stored attachment.",
         inputSchema: {
           type: "object" as const,
           properties: {
             file_id: {
               type: "string",
-              description: "Telegram file_id from the attachment.",
+              description:
+                "Telegram file_id from the attachment. Optional when row_id is given.",
+            },
+            row_id: {
+              type: "number",
+              description:
+                "DB row id of the inbound message carrying the attachment " +
+                "(row_id from the <channel> meta or get_history).",
             },
             chat_id: {
               type: "string",
               description:
-                "Chat ID for organizing downloads. Defaults to 'unknown'.",
+                "Chat ID for organizing downloads. Defaults to the attachment's " +
+                "own chat when resolvable, else 'unknown'.",
             },
           },
-          required: ["file_id"],
         },
       },
       {
@@ -208,6 +234,18 @@ export function registerTools(mcp: Server): void {
         },
       },
       {
+        name: "health",
+        description:
+          "Run the claude-code-telegrammer health check (doctor). Returns a JSON report " +
+          "{package, ok, checks[], summary} — env hygiene, bot token presence/validity, " +
+          "webhook absence, poller liveness, allowlist, state dir, and DB schema/offset. " +
+          "Every failing check carries an actionable hint. Takes no parameters.",
+        inputSchema: {
+          type: "object" as const,
+          properties: {},
+        },
+      },
+      {
         name: "get_context",
         description:
           "Get recent conversation context for a chat, formatted as compact text for LLM consumption. " +
@@ -237,6 +275,37 @@ export function registerTools(mcp: Server): void {
         case "reply": {
           const chatId = args.chat_id as string;
           const text = args.text as string;
+          // Hard length cap (operator 2026-06-04, raised to 512 on
+          // 2026-06-06 per operator request): the operator reads on a
+          // phone and cannot scan walls of text. REJECT over-limit messages
+          // here at the send boundary instead of letting the API layer auto-
+          // chunk them — this forces the caller (lead or any agent) to be
+          // brief and split. Counts Unicode code points (CJK == Latin).
+          // Read PER CALL (not at module load) so a running process picks
+          // up CCT_TG_MAX_CHARS if it's set in its environment at spawn.
+          const TG_LIMIT = Number(process.env.CCT_TG_MAX_CHARS ?? "512");
+          if (
+            typeof text === "string" &&
+            [...text].length > TG_LIMIT &&
+            process.env.CCT_TG_ALLOW_LONG !== "1"
+          ) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text:
+                    `BLOCKED: message is ${[...text].length} chars > ${TG_LIMIT}-char limit. ` +
+                    `Keep every Telegram message short (<=${TG_LIMIT} chars). ` +
+                    `1) SPLIT a long update into MULTIPLE short messages, one point each. ` +
+                    `2) Write ONLY what the operator must act on — no filler, no trivia, ` +
+                    `no process-narration, no markdown bold. ` +
+                    `If it is not worth ${TG_LIMIT} chars to the operator, do not send it. ` +
+                    `Override (rare): set env CCT_TG_ALLOW_LONG=1.`,
+                },
+              ],
+              isError: true,
+            };
+          }
           const replyTo =
             args.reply_to != null ? Number(args.reply_to) : undefined;
           const rowId = args.row_id != null ? Number(args.row_id) : undefined;
@@ -275,33 +344,22 @@ export function registerTools(mcp: Server): void {
         case "edit_message": {
           const chatId = args.chat_id as string;
           assertAllowedChat(chatId);
-          const result = await tgApi("editMessageText", {
-            chat_id: chatId,
-            message_id: Number(args.message_id),
-            text: args.text as string,
-          });
+          // editMessageText() applies the agent signature (idempotent).
+          const result = await editMessageText(
+            chatId,
+            Number(args.message_id),
+            args.text as string,
+          );
           const id =
             typeof result === "object" ? result.message_id : args.message_id;
           return { content: [{ type: "text", text: `edited (id: ${id})` }] };
         }
-        case "get_history": {
-          const chatId = args.chat_id as string;
-          const limit = (args.limit as number) ?? 20;
-          const offset = (args.offset as number) ?? 0;
-          assertAllowedChat(chatId);
-          const rows = getHistory(chatId, limit, offset);
-          return {
-            content: [{ type: "text", text: JSON.stringify(rows, null, 2) }],
-          };
-        }
-        case "get_unread": {
-          const chatId = args.chat_id as string | undefined;
-          if (chatId) assertAllowedChat(chatId);
-          const rows = getUnread(chatId);
-          return {
-            content: [{ type: "text", text: JSON.stringify(rows, null, 2) }],
-          };
-        }
+        // Handler bodies live in tools-messages.ts (unit-testable without
+        // an MCP server; keeps this file under the repo line cap).
+        case "get_history":
+          return handleGetHistory(args);
+        case "get_unread":
+          return handleGetUnread(args);
         case "mark_read": {
           const chatId = args.chat_id as string | undefined;
           const messageIds = args.message_ids as number[] | undefined;
@@ -340,14 +398,8 @@ export function registerTools(mcp: Server): void {
             isError: true,
           };
         }
-        case "download_attachment": {
-          const fileId = args.file_id as string;
-          const chatId = (args.chat_id as string) ?? "unknown";
-          const localPath = await downloadNow(fileId, chatId);
-          return {
-            content: [{ type: "text", text: `downloaded to: ${localPath}` }],
-          };
-        }
+        case "download_attachment":
+          return await handleDownloadAttachment(args);
         case "send_document": {
           const chatId = args.chat_id as string;
           const filePath = args.file_path as string;
@@ -366,6 +418,17 @@ export function registerTools(mcp: Server): void {
           const rows = searchMessages(query, chatId, limit);
           return {
             content: [{ type: "text", text: JSON.stringify(rows, null, 2) }],
+          };
+        }
+        case "health": {
+          // MCP-tool variant: this server process IS the poller, so the
+          // poller_alive check reports our own pid ("self") instead of the
+          // lockfile/pidfile round-trip the CLI probe does. The serialized
+          // report has the raw token redacted (belt-and-braces — the checks
+          // never include it in the first place).
+          const report = await runHealth({ poller: "self" });
+          return {
+            content: [{ type: "text", text: serializeHealthReport(report) }],
           };
         }
         case "get_context": {

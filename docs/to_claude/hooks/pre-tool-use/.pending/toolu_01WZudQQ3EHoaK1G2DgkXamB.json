@@ -1,0 +1,4 @@
+{
+  "stage": "fix: enforce MCP flag ordering (--mcp-config before --dangerously-load-development-channels)",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

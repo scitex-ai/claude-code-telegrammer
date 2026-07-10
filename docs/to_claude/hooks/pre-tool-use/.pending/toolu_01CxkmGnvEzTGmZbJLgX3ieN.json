@@ -1,0 +1,4 @@
+{
+  "stage": "import asyncio, json, websockets",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

@@ -1,0 +1,4 @@
+{
+  "stage": "docker exec orochi-server-stable python -c 'from scitex_orochi._telegram_bridge import TelegramBridge",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

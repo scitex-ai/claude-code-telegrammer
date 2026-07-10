@@ -1,0 +1,4 @@
+{
+  "stage": "chore: add .env.example with all env vars documented",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

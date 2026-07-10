@@ -3,6 +3,7 @@
  */
 
 import { API_BASE, TOKEN, MAX_TEXT } from "./config.js";
+import { appendSignature } from "./signature.js";
 import { mkdirSync, readFileSync } from "fs";
 import { join, basename, extname } from "path";
 
@@ -22,6 +23,31 @@ export async function tgApi(
     );
   }
   return json.result;
+}
+
+/**
+ * Raw getMe that returns the PARSED Telegram JSON ({ok, result?, error_code?,
+ * description?}) instead of tgApi()'s unwrapped `result`. tgApi() throws a
+ * generic Error on ok:false that LOSES the error_code, so a caller cannot tell
+ * an invalid-token 401/404 from a transient 429/5xx. Startup token validation
+ * (lib/startup-validate.ts) needs that distinction, so this variant does NOT
+ * throw on ok:false — it hands back the full envelope. It still REJECTS on a
+ * transport-level fetch failure (DNS/connect/reset), which validateBotToken()
+ * classifies as transient.
+ */
+export async function getMeRaw(): Promise<{
+  ok: boolean;
+  result?: { id?: number; username?: string; [k: string]: unknown };
+  error_code?: number;
+  description?: string;
+}> {
+  const res = await fetch(`${API_BASE}/getMe`, { method: "POST" });
+  return (await res.json()) as {
+    ok: boolean;
+    result?: { id?: number; username?: string; [k: string]: unknown };
+    error_code?: number;
+    description?: string;
+  };
 }
 
 export function splitText(text: string, limit: number = MAX_TEXT): string[] {
@@ -52,7 +78,13 @@ export async function sendMessage(
   text: string,
   replyTo?: number,
 ): Promise<number> {
-  const chunks = splitText(text);
+  // Sign BEFORE splitting: appendSignature is idempotent, and signing the
+  // whole text first means the splitter naturally keeps the signature on
+  // the tail chunk regardless of where the body cuts. This avoids the
+  // "double-sign on a split message" failure mode the operator called out
+  // (we never sign per-chunk).
+  const signed = appendSignature(text);
+  const chunks = splitText(signed);
   let lastMsgId = 0;
   for (let i = 0; i < chunks.length; i++) {
     const params: Record<string, unknown> = {
@@ -121,9 +153,10 @@ export async function sendDocument(
   const formData = new FormData();
   formData.append("chat_id", chatId);
   formData.append("document", new Blob([fileBytes], { type: mime }), fileName);
-  if (caption) {
-    formData.append("caption", caption);
-  }
+  // Always attach a signed caption — even when no user caption was passed,
+  // we want the agent-signature line to identify which bot sent the file.
+  // appendSignature("") returns the bare signature; idempotent on re-send.
+  formData.append("caption", appendSignature(caption ?? ""));
 
   const res = await fetch(`${API_BASE}/sendDocument`, {
     method: "POST",
@@ -136,4 +169,23 @@ export async function sendDocument(
     );
   }
   return json.result.message_id;
+}
+
+/**
+ * Edit a message the bot previously sent. Applies the agent signature to
+ * the new text so an edited message stays attributed to its sender — the
+ * idempotent appendSignature avoids double-signing when the previous text
+ * (which the agent might pass through unchanged) already carries it.
+ */
+export async function editMessageText(
+  chatId: string,
+  messageId: number,
+  text: string,
+): Promise<{ message_id: number }> {
+  const signed = appendSignature(text);
+  return tgApi("editMessageText", {
+    chat_id: chatId,
+    message_id: messageId,
+    text: signed,
+  });
 }

@@ -1,0 +1,4 @@
+{
+  "stage": "fd -H -a 'SCITEX_LEAD_TELEGRAM_STATE_DIR' . 2>/dev/null",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

@@ -1,0 +1,4 @@
+{
+  "stage": "pgrep -u $(whoami) -fa bun",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}

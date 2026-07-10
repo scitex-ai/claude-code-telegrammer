@@ -1,0 +1,4 @@
+{
+  "stage": "docker compose -f docker-compose.stable.yml restart\"",
+  "cwd": "/home/ywatanabe/proj/claude-code-telegrammer"
+}
