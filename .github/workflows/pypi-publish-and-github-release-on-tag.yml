@@ -1,0 +1,170 @@
+name: release
+
+# Tag-driven release pipeline — LIGHTWEIGHT GitHub-hosted variant (this repo is
+# Bun/TypeScript with a thin Python packaging wrapper, not a native-Python/
+# pytest package — see scitex-dev consult, 2026-07-11).
+#
+# The intended operator flow is:
+#
+#     git tag vX.Y.Z && git push origin vX.Y.Z
+#
+# Everything else fires automatically:
+#
+#   1. test          — bun test (ts/) + the Python-wrapper import/shell tests,
+#                      on GitHub-hosted ubuntu-latest. Must pass or the
+#                      pipeline halts; nothing is published until green.
+#   2. build         — sdist built via `python -m build`, uploaded as artifact.
+#   3. publish       — PyPI via OIDC trusted publishing (pypa/gh-action-pypi-
+#                      publish). Trusted-publisher config on PyPI keys off the
+#                      exact repo + this workflow's filename — keep this name
+#                      in sync with the fleet standard
+#                      (`pypi-publish-and-github-release-on-tag.yml`), or a
+#                      correctly-authorized owner/repo will still fail with
+#                      "invalid-publisher" on a filename mismatch.
+#   4. release       — GitHub Release with auto-generated notes + artifacts.
+#
+# develop→main promotion is a DELIBERATE, separate PR (operator policy);
+# this pipeline never auto-syncs main.
+#
+# Manual re-run: the workflow also accepts a `version` input via
+# workflow_dispatch so you can re-publish without re-tagging.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Tag to publish (e.g. v0.5.2) — must already exist on the repo'
+        required: true
+        type: string
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            v="${GITHUB_REF#refs/tags/}"
+          else
+            v="${{ inputs.version }}"
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.ver.outputs.version }}
+          fetch-depth: 0
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pyyaml
+      - name: Run shell tests
+        run: bash tests/test-state-detection.sh
+
+  test-ts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            v="${GITHUB_REF#refs/tags/}"
+          else
+            v="${{ inputs.version }}"
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.ver.outputs.version }}
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+      - name: Install dependencies
+        run: bun install
+        working-directory: ts
+      - name: Run TypeScript tests
+        run: bun test
+        working-directory: ts
+
+  build:
+    needs: [test, test-ts]
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - name: Resolve version
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            v="${GITHUB_REF#refs/tags/}"
+          else
+            v="${{ inputs.version }}"
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.ver.outputs.version }}
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install build tools
+        run: pip install build
+      - name: Build distribution
+        run: python -m build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/claude-code-telegrammer
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  release:
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.build.outputs.version }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      # No CHANGELOG.md convention in this repo (unlike native-Python scitex-*
+      # packages) — use GitHub's auto-generated release notes (derived from
+      # merged PRs since the last tag) instead of a hand-maintained changelog.
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.build.outputs.version }}
+          name: ${{ needs.build.outputs.version }}
+          generate_release_notes: true
+          files: dist/*
+          fail_on_unmatched_files: true
