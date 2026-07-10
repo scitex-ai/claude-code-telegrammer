@@ -7,7 +7,12 @@ logs/*.log
 # Local/machine-specific config — never track: direnv exports (could grow a
 # literal secret), the Python venv (vendored library bloat, unrelated to the
 # ts/ runtime), and personal Claude settings (symlinked to an absolute path
-# on the operator's machine — dangling for anyone else who clones the repo).
+# on the operator's machine — dangling for anyone else who clones the repo,
+# and fatal to `python -m build`: tarfile's `filter="data"` safety check
+# refuses to package any tar member that is a symlink to an absolute path).
 .envrc
 .venv/
 **/settings.local.json
+**/settings.json
+**/skills/secret
+**/bin/general/rename.sh
