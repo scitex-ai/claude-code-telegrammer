@@ -1,1 +1,0 @@
-"""Skill source-code management — skill discovery, audit, export, quality.\n\nDistinct from `_skills/` (vendored agent-facing skill assets) — this\nsubpackage holds the *handlers* that operate on those assets.\n"""
