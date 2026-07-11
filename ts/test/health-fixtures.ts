@@ -44,6 +44,8 @@ export function healthyInputs(
       maxUpdateId: 99,
       inboundCount: 5,
     },
+    wakeReachability: { kind: "disabled" },
+    wakeBacklog: null,
     ...overrides,
   };
 }

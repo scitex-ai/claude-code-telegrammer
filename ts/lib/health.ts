@@ -16,9 +16,10 @@
  *   - "Status as hints, fail-loud, no silent fallback" (operator directive,
  *     card cct-health-doctor-mcp-tool-20260702).
  *
- * Everything in this module (and lib/health-checks.ts, which holds the ten
- * individual check builders) is PURE — no network, no filesystem, no process
- * inspection. All probes are injected as plain data (`HealthInputs`), gathered
+ * Everything in this module (and lib/health-checks.ts + lib/health-checks-wake.ts,
+ * which together hold the twelve individual check builders) is PURE — no
+ * network, no filesystem, no process inspection. All probes are injected as
+ * plain data (`HealthInputs`), gathered
  * by the thin adapters in lib/health-adapters.ts. That keeps every branch unit
  * -testable under `bun test` without mocking fetch/fs (same split as
  * lib/startup-validate.ts).
@@ -37,6 +38,7 @@
  */
 
 import type { TokenCheck, AccessGatingInput } from "./startup-validate.js";
+import type { WakeFailureState } from "./wake-health.js";
 import {
   checkEnvUnexpanded,
   checkEnvRenamed,
@@ -50,9 +52,14 @@ import {
   checkEnvLegacy,
   type CheckOutcome,
 } from "./health-checks.js";
+import {
+  checkWakeTargetReachable,
+  checkWakeDeliveryBacklog,
+} from "./health-checks-wake.js";
 
 // Re-export the builders + skip marker so callers/tests have one import surface.
 export * from "./health-checks.js";
+export * from "./health-checks-wake.js";
 
 // ── Report shape (shared contract) ──────────────────────────────────────────
 
@@ -128,6 +135,19 @@ export type DbProbe =
       inboundCount: number;
     };
 
+/**
+ * Reachability probe for the configured wake target (TURN_URL). A raw TCP
+ * connect attempt — never an HTTP request — so probing can never itself
+ * trigger a real turn on the target agent. "disabled" mirrors the other
+ * skipped-when-no-token probes: wake has its own independent gate
+ * (TURN_URL empty), orthogonal to whether a bot token is set at all.
+ */
+export type WakeReachabilityProbe =
+  | { kind: "disabled" }
+  | { kind: "reachable"; host: string; port: number }
+  | { kind: "unreachable"; host: string; port: number; detail: string }
+  | { kind: "invalid_url"; url: string; detail: string };
+
 /** Everything buildHealthReport needs, as plain injected data. */
 export interface HealthInputs {
   agentId: string;
@@ -149,6 +169,10 @@ export interface HealthInputs {
   access: AccessGatingInput | null;
   stateDirProbe: StateDirProbe;
   db: DbProbe;
+  /** TCP reachability of the configured wake target. */
+  wakeReachability: WakeReachabilityProbe;
+  /** Consecutive-wake-failure counter; null ⇔ skipped (wake disabled). */
+  wakeBacklog: WakeFailureState | null;
 }
 
 // ── Report assembly ─────────────────────────────────────────────────────────
@@ -169,6 +193,8 @@ export function buildHealthReport(inputs: HealthInputs): HealthReport {
     checkStateDirWritable(inputs.stateDirProbe),
     checkDbSchemaCurrent(inputs.db),
     checkEnvLegacy(inputs.legacyEnvNames),
+    checkWakeTargetReachable(inputs.wakeReachability),
+    checkWakeDeliveryBacklog(inputs.wakeBacklog),
   ];
 
   const checks = outcomes.map((o) => o.entry);

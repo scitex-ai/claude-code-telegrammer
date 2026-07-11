@@ -1,5 +1,7 @@
 /**
- * Health check ("doctor") — the ten individual check builders.
+ * Health check ("doctor") — ten of the twelve individual check builders
+ * (the two wake-delivery checks live in health-checks-wake.ts — this file
+ * was already near the repo's line cap).
  *
  * PURE functions with injected inputs (no network / fs / process inspection);
  * see lib/health.ts for the shared report contract, the probe input types,
@@ -33,7 +35,9 @@ export interface CheckOutcome {
 /** Detail used for checks skipped because telegram is disabled (no token). */
 export const SKIPPED_DISABLED_DETAIL = "skipped: telegram disabled (no token)";
 
-function skippedDisabled(name: string): CheckOutcome {
+/** Exported so health-checks-wake.ts (a separate gate: wake disabled, not
+ *  token-absent) can reuse the same skipped-entry shape. */
+export function skippedDisabled(name: string): CheckOutcome {
   return {
     entry: { name, ok: true, detail: SKIPPED_DISABLED_DETAIL, hint: null },
     warn: false,
