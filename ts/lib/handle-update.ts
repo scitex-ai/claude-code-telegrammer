@@ -35,6 +35,7 @@ import {
   attachmentDescriptor,
 } from "./forward.js";
 import { sendLoudFailReply } from "./loudfail.js";
+import { recordWakeFailure, recordWakeSuccess } from "./wake-health.js";
 
 /**
  * Outcome of handling ONE inbound update, consumed by the poller batch
@@ -377,8 +378,10 @@ export async function handleUpdate(
   if (wakeEnabled()) {
     void wakeTurn(deliveredText, meta).then((result) => {
       if (result.ok) {
+        recordWakeSuccess();
         void markDone(chatId, String(msg.message_id));
       } else {
+        recordWakeFailure(result.category, result.reason);
         void markFailed(chatId, String(msg.message_id));
         void sendLoudFailReply(chatId, Number(msg.message_id), result);
       }
