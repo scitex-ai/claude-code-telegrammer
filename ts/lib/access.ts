@@ -84,10 +84,26 @@ export function loadAccess(): Access {
       cachedMtimeMs = -1; // Sentinel: file missing
       lastCheckMs = now;
       return cachedAccess;
-    } else {
+    } else if (err instanceof SyntaxError) {
+      // JSON.parse threw — genuinely malformed access.json content. This
+      // is the one case in this branch where "parse error" is actually
+      // supported by the evidence (a SyntaxError, not just "something
+      // in the try block failed").
       log(
         "access",
         `access.json parse error — all messages will be rejected until fixed`,
+        { error: String(err) },
+      );
+      cachedAccess = null;
+      cachedMtimeMs = 0;
+      return getDefaults();
+    } else {
+      // statSync/readFileSync threw something other than ENOENT (e.g.
+      // EACCES, EISDIR) — that is NOT a parse problem, so don't claim
+      // "parse error" without evidence; report the raw error instead.
+      log(
+        "access",
+        `access.json unreadable — all messages will be rejected until fixed`,
         { error: String(err) },
       );
       cachedAccess = null;

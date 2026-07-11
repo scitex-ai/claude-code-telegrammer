@@ -36,6 +36,7 @@ import {
 } from "./forward.js";
 import { sendLoudFailReply } from "./loudfail.js";
 import { recordWakeFailure, recordWakeSuccess } from "./wake-health.js";
+import { neutralizeChannelEnvelope } from "./sanitize.js";
 
 /**
  * Outcome of handling ONE inbound update, consumed by the poller batch
@@ -327,10 +328,17 @@ export async function handleUpdate(
   // Interactive CLI (no TURN_URL) keeps the notification — its live event
   // loop surfaces it, and there is no wake to duplicate.
   if (!wakeEnabled()) {
+    // Neutralize any <channel>-envelope markup in the body so a message that
+    // itself contains `<channel ...>` / `</channel>` cannot open or close the
+    // envelope the Claude Code CLI wraps this content in (mis-parse / fake
+    // notification / injection). Only the wake path frames its own envelope
+    // (lib/wake.ts already neutralizes there); here the CLI frames it, so we
+    // neutralize the content we hand it. The stored DB text (saved above via
+    // saveInbound) and `meta` are left untouched — history stays faithful.
     mcp
       .notification({
         method: "notifications/claude/channel",
-        params: { content: deliveredText, meta },
+        params: { content: neutralizeChannelEnvelope(deliveredText), meta },
       })
       .catch((err) => {
         log("poller", "failed to deliver inbound to Claude", {

@@ -2,7 +2,7 @@
  * Tests for single-instance lock file logic (lock.ts).
  */
 
-import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { describe, test, expect, beforeEach, afterEach, spyOn } from "bun:test";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
@@ -63,6 +63,39 @@ describe("lock", () => {
     acquireLock();
     const content = readFileSync(LOCK_FILE, "utf8").trim();
     expect(content).toBe(String(process.pid));
+  });
+
+  // Regression test for the evidence-derived-catch-blocks fix: a bare
+  // read failure (readFileSync itself throwing) must NOT be reported as
+  // "unparseable content" — that claim is only earned when the content
+  // was actually read and just wasn't a valid pid. Force the read to
+  // throw by pointing LOCK_FILE at a DIRECTORY (portable — no
+  // chmod/permission tricks, which behave differently or not at all when
+  // running as root).
+  //
+  // Note: acquireLock() unconditionally (re)writes the lockfile at the
+  // very end, and that write ALSO fails here (can't write a file over an
+  // existing directory), so the call still throws overall. That's fine —
+  // the log call under test fires before that final write, so we can
+  // assert on it and still expect the throw.
+  test("logs 'could not read lockfile' (not 'unparseable content') when the lockfile itself can't be read", () => {
+    mkdirSync(LOCK_FILE, { recursive: true });
+
+    const writeSpy = spyOn(process.stderr, "write");
+    try {
+      expect(() => acquireLock()).toThrow();
+
+      const logged = writeSpy.mock.calls.map((c) => String(c[0])).join("");
+      expect(logged).toContain(
+        "could not read lockfile — proceeding to (re)claim it",
+      );
+      expect(logged).not.toContain(
+        "removing lockfile with unparseable content",
+      );
+    } finally {
+      writeSpy.mockRestore();
+      rmSync(LOCK_FILE, { recursive: true, force: true });
+    }
   });
 
   // ── NEWEST WINS (#37) ──────────────────────────────────────────────
