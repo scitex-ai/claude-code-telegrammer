@@ -36,6 +36,7 @@
 
 import { TURN_URL, TURN_BEARER } from "./config.js";
 import { log } from "./log.js";
+import { neutralizeChannelEnvelope } from "./sanitize.js";
 
 /** Metadata attached to an inbound message (subset used to frame the turn). */
 export interface WakeMeta {
@@ -140,13 +141,20 @@ export function wakeEnabled(): boolean {
  * Render the turn input fed to /v1/turn. Mirrors the <channel ...> framing
  * Claude renders for an in-session push so a woken (idle) agent sees the same
  * shape — source, ids, and the message body — attributed to its sender.
+ *
+ * The body is run through neutralizeChannelEnvelope() FIRST so a message that
+ * itself contains `<channel ...>` / `</channel>` cannot open or prematurely
+ * close this envelope (which would mis-frame the turn / inject a fake channel
+ * notification). Only the `<channel>` envelope tokens are neutralized; all
+ * other angle brackets in the body are preserved verbatim.
  */
 export function wakeText(text: string, meta: WakeMeta): string {
   const attrs = ["source", "chat_id", "message_id", "row_id", "user", "user_id"]
     .filter((k) => meta[k] != null && meta[k] !== "")
     .map((k) => `${k}="${meta[k]}"`)
     .join(" ");
-  return `<channel ${attrs}>\n${text}\n</channel>`;
+  const safeBody = neutralizeChannelEnvelope(text);
+  return `<channel ${attrs}>\n${safeBody}\n</channel>`;
 }
 
 /**
