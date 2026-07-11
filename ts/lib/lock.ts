@@ -73,16 +73,26 @@ export function acquireLock(opts: { signalOutgoing?: boolean } = {}): void {
 
   if (existsSync(LOCK_FILE)) {
     let outgoingPid: number | null = null;
+    let readErr: unknown;
     try {
       outgoingPid = parseInt(readFileSync(LOCK_FILE, "utf8").trim(), 10);
       if (!Number.isFinite(outgoingPid) || outgoingPid <= 0) {
         outgoingPid = null;
       }
-    } catch {
+    } catch (err) {
       outgoingPid = null;
+      readErr = err;
     }
 
-    if (outgoingPid === null) {
+    if (readErr !== undefined) {
+      // readFileSync itself threw (e.g. EACCES, or the file vanished in
+      // a race) — that is NOT the same evidence as "we read the content
+      // and it wasn't a valid pid", so don't claim "unparseable content"
+      // without a basis; report the raw error instead.
+      log("lock", "could not read lockfile — proceeding to (re)claim it", {
+        error: String(readErr),
+      });
+    } else if (outgoingPid === null) {
       log("lock", "removing lockfile with unparseable content");
     } else if (outgoingPid === process.pid) {
       // Already ours (re-acquire is a no-op).
