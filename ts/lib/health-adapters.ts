@@ -29,6 +29,7 @@ import {
   constants,
 } from "fs";
 import { join, dirname } from "path";
+import { connect } from "net";
 import { Database } from "bun:sqlite";
 import {
   STATE_DIR,
@@ -37,6 +38,7 @@ import {
   ENV_ALLOWED,
   AGENT_ID,
   TOKEN,
+  TURN_URL,
   API_BASE,
   BOT_TOKEN_HASH,
   findUnexpandedEnv,
@@ -48,6 +50,8 @@ import { getMeRaw } from "./telegram-api.js";
 import { loadAccess } from "./access.js";
 import { pollerPidfilePath, readPidfile, isPidAlive } from "./takeover.js";
 import { DB_PATH } from "./store.js";
+import { wakeEnabled } from "./wake.js";
+import { getWakeFailureState } from "./wake-health.js";
 import {
   buildHealthReport,
   type HealthReport,
@@ -56,6 +60,7 @@ import {
   type PollerProbe,
   type StateDirProbe,
   type DbProbe,
+  type WakeReachabilityProbe,
 } from "./health.js";
 
 /**
@@ -240,6 +245,58 @@ export function probeLegacyEnv(
     .sort();
 }
 
+/**
+ * Reachability probe for the configured wake target — a raw TCP connect,
+ * NEVER an HTTP request, so probing can never itself trigger a real turn
+ * on the target agent. Skips entirely when wake is disabled (no TURN_URL),
+ * a gate independent of tokenPresent (a tokenful interactive-CLI agent
+ * commonly has a bot token but no TURN_URL at all).
+ */
+export function probeWakeReachability(
+  timeoutMs: number = 2000,
+): Promise<WakeReachabilityProbe> {
+  return new Promise((resolve) => {
+    if (!wakeEnabled()) {
+      resolve({ kind: "disabled" });
+      return;
+    }
+    let url: URL;
+    try {
+      url = new URL(TURN_URL);
+    } catch (err) {
+      resolve({
+        kind: "invalid_url",
+        url: redactToken(TURN_URL),
+        detail: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
+    const host = url.hostname;
+    const port = url.port
+      ? Number(url.port)
+      : url.protocol === "https:"
+        ? 443
+        : 80;
+    const socket = connect({ host, port, timeout: timeoutMs });
+    const finish = (result: WakeReachabilityProbe) => {
+      socket.destroy();
+      resolve(result);
+    };
+    socket.once("connect", () => finish({ kind: "reachable", host, port }));
+    socket.once("timeout", () =>
+      finish({
+        kind: "unreachable",
+        host,
+        port,
+        detail: `connect timed out after ${timeoutMs}ms`,
+      }),
+    );
+    socket.once("error", (err) =>
+      finish({ kind: "unreachable", host, port, detail: err.message }),
+    );
+  });
+}
+
 // ── Entry point ─────────────────────────────────────────────────────────────
 
 /**
@@ -275,6 +332,9 @@ export async function runHealth(opts: {
     };
   }
 
+  const wakeReachability = await probeWakeReachability();
+  const wakeBacklog = wakeEnabled() ? getWakeFailureState() : null;
+
   return buildHealthReport({
     agentId: AGENT_ID,
     stateDir: STATE_DIR,
@@ -288,5 +348,7 @@ export async function runHealth(opts: {
     access,
     stateDirProbe: probeStateDir(),
     db: probeDb(),
+    wakeReachability,
+    wakeBacklog,
   });
 }
