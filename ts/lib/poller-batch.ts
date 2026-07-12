@@ -18,9 +18,8 @@
  * undelivered updates ~24h).
  */
 
-import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { log } from "./log.js";
-import { CHANNEL_SOURCE } from "./config.js";
+import { broadcastSystemAlert } from "./loudfail.js";
 import { handleUpdate, type UpdateStatus } from "./handle-update.js";
 
 /**
@@ -43,23 +42,19 @@ export function _resetPersistFailures(): void {
   persistFail = null;
 }
 
-type UpdateHandler = (mcp: Server, update: any) => Promise<UpdateStatus>;
+type UpdateHandler = (update: any) => Promise<UpdateStatus>;
 
 /**
- * Emit a LOUD failure notification. Same channel-notification mechanism
- * the poller's 409-fatal path uses (type: "error") so a persistence
- * failure is surfaced to the operator's channel and never silent. Also
- * logged. Best-effort — a failed notification is swallowed (we must not
- * throw out of the poll loop).
+ * Emit a LOUD failure notification. Broadcasts directly to Telegram (see
+ * lib/loudfail.ts::broadcastSystemAlert) so a persistence failure is
+ * surfaced to the operator even though this now runs in the standalone
+ * poller process with no mcp/Server object to notify through. Also
+ * logged. Best-effort — broadcastSystemAlert never throws/rejects (we
+ * must not throw out of the poll loop).
  */
-function emitLoud(mcp: Server, content: string): void {
+function emitLoud(content: string): void {
   log("poller", content);
-  mcp
-    .notification({
-      method: "notifications/claude/channel",
-      params: { content, meta: { source: CHANNEL_SOURCE, type: "error" } },
-    })
-    .catch(() => {});
+  void broadcastSystemAlert(content);
 }
 
 /**
@@ -84,7 +79,6 @@ function emitLoud(mcp: Server, content: string): void {
  * offset / loud-notification logic is unit-testable without any network.
  */
 export async function processBatch(
-  mcp: Server,
   updates: any[],
   startOffset: number,
   handle: UpdateHandler = handleUpdate,
@@ -94,7 +88,7 @@ export async function processBatch(
   for (const update of updates) {
     let status: UpdateStatus;
     try {
-      status = await handle(mcp, update);
+      status = await handle(update);
     } catch (err) {
       // An UNEXPECTED throw — NOT the saveInbound-throw path, which
       // handleUpdate converts to "persistError". saveInbound failures
@@ -118,7 +112,6 @@ export async function processBatch(
 
       if (persistFail.count >= MAX_PERSIST_RETRIES) {
         emitLoud(
-          mcp,
           `FATAL: update ${update.update_id} failed to persist ` +
             `${persistFail.count}× consecutively — SKIPPING it to unwedge ` +
             `the poller. This message is PERMANENTLY LOST, but the loss is ` +
@@ -131,7 +124,6 @@ export async function processBatch(
       }
 
       emitLoud(
-        mcp,
         `persist FAILED for update ${update.update_id} ` +
           `(attempt ${persistFail.count}/${MAX_PERSIST_RETRIES}) — NOT ` +
           `advancing the getUpdates offset. Telegram will redeliver it on ` +

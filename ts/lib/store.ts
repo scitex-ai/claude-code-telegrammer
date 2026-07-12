@@ -46,9 +46,10 @@ let stmtContextChat: Statement | null = null;
 
 // ── Schema ─────────────────────────────────────────────────────────────────
 
+// busy_timeout FIRST (concurrency fix — see ts/test/multiprocess-sqlite.test.ts):
 const SCHEMA_SQL = `
-PRAGMA journal_mode = WAL;
 PRAGMA busy_timeout = 5000;
+PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
 PRAGMA foreign_keys = ON;
 

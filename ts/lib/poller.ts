@@ -8,11 +8,10 @@
  * processBatch decides is safe to advance to.
  */
 
-import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { tgApi } from "./telegram-api.js";
 import { loadAccess } from "./access.js";
 import { log } from "./log.js";
-import { BOT_TOKEN_HASH, STATE_DIR, CHANNEL_SOURCE } from "./config.js";
+import { BOT_TOKEN_HASH, STATE_DIR } from "./config.js";
 import { saveOffset, loadOffset } from "./store.js";
 import {
   claimAuthoritative,
@@ -22,6 +21,7 @@ import {
 import { processBatch } from "./poller-batch.js";
 import { recordSuccessfulPoll, startStallWatchdog } from "./poll-watchdog.js";
 import { getenv } from "./env.js";
+import { broadcastSystemAlert } from "./loudfail.js";
 
 /**
  * Max consecutive 409 Conflict responses we tolerate before declaring
@@ -42,7 +42,7 @@ export function stopPolling(): void {
   polling = false;
 }
 
-export async function startPolling(mcp: Server): Promise<void> {
+export async function startPolling(): Promise<void> {
   log("poller", "starting getUpdates polling...");
 
   // ── Takeover preflight ──────────────────────────────────────────────
@@ -130,7 +130,7 @@ export async function startPolling(mcp: Server): Promise<void> {
   // black-hole) — the failure kill-0 liveness checks miss. Stopped in the
   // finally below so it can never leak or alarm after a clean shutdown /
   // preemption (isPolling() also gates it). See poll-watchdog.ts.
-  const watchdog = startStallWatchdog(mcp, () => polling);
+  const watchdog = startStallWatchdog(() => polling);
 
   try {
     while (polling) {
@@ -172,7 +172,7 @@ export async function startPolling(mcp: Server): Promise<void> {
           // (returning that update's own update_id so Telegram redelivers
           // it), emitting a loud channel notification so the failure is
           // never silent. See poller-batch.ts.
-          updateOffset = await processBatch(mcp, updates, updateOffset);
+          updateOffset = await processBatch(updates, updateOffset);
           try {
             saveOffset(updateOffset);
           } catch (err) {
@@ -201,15 +201,10 @@ export async function startPolling(mcp: Server): Promise<void> {
               `Another consumer holds THIS bot token (hash=${BOT_TOKEN_HASH}, state_dir=${STATE_DIR}) — commonly multiple agents sharing one bot token. Each agent needs its OWN bot token + CCT_STATE_DIR. ` +
               "Stop the other consumer (or call deleteWebhook) and restart the bridge.";
             log("poller", fatalMsg);
-            mcp
-              .notification({
-                method: "notifications/claude/channel",
-                params: {
-                  content: fatalMsg,
-                  meta: { source: CHANNEL_SOURCE, type: "error" },
-                },
-              })
-              .catch(() => {});
+            // Broadcast directly to Telegram — this runs in the standalone
+            // poller process, with no mcp/Server object to notify through
+            // (see lib/loudfail.ts::broadcastSystemAlert).
+            void broadcastSystemAlert(fatalMsg);
             polling = false;
             // We DID hold the lease; release it so the operator's manual
             // restart can re-claim cleanly.

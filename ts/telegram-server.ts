@@ -44,11 +44,10 @@ import {
 import { log } from "./lib/log.js";
 import { acquireLock, releaseLock } from "./lib/lock.js";
 import { registerTools } from "./lib/tools.js";
-import { startPolling, stopPolling } from "./lib/poller.js";
 import { initStore } from "./lib/store.js";
 import { migrateLegacyStateDir, ensureCctAlias } from "./lib/migrate-state.js";
 import { loadAccess } from "./lib/access.js";
-import { releaseAuthoritative } from "./lib/takeover.js";
+import { ensurePollerRunning } from "./lib/poller-supervisor.js";
 import { resolveConfigProbe, wantsGetMe } from "./lib/config-probe.js";
 import { runHealth, serializeHealthReport } from "./lib/health-adapters.js";
 import { tgApi, getMeRaw } from "./lib/telegram-api.js";
@@ -58,6 +57,7 @@ import {
   buildDisabledWarning,
 } from "./lib/startup-validate.js";
 import { existsSync } from "fs";
+import { join } from "path";
 
 // ── Health probe ("doctor") — no server, no poller ──────────────────────────
 //
@@ -244,12 +244,14 @@ function shutdown(): void {
   if (shuttingDown) return;
   shuttingDown = true;
   log("server", "shutting down");
-  stopPolling();
-  // Release the per-token pidfile only if WE still own it. claimAuthoritative
-  // is idempotent and never tears down a successor's claim — so a SIGTERM
-  // sent by a newer poller racing us through startup will not lose its
-  // record.
-  releaseAuthoritative({ stateDir: STATE_DIR, tokenHash: BOT_TOKEN_HASH });
+  // Architecture fix (incident-cct-inbound-dies-silently-with-mcp-server-
+  // 20260711): the poller is now a SEPARATE, standalone process
+  // (ts/telegram-poller.ts, spawned by ensurePollerRunning() below) — it
+  // must NOT be torn down when this MCP server exits/restarts, which is
+  // exactly what used to kill inbound Telegram delivery silently. Only
+  // release OUR OWN single-instance lock (LOCK_FILE); the per-token pidfile
+  // (lib/takeover.ts) now belongs entirely to the poller process's own
+  // lifecycle (see ts/telegram-poller.ts's shutdown()).
   releaseLock();
   setTimeout(() => process.exit(0), 2000);
 }
@@ -303,11 +305,24 @@ if (TELEGRAM_ENABLED) {
 await mcp.connect(new StdioServerTransport());
 log("server", "MCP server connected via stdio");
 
-// Start polling in background (don't await — MCP must keep processing). When
-// telegram is DISABLED (no token) we DON'T poll — the MCP stays connected but
-// idle-disabled, matching the loud WARN emitted above (honest status, no crash).
+// Ensure the standalone poller is running (don't await — MCP must keep
+// processing). Architecture fix (incident-cct-inbound-dies-silently-with-
+// mcp-server-20260711): the getUpdates poll loop no longer runs on THIS
+// process's event loop at all — it lives in a separate, detached process
+// (ts/telegram-poller.ts) coordinated via the lib/takeover.ts per-token
+// pidfile, so an MCP-child restart (Claude Code recycling its own MCP
+// child under host load — the original incident) no longer kills inbound
+// Telegram delivery. ensurePollerRunning() checks the pidfile for a live
+// PID and only spawns a fresh poller when none is found; see
+// lib/poller-supervisor.ts. When telegram is DISABLED (no token) we DON'T
+// spawn a poller — the MCP stays connected but idle-disabled, matching the
+// loud WARN emitted above (honest status, no crash).
 if (TELEGRAM_ENABLED) {
-  void startPolling(mcp);
+  ensurePollerRunning({
+    stateDir: STATE_DIR,
+    tokenHash: BOT_TOKEN_HASH,
+    pollerScriptPath: join(import.meta.dir, "telegram-poller.ts"),
+  });
 } else {
   log(
     "server",

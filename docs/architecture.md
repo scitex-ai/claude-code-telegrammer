@@ -6,29 +6,63 @@ document covers the internals.
 
 ## Components
 
-The MCP server (`ts/telegram-server.ts`, Bun + `@modelcontextprotocol/sdk`) is a
-single stdio process with these internal modules (`ts/lib/`):
+**Two cooperating processes**, coordinated via the state dir (architecture fix,
+incident `incident-cct-inbound-dies-silently-with-mcp-server-20260711`, 2026-07):
+a prior single-process design meant that when Claude Code recycled its MCP
+stdio child (e.g. under host load), the getUpdates poll loop died with it —
+silently, since inbound Telegram delivery had no process of its own. Now:
+
+| Process | Entrypoint | Responsibility |
+|---------|------------|----------------|
+| MCP server | `ts/telegram-server.ts` | MCP stdio transport, the 10 tools, ensures a poller is running |
+| Poller | `ts/telegram-poller.ts` | Telegram `getUpdates` long-poll, inbound delivery — fully independent of the MCP server |
+
+The MCP server does not run the poll loop itself. At startup (and on every
+restart) it checks the per-token pidfile (`lib/takeover.ts`) for a live poller
+PID; if none is found, it spawns `ts/telegram-poller.ts` **detached**
+(`lib/poller-supervisor.ts::ensurePollerRunning`) and does not wait on it. The
+poller then runs on regardless of what happens to the MCP server afterwards —
+an MCP-child restart no longer touches inbound delivery at all. Conversely the
+MCP server's own shutdown releases only its own single-instance lock, never
+the poller's pidfile. The two processes share internal modules (`ts/lib/`):
 
 | Module | Responsibility |
 |--------|----------------|
-| `poller` | Telegram `getUpdates` long-poll; delivers inbound messages as MCP channel notifications |
-| `store` | SQLite (WAL) message persistence + dedup + read/replied tracking |
-| `tools` | The 10 MCP tools (see [interfaces](interfaces.md)) |
+| `poller` | Telegram `getUpdates` long-poll loop (runs only in the poller process) |
+| `poller-supervisor` | MCP-server-side: spawn-if-not-already-running decision (testable, injectable) |
+| `handle-update` / `poller-batch` / `poll-watchdog` | Per-update handling, batch/durability retry, ingestion-stall alarm — all mcp-independent |
+| `loudfail` | Direct-Telegram-API alarms/replies that must work whether or not the agent/mcp side is reachable |
+| `store` | SQLite (WAL) message persistence + dedup + read/replied tracking; opened independently by both processes |
+| `tools` | The 10 MCP tools (see [interfaces](interfaces.md)) — MCP-server process only |
 | `attachments` | Background download queue for inbound files |
 | `access` | Allowlist gating (`access.json` + `CCT_ALLOWED_USERS`), mtime-cached |
 | `config` / `env` | Env-var resolution (see [configuration](configuration.md)) |
-| `lock` / `takeover` | Single-instance PID lock + newest-wins per-token takeover |
+| `lock` / `takeover` | Single-instance MCP-server PID lock + newest-wins per-token poller takeover |
 
 An optional **TUI Watchdog** (`lib/`, shell) keeps an interactive CLI session
 alive; SDK-runner agents use the [wake path](configuration.md#wake-on-push-turn_url)
 instead. Lifecycle orchestration is handled by
 [scitex-agent-container](https://github.com/ywatanabe1989/scitex-agent-container).
+Whether sac's stop path reaps the now-detached poller process was an open
+question tracked in scitex-todo card `cct-mcp-server-periodic-drop-20260712`
+— now RESOLVED: sac's stop is single-PID SIGTERM only (would miss a detached
+process), but sac already reaps orphans of exactly this shape via their own
+env+cmdline-matching cleanup, being wired into their `agent_stop` path too —
+so `lib/poller-teardown.ts`'s `shouldSelfTerminateOnTeardown()` stays a
+PERMANENT safe-default stub (always false); this repo needs no active
+teardown-detection logic.
 
 ## Data flow
 
-**Inbound:** Telegram `getUpdates` → poller → allowlist gate → (if allowed) MCP
-channel notification → Claude Code. **Outbound:** Claude Code calls the `reply` /
-`react` / `send_document` tools → `sendMessage` → Telegram → operator.
+**Inbound:** Telegram `getUpdates` → poller process → allowlist gate → (if
+`TURN_URL` is set) `/v1/turn` wake POST to the agent — mcp-independent, plain
+HTTP, works regardless of which process is up — **or** (interactive-CLI, no
+`TURN_URL`) an MCP channel notification, which now only works when the MCP
+server happens to still be the one observing it; system-level alarms (batch
+persist-failure, 409-exhausted, ingestion-stall) and reactions never depend on
+the MCP server at all — they go straight to Telegram (`loudfail.ts`) or through
+the same wake POST. **Outbound:** Claude Code calls the `reply` / `react` /
+`send_document` tools (MCP-server process) → `sendMessage` → Telegram → operator.
 
 Each agent is a self-contained unit: its own bot token, its own state directory,
 its own poller. See [per-agent identity](configuration.md#per-agent-identity).
@@ -114,7 +148,9 @@ All messages persist in `$CLAUDE_CODE_TELEGRAMMER_AGENT_STATE_DIR/messages.db` (
   bot_token_hash), raw_json.
 - **attachments** — message_row_id (FK), kind, file_id, file_name, mime_type,
   file_size, local_path, downloaded_at.
-- **meta** — key-value store for schema_version, update_offset.
+- **meta** — key-value store for schema_version, update_offset, last_poll_ts
+  (poll-freshness heartbeat), wake_failure_state (cross-process wake-delivery
+  backlog counter the `health` tool reads — see [poller decoupling](#components)).
 
 ## Part of the SciTeX agent stack
 
@@ -123,5 +159,6 @@ scitex-orochi          — agent definitions, dashboard
         ↓
 scitex-agent-container — lifecycle, health, restart, per-agent .envrc + .mcp.json
         ↓
-claude-code-telegrammer — MCP server (Telegram API, message DB, 10 tools) + watchdog
+claude-code-telegrammer — MCP server (Telegram API, message DB, 10 tools)
+                          + standalone poller process + TUI watchdog
 ```
