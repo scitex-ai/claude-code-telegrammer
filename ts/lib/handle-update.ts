@@ -35,6 +35,8 @@ import {
 } from "./forward.js";
 import { sendLoudFailReply } from "./loudfail.js";
 import { recordWakeFailure, recordWakeSuccess } from "./wake-health.js";
+import { neutralizeChannelEnvelope } from "./sanitize.js";
+import { savePendingNotification } from "./notify-relay.js";
 
 /**
  * Outcome of handling ONE inbound update, consumed by the poller batch
@@ -347,26 +349,23 @@ export async function handleUpdate(update: any): Promise<UpdateStatus> {
   if (!wakeEnabled()) {
     // Post-split (incident incident-cct-inbound-dies-silently-with-mcp-
     // server-20260711): this handler now runs in the standalone poller
-    // process (ts/telegram-poller.ts), which has no mcp/Server object — an
-    // MCP `notifications/claude/channel` push requires being co-located
-    // with the live MCP stdio transport, which is categorically impossible
-    // from a separate OS process. There is currently NO cross-process
-    // replacement for this "push into an ACTIVE interactive-CLI turn"
-    // mechanism (and it never advanced an IDLE session anyway — see the
-    // wake-POST branch below). The message is NOT lost: saveInbound()
-    // already persisted it durably above, so it remains fully discoverable
-    // via the get_unread / get_history / get_context MCP tools. Only the
-    // "proactively appear mid-turn" convenience is gone for interactive-CLI
-    // (no TURN_URL) deployments — SDK-runner / fleet agents are unaffected
-    // (they use the wakeEnabled() branch below, which never depended on mcp
-    // at all). Logged (never silent) rather than guessed at further; the
-    // teardown/decoupling tradeoffs here are tracked alongside
-    // cct-mcp-server-periodic-drop-20260712. See docs/architecture.md.
-    log(
-      "poller",
-      "interactive-CLI live-push unavailable from the standalone poller (no mcp connection) — message persisted, discoverable via get_unread/get_history/get_context",
-      { chat_id: chatId, row_id: rowId },
-    );
+    // process (ts/telegram-poller.ts), which has no mcp/Server object — a
+    // DIRECT `mcp.notification(...)` call requires being co-located with
+    // the live MCP stdio transport, impossible from a separate OS process.
+    // Adversarial-review finding #3: rather than leaving this a documented
+    // gap, the payload is persisted on the message's own row
+    // (messages.pending_notification) and relayed by the MCP-server
+    // process itself — see lib/notify-relay.ts for the full cross-process
+    // design (mirrors lib/wake-health.ts's own pattern). The MCP server
+    // polls for pending rows (default every 1s) and calls
+    // mcp.notification() when it finds one, so the interactive-CLI session
+    // still sees inbound messages live — with a short relay delay instead
+    // of an immediate push, the necessary cost of crossing a process
+    // boundary via disk instead of a function call.
+    savePendingNotification(rowId, {
+      content: neutralizeChannelEnvelope(deliveredText),
+      meta,
+    });
   }
 
   // Wake-on-push — when CLAUDE_CODE_TELEGRAMMER_TURN_URL is set

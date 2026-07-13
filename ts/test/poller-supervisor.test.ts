@@ -12,18 +12,64 @@
  * not a test-framework mocking helper.
  */
 
-import { describe, test, expect } from "bun:test";
+import {
+  describe,
+  test,
+  expect,
+  beforeAll,
+  beforeEach,
+  afterEach,
+  afterAll,
+} from "bun:test";
+import { writeFileSync, mkdirSync, rmSync } from "fs";
 import {
   ensurePollerRunning,
   type SpawnedProcessHandle,
 } from "../lib/poller-supervisor.js";
+import {
+  setSystemAlertSender,
+  _resetSystemAlertSender,
+} from "../lib/loudfail.js";
+import { _resetCache } from "../lib/access.js";
+import { ACCESS_FILE, STATE_DIR } from "../lib/config.js";
 
-function fakeSpawnHandle(pid: number): SpawnedProcessHandle & {
-  unrefCalled: boolean;
-} {
+// broadcastSystemAlert (used by the spawn-failure / early-death alerts
+// below) defaults its recipients to loadAccess().allowFrom — give it a
+// non-empty allowlist so these tests actually exercise the send path.
+beforeAll(() => {
+  mkdirSync(STATE_DIR, { recursive: true });
+  writeFileSync(ACCESS_FILE, JSON.stringify({ allowFrom: ["424242"] }));
+  _resetCache();
+});
+afterAll(() => {
+  rmSync(ACCESS_FILE, { force: true });
+  _resetCache();
+});
+
+let alerts: string[] = [];
+beforeEach(() => {
+  alerts = [];
+  setSystemAlertSender(async (_chatId, text) => {
+    alerts.push(text);
+    return { ok: true };
+  });
+});
+afterEach(() => {
+  _resetSystemAlertSender();
+});
+
+function fakeSpawnHandle(
+  pid: number,
+  // Defaults to a promise that never resolves within a test's lifetime —
+  // "this child hasn't exited" (the common case: a healthy, long-running
+  // poller). Tests exercising the grace-window death check pass an
+  // already-resolved (or soon-to-resolve) promise instead.
+  exited: Promise<number> = new Promise<number>(() => {}),
+): SpawnedProcessHandle & { unrefCalled: boolean } {
   const handle = {
     pid,
     unrefCalled: false,
+    exited,
     unref(): void {
       handle.unrefCalled = true;
     },
@@ -142,9 +188,15 @@ describe("ensurePollerRunning: spawn case", () => {
 
 describe("ensurePollerRunning: real takeover.ts pidfile (no mocked reader)", () => {
   test("uses the real pidfile default when readPid is omitted", async () => {
-    // Exercise the DEFAULT readPid/isAlive wiring (lib/takeover.ts) against a
-    // real temp state dir, without mocking the pidfile layer itself — only
-    // the spawn primitive is injected, so no real process is ever forked.
+    // Exercise the DEFAULT readPid wiring (lib/takeover.ts) against a real
+    // temp state dir, without mocking the pidfile layer itself. isAlive IS
+    // explicitly injected here (this test's job is the pidfile, not
+    // identity verification — that gets its own describe block below and
+    // its own direct coverage in takeover.test.ts): the real DEFAULT
+    // isAlive is now identity-aware (isProcessMatching against
+    // POLLER_CMDLINE_MARKER), and this bun:test process's own cmdline
+    // legitimately does NOT contain "telegram-poller", so asserting
+    // against the real default here would be testing the wrong thing.
     const { mkdtempSync, rmSync } = await import("fs");
     const { tmpdir } = await import("os");
     const { join } = await import("path");
@@ -158,6 +210,7 @@ describe("ensurePollerRunning: real takeover.ts pidfile (no mocked reader)", () 
         pollerScriptPath: "/fake/telegram-poller.ts",
         stateDir,
         tokenHash: "realpidfile",
+        isAlive: () => true,
         spawn: () => {
           spawnCalls += 1;
           return fakeSpawnHandle(1111);
@@ -167,8 +220,7 @@ describe("ensurePollerRunning: real takeover.ts pidfile (no mocked reader)", () 
       expect(spawnCalls).toBe(1);
 
       // Our OWN pid is guaranteed alive — claim it, then ensurePollerRunning
-      // (real pidfile reader + real isPidAlive) must see it as already
-      // running and NOT spawn.
+      // (real pidfile reader) must see it as already running and NOT spawn.
       claimAuthoritative({
         stateDir,
         tokenHash: "realpidfile",
@@ -180,6 +232,7 @@ describe("ensurePollerRunning: real takeover.ts pidfile (no mocked reader)", () 
         pollerScriptPath: "/fake/telegram-poller.ts",
         stateDir,
         tokenHash: "realpidfile",
+        isAlive: () => true,
         spawn: () => {
           spawnCalls2 += 1;
           return fakeSpawnHandle(2222);
@@ -190,6 +243,32 @@ describe("ensurePollerRunning: real takeover.ts pidfile (no mocked reader)", () 
     } finally {
       rmSync(stateDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("ensurePollerRunning: identity-aware default isAlive (adversarial-review finding #2)", () => {
+  test("a stale pidfile PID reused by an unrelated (non-poller) process is NOT trusted — spawns anyway", async () => {
+    // The exact failure mode this fix closes: a pidfile recording a PID
+    // that is alive (kill-0 succeeds) but does NOT look like our poller
+    // (no "telegram-poller" in its cmdline) must NOT be trusted as
+    // "already running" — otherwise ensurePollerRunning would silently,
+    // permanently never spawn a real poller. Uses the REAL default isAlive
+    // (identity-aware) against our OWN, definitely-alive, definitely-NOT-
+    // a-poller test process pid.
+    let spawnCalls = 0;
+    const result = ensurePollerRunning({
+      pollerScriptPath: "/fake/telegram-poller.ts",
+      stateDir: "/fake/state",
+      tokenHash: "reused-pid",
+      readPid: () => ({ pid: process.pid }), // alive, but not a poller
+      // isAlive omitted deliberately — exercises the REAL default.
+      spawn: () => {
+        spawnCalls += 1;
+        return fakeSpawnHandle(9999);
+      },
+    });
+    expect(result).toEqual({ action: "spawned", pid: 9999 });
+    expect(spawnCalls).toBe(1);
   });
 });
 
@@ -257,5 +336,93 @@ describe("ensurePollerRunning: default spawn inherits the parent environment", (
     } finally {
       delete process.env.CCT_SUPERVISOR_ENV_TEST_MARKER_OMITTED;
     }
+  });
+});
+
+describe("ensurePollerRunning: spawn() throwing is loud, not silent (adversarial-review finding #4)", () => {
+  test("a spawn failure returns spawn-failed, logs, and broadcasts a system alert", () => {
+    const result = ensurePollerRunning({
+      pollerScriptPath: "/fake/telegram-poller.ts",
+      stateDir: "/fake/state",
+      tokenHash: "spawn-fails",
+      readPid: () => null,
+      isAlive: () => false,
+      spawn: () => {
+        throw new Error("ENOMEM: cannot fork");
+      },
+    });
+
+    expect(result).toEqual({
+      action: "spawn-failed",
+      error: "ENOMEM: cannot fork",
+    });
+    expect(alerts.length).toBe(1);
+    expect(alerts[0]).toContain("FATAL");
+    expect(alerts[0]).toContain("failed to spawn");
+    expect(alerts[0]).toContain("ENOMEM: cannot fork");
+  });
+});
+
+describe("ensurePollerRunning: post-spawn grace-window death check (adversarial-review finding #4)", () => {
+  test("a child that exits almost immediately triggers a loud alert", async () => {
+    const spawnedHandle = fakeSpawnHandle(5050, Promise.resolve(1));
+    const result = ensurePollerRunning({
+      pollerScriptPath: "/fake/telegram-poller.ts",
+      stateDir: "/fake/state",
+      tokenHash: "dies-immediately",
+      readPid: () => null,
+      isAlive: () => false,
+      spawn: () => spawnedHandle,
+      graceMs: 50, // tiny window — this test does not wait 3 real seconds
+    });
+    expect(result).toEqual({ action: "spawned", pid: 5050 });
+
+    // The exit-observer is fire-and-forget (`void child.exited.then(...)`)
+    // — give its microtask/short-timer chain a tick to run before asserting.
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(alerts.length).toBe(1);
+    expect(alerts[0]).toContain("FATAL");
+    expect(alerts[0]).toContain("pid 5050");
+    expect(alerts[0]).toContain("exited with code 1");
+  });
+
+  test("a child that exits well after the grace window does NOT alert", async () => {
+    const spawnedHandle = fakeSpawnHandle(
+      6060,
+      new Promise<number>((resolve) => setTimeout(() => resolve(0), 60)),
+    );
+    const result = ensurePollerRunning({
+      pollerScriptPath: "/fake/telegram-poller.ts",
+      stateDir: "/fake/state",
+      tokenHash: "dies-later",
+      readPid: () => null,
+      isAlive: () => false,
+      spawn: () => spawnedHandle,
+      graceMs: 10, // the child "survives" past this before exiting
+    });
+    expect(result).toEqual({ action: "spawned", pid: 6060 });
+
+    await new Promise((r) => setTimeout(r, 100));
+
+    expect(alerts.length).toBe(0);
+  });
+
+  test("a still-running child (exited never resolves) never alerts", async () => {
+    const spawnedHandle = fakeSpawnHandle(7070); // default: never-resolving exited
+    const result = ensurePollerRunning({
+      pollerScriptPath: "/fake/telegram-poller.ts",
+      stateDir: "/fake/state",
+      tokenHash: "still-running",
+      readPid: () => null,
+      isAlive: () => false,
+      spawn: () => spawnedHandle,
+      graceMs: 20,
+    });
+    expect(result).toEqual({ action: "spawned", pid: 7070 });
+
+    await new Promise((r) => setTimeout(r, 60));
+
+    expect(alerts.length).toBe(0);
   });
 });

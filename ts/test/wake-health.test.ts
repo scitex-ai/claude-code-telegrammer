@@ -13,15 +13,32 @@
  * loadLastPollTs for the poll heartbeat.
  */
 
-import { describe, test, expect, beforeEach, beforeAll } from "bun:test";
+import {
+  describe,
+  test,
+  expect,
+  beforeEach,
+  beforeAll,
+  afterEach,
+  afterAll,
+} from "bun:test";
 import { Database } from "bun:sqlite";
+import { writeFileSync, mkdirSync, rmSync } from "fs";
 import {
   recordWakeFailure,
   recordWakeSuccess,
   getWakeFailureState,
   _resetWakeFailureState,
+  _setPersistAttempt,
+  _resetPersistAttempt,
 } from "../lib/wake-health.js";
 import { initStore, DB_PATH } from "../lib/store.js";
+import {
+  setSystemAlertSender,
+  _resetSystemAlertSender,
+} from "../lib/loudfail.js";
+import { _resetCache } from "../lib/access.js";
+import { ACCESS_FILE, STATE_DIR } from "../lib/config.js";
 
 describe("wake failure tracker", () => {
   beforeEach(() => {
@@ -186,5 +203,77 @@ describe("wake failure tracker: cross-process DB persistence", () => {
       lastReason: null,
       lastAtMs: null,
     });
+  });
+});
+
+describe("persist(): retry + loud-alert-on-exhaustion (adversarial-review finding #5)", () => {
+  const ALERT_RECIPIENT = "wake-health-alert-recipient";
+  let alerts: string[] = [];
+
+  beforeAll(() => {
+    mkdirSync(STATE_DIR, { recursive: true });
+    writeFileSync(
+      ACCESS_FILE,
+      JSON.stringify({ allowFrom: [ALERT_RECIPIENT] }),
+    );
+    _resetCache();
+  });
+
+  afterAll(() => {
+    rmSync(ACCESS_FILE, { force: true });
+    _resetCache();
+  });
+
+  beforeEach(() => {
+    alerts = [];
+    setSystemAlertSender(async (_chatId, text) => {
+      alerts.push(text);
+      return { ok: true };
+    });
+    _resetWakeFailureState();
+    alerts = []; // _resetWakeFailureState's own persist() may itself alert
+  });
+
+  afterEach(() => {
+    _resetPersistAttempt();
+    _resetSystemAlertSender();
+  });
+
+  test("a persist that fails every attempt is retried 3 times total, then broadcasts a loud alert", () => {
+    let attempts = 0;
+    _setPersistAttempt(() => {
+      attempts += 1;
+      throw new Error("simulated disk-full");
+    });
+
+    recordWakeFailure("server_error", "HTTP 500", 12345);
+
+    expect(attempts).toBe(3);
+    expect(alerts.length).toBe(1);
+    expect(alerts[0]).toContain("FATAL");
+    expect(alerts[0]).toContain("3 attempts");
+    expect(alerts[0]).toContain("simulated disk-full");
+  });
+
+  test("a persist that fails once then succeeds does NOT alert (transient recovery)", () => {
+    let attempts = 0;
+    _setPersistAttempt(() => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("transient blip");
+      // second attempt: succeeds (a no-op stand-in is enough — persist()
+      // only cares whether persistAttempt() throws, not what it does).
+    });
+
+    expect(() => recordWakeSuccess()).not.toThrow();
+    expect(attempts).toBe(2);
+    expect(alerts.length).toBe(0);
+  });
+
+  test("a fully healthy persist never retries and never alerts", () => {
+    // Uses the REAL persistAttempt (restored in afterEach of the previous
+    // describe's tests too, but explicit here for clarity).
+    _resetPersistAttempt();
+    recordWakeFailure("timeout", "t", 1);
+    expect(alerts.length).toBe(0);
   });
 });

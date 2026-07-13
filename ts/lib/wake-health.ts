@@ -36,6 +36,7 @@
 import { Database } from "bun:sqlite";
 import { DB_PATH } from "./store.js";
 import { log } from "./log.js";
+import { broadcastSystemAlert } from "./loudfail.js";
 import type { WakeFailCategory } from "./wake.js";
 
 export interface WakeFailureState {
@@ -46,33 +47,96 @@ export interface WakeFailureState {
 }
 
 const META_KEY = "wake_failure_state";
+const PERSIST_MAX_ATTEMPTS = 3;
+const PERSIST_RETRY_DELAY_MS = 50;
 
 let count = 0;
 let lastCategory: WakeFailCategory | null = null;
 let lastReason: string | null = null;
 let lastAtMs: number | null = null;
 
-/** Best-effort: write the current in-process state to the shared store.
- * Never throws — a persistence failure is logged, not propagated, exactly
- * like poll-watchdog.ts::recordSuccessfulPoll's saveLastPollTs call. */
-function persist(): void {
+/** Synchronous, bounded sleep (Atomics.wait — no busy-spin, no async so
+ * callers stay synchronous). Mirrors lib/lock.ts's own sleepSync;
+ * duplicated here (4 lines) rather than exported/shared, to avoid
+ * coupling an unrelated module's internals for a trivial helper. */
+function sleepSync(ms: number): void {
+  const sab = new SharedArrayBuffer(4);
+  const ia = new Int32Array(sab);
+  Atomics.wait(ia, 0, 0, ms);
+}
+
+function realPersistAttempt(): void {
+  const db = new Database(DB_PATH);
   try {
-    const db = new Database(DB_PATH);
+    // busy_timeout is per-CONNECTION — an ad hoc handle like this one does
+    // NOT inherit it from the file's WAL-mode schema (adversarial-review
+    // finding #6). Belt-and-braces here: persist() already retries this
+    // whole attempt on ANY failure, but setting it avoids relying on that
+    // retry loop to paper over ordinary lock contention.
+    db.exec("PRAGMA busy_timeout = 5000;");
+    db.prepare(
+      `INSERT INTO meta (key, value) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    ).run(
+      META_KEY,
+      JSON.stringify({ count, lastCategory, lastReason, lastAtMs }),
+    );
+  } finally {
+    db.close();
+  }
+}
+
+let persistAttempt: () => void = realPersistAttempt;
+
+/** Test-only: override the single-attempt persist implementation, to
+ * force failures deterministically without touching the real DB. Returns
+ * the previous implementation. */
+export function _setPersistAttempt(impl: () => void): () => void {
+  const prev = persistAttempt;
+  persistAttempt = impl;
+  return prev;
+}
+
+/** Test-only: restore the real DB-backed persist attempt. */
+export function _resetPersistAttempt(): void {
+  persistAttempt = realPersistAttempt;
+}
+
+/**
+ * Best-effort: write the current in-process state to the shared store,
+ * retrying up to PERSIST_MAX_ATTEMPTS times (brief synchronous backoff
+ * between attempts) before giving up LOUDLY (adversarial-review finding
+ * #5: a silently-dropped write on this exact counter — meant to be the
+ * trustworthy cross-process health signal the `health` tool reads — could
+ * under-report or fail to clear a real failure streak with nothing to
+ * notice). Synchronous by design (Atomics.wait, not setTimeout/await) so
+ * callers (recordWakeFailure/recordWakeSuccess/_resetWakeFailureState)
+ * keep their existing synchronous call contract.
+ */
+function persist(): void {
+  for (let attempt = 1; attempt <= PERSIST_MAX_ATTEMPTS; attempt++) {
     try {
-      db.prepare(
-        `INSERT INTO meta (key, value) VALUES (?, ?)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-      ).run(
-        META_KEY,
-        JSON.stringify({ count, lastCategory, lastReason, lastAtMs }),
-      );
-    } finally {
-      db.close();
+      persistAttempt();
+      return;
+    } catch (err) {
+      if (attempt < PERSIST_MAX_ATTEMPTS) {
+        log(
+          "wake-health",
+          `persist attempt ${attempt}/${PERSIST_MAX_ATTEMPTS} failed — retrying`,
+          { error: String(err) },
+        );
+        sleepSync(PERSIST_RETRY_DELAY_MS);
+      } else {
+        const msg =
+          `FATAL: wake-failure state failed to persist after ` +
+          `${PERSIST_MAX_ATTEMPTS} attempts — the cross-process wake-health ` +
+          `signal (the health tool's wake_delivery_backlog) may now be ` +
+          `stale/incorrect. Last error: ` +
+          `${err instanceof Error ? err.message : String(err)}`;
+        log("wake-health", msg);
+        void broadcastSystemAlert(msg);
+      }
     }
-  } catch (err) {
-    log("wake-health", "failed to persist wake-failure state", {
-      error: String(err),
-    });
   }
 }
 
@@ -84,6 +148,7 @@ function readPersisted(): WakeFailureState | null {
   try {
     const db = new Database(DB_PATH, { readonly: true });
     try {
+      db.exec("PRAGMA busy_timeout = 5000;"); // per-connection; see realPersistAttempt
       const row = db
         .prepare(`SELECT value FROM meta WHERE key = ?`)
         .get(META_KEY) as { value: string } | undefined;

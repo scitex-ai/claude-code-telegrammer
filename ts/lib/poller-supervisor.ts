@@ -41,15 +41,29 @@
  * "probably inherited" was not good enough here.
  */
 
-import { pollerPidfilePath, readPidfile, isPidAlive } from "./takeover.js";
+import {
+  pollerPidfilePath,
+  readPidfile,
+  isProcessMatching,
+  POLLER_CMDLINE_MARKER,
+} from "./takeover.js";
 import { log } from "./log.js";
+import { broadcastSystemAlert } from "./loudfail.js";
 
 /** Minimal shape ensurePollerRunning needs from a spawned child handle —
  * satisfied by Bun.Subprocess, and trivially fakeable in tests. */
 export interface SpawnedProcessHandle {
   pid: number;
   unref(): void;
+  /** Resolves with the child's exit code once it exits — used for the
+   * post-spawn grace-window death check (adversarial-review finding #4). */
+  exited: Promise<number>;
 }
+
+/** How long after a successful spawn() call an early exit is treated as a
+ * startup failure worth alerting on, rather than normal process lifecycle
+ * (e.g. preempted by a newer poller's takeover, which happens later). */
+const SPAWN_GRACE_MS = 3000;
 
 export interface EnsurePollerDeps {
   /** Absolute path to the standalone poller entrypoint script
@@ -60,17 +74,26 @@ export interface EnsurePollerDeps {
   /** Injectable pidfile reader; defaults to the real lib/takeover.ts pidfile
    * at (stateDir, tokenHash). */
   readPid?: (stateDir: string, tokenHash: string) => { pid: number } | null;
-  /** Injectable liveness check; defaults to kill(pid, 0) (lib/takeover.ts::isPidAlive). */
+  /** Injectable liveness check; defaults to an IDENTITY-AWARE check
+   * (lib/takeover.ts::isProcessMatching against POLLER_CMDLINE_MARKER),
+   * not a bare kill(pid,0) — a stale pidfile's PID can be reused by the
+   * OS for an unrelated process, which a plain existence check can't
+   * tell apart from the real poller. */
   isAlive?: (pid: number) => boolean;
   /** Injectable spawn primitive; defaults to a detached, stdio-ignored
    * Bun.spawn of [process.execPath, "run", pollerScriptPath]. */
   spawn?: (cmd: string[]) => SpawnedProcessHandle;
+  /** Injectable grace-window threshold (ms) for the post-spawn early-death
+   * alert; defaults to SPAWN_GRACE_MS. Tests inject a tiny value instead
+   * of waiting out the real 3s default. */
+  graceMs?: number;
   logFn?: typeof log;
 }
 
 export type EnsurePollerResult =
   | { action: "already-running"; pid: number }
-  | { action: "spawned"; pid: number };
+  | { action: "spawned"; pid: number }
+  | { action: "spawn-failed"; error: string };
 
 function defaultReadPid(
   stateDir: string,
@@ -108,13 +131,25 @@ function defaultSpawn(cmd: string[]): SpawnedProcessHandle {
  * here (TOCTOU between the read and the spawn) self-heals: at worst two
  * pollers briefly race and the older one is preempted, never both running
  * forever.
+ *
+ * NOTED, NOT ACTED ON (adversarial review, follow-up pass): the SAME
+ * TOCTOU also applies between two SEPARATE ensurePollerRunning() calls
+ * (e.g. two near-simultaneous MCP-server starts) both reading "no live
+ * poller" and both deciding to spawn. Reviewed and assessed as benign in
+ * practice — the DB-level dedup (takeover.ts's pidfile "newest wins"
+ * claim) plus the poll loop's own per-iteration isAuthoritative() check
+ * already resolve it the same way, self-healing rather than silent. Left
+ * as documented behaviour rather than adding a redundant guard here.
  */
 export function ensurePollerRunning(
   deps: EnsurePollerDeps,
 ): EnsurePollerResult {
   const readPid = deps.readPid ?? defaultReadPid;
-  const isAlive = deps.isAlive ?? isPidAlive;
+  const isAlive =
+    deps.isAlive ??
+    ((pid: number) => isProcessMatching(pid, POLLER_CMDLINE_MARKER));
   const spawn = deps.spawn ?? defaultSpawn;
+  const graceMs = deps.graceMs ?? SPAWN_GRACE_MS;
   const logFn = deps.logFn ?? log;
 
   const snap = readPid(deps.stateDir, deps.tokenHash);
@@ -127,11 +162,57 @@ export function ensurePollerRunning(
     return { action: "already-running", pid: snap.pid };
   }
 
-  const child = spawn([process.execPath, "run", deps.pollerScriptPath]);
+  // The spawn call itself can throw (missing binary, exhausted process
+  // limits, bad script path, ...) — this must be LOUD, not silent
+  // (adversarial-review finding #4): fire-and-forget was previously wired
+  // with no try/catch anywhere in the chain, so a failed spawn would
+  // vanish until the next MCP-server restart with nobody the wiser.
+  let child: SpawnedProcessHandle;
+  try {
+    child = spawn([process.execPath, "run", deps.pollerScriptPath]);
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    const msg =
+      `FATAL: failed to spawn the standalone poller process ` +
+      `(${deps.pollerScriptPath}): ${errMsg} — inbound Telegram delivery ` +
+      `is NOT running.`;
+    logFn("poller-supervisor", msg);
+    void broadcastSystemAlert(msg);
+    return { action: "spawn-failed", error: errMsg };
+  }
   child.unref();
   logFn("poller-supervisor", "spawned standalone poller process", {
     pid: child.pid,
     script: deps.pollerScriptPath,
   });
+
+  // Grace-window death check: a child that exits within SPAWN_GRACE_MS of
+  // being spawned is a strong signal of an immediate startup failure (e.g.
+  // issue #1's migration race, before it was fixed, or any other early
+  // crash) rather than normal lifecycle (preemption by a newer poller
+  // happens much later, driven by operator/agent restarts). Best-effort:
+  // logged + alerted, never thrown — this must not crash the caller.
+  const spawnedAt = Date.now();
+  void child.exited
+    .then((code) => {
+      const aliveMs = Date.now() - spawnedAt;
+      if (aliveMs < graceMs) {
+        const msg =
+          `FATAL: standalone poller process (pid ${child.pid}) exited ` +
+          `with code ${code} only ${aliveMs}ms after spawning — inbound ` +
+          `Telegram delivery is likely NOT running. Check the poller's ` +
+          `own logs/stderr for the real cause.`;
+        logFn("poller-supervisor", msg);
+        void broadcastSystemAlert(msg);
+      }
+    })
+    .catch((err) => {
+      // .exited itself rejecting is exotic but must not go unnoticed either.
+      logFn("poller-supervisor", "failed to observe spawned poller exit", {
+        pid: child.pid,
+        error: String(err),
+      });
+    });
+
   return { action: "spawned", pid: child.pid };
 }

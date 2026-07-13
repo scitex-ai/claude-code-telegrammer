@@ -48,6 +48,8 @@ import { initStore } from "./lib/store.js";
 import { migrateLegacyStateDir, ensureCctAlias } from "./lib/migrate-state.js";
 import { loadAccess } from "./lib/access.js";
 import { ensurePollerRunning } from "./lib/poller-supervisor.js";
+import { startNotifyRelay } from "./lib/notify-relay.js";
+import { wakeEnabled } from "./lib/wake.js";
 import { resolveConfigProbe, wantsGetMe } from "./lib/config-probe.js";
 import { runHealth, serializeHealthReport } from "./lib/health-adapters.js";
 import { tgApi, getMeRaw } from "./lib/telegram-api.js";
@@ -328,4 +330,19 @@ if (TELEGRAM_ENABLED) {
     "server",
     "telegram disabled (CCT_BOT_TOKEN empty) — MCP connected, poller not started",
   );
+}
+
+// Cross-process inbound-notification relay (adversarial-review finding #3):
+// interactive-CLI (!wakeEnabled()) deployments push inbound Telegram
+// messages live via mcp.notification(), but that call now has to come from
+// THIS process — the standalone poller (ts/telegram-poller.ts) that
+// persists the message has no mcp/Server object at all. This process still
+// holds the live `mcp` object throughout the session, so it polls the
+// shared store for pending rows (lib/handle-update.ts::savePendingNotification)
+// and delivers them itself. Only started for !wakeEnabled(): wake-enabled
+// (SDK-runner/fleet) agents deliver via the already mcp-independent
+// /v1/turn POST and never populate pending rows, so this would be a
+// pointless poll for them. See lib/notify-relay.ts.
+if (TELEGRAM_ENABLED && !wakeEnabled()) {
+  startNotifyRelay({ mcp });
 }

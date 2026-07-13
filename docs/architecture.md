@@ -31,6 +31,7 @@ the poller's pidfile. The two processes share internal modules (`ts/lib/`):
 | `poller` | Telegram `getUpdates` long-poll loop (runs only in the poller process) |
 | `poller-supervisor` | MCP-server-side: spawn-if-not-already-running decision (testable, injectable) |
 | `handle-update` / `poller-batch` / `poll-watchdog` | Per-update handling, batch/durability retry, ingestion-stall alarm — all mcp-independent |
+| `notify-relay` | Cross-process inbound live-push relay for interactive-CLI (`!wakeEnabled()`) mode — poller writes, MCP server reads+delivers |
 | `loudfail` | Direct-Telegram-API alarms/replies that must work whether or not the agent/mcp side is reachable |
 | `store` | SQLite (WAL) message persistence + dedup + read/replied tracking; opened independently by both processes |
 | `tools` | The 10 MCP tools (see [interfaces](interfaces.md)) — MCP-server process only |
@@ -57,11 +58,20 @@ teardown-detection logic.
 **Inbound:** Telegram `getUpdates` → poller process → allowlist gate → (if
 `TURN_URL` is set) `/v1/turn` wake POST to the agent — mcp-independent, plain
 HTTP, works regardless of which process is up — **or** (interactive-CLI, no
-`TURN_URL`) an MCP channel notification, which now only works when the MCP
-server happens to still be the one observing it; system-level alarms (batch
-persist-failure, 409-exhausted, ingestion-stall) and reactions never depend on
-the MCP server at all — they go straight to Telegram (`loudfail.ts`) or through
-the same wake POST. **Outbound:** Claude Code calls the `reply` / `react` /
+`TURN_URL`) a relayed MCP channel notification: the poller process (no `mcp`
+object) persists the fully-built notification on the message's own row
+(`messages.pending_notification`), and the MCP-server process — which still
+holds the live `mcp` object throughout the session — polls for pending rows
+(default every 1s) and delivers them (`lib/notify-relay.ts`). This is a short
+relay delay, not an immediate push, but it is *not* zero/best-effort-only:
+every pending row is eventually delivered once the MCP server is up, same as
+before the poller/MCP-server split (just no longer instantaneous). System-
+level alarms (batch persist-failure, 409-exhausted, ingestion-stall) and
+reactions never depend on the MCP server at all — they go straight to
+Telegram (`loudfail.ts`) or through the same wake POST (reactions have no
+durable row to relay from, so they use the wake POST only, logging in
+interactive-CLI mode — see `lib/handle-update.ts::handleReaction`).
+**Outbound:** Claude Code calls the `reply` / `react` /
 `send_document` tools (MCP-server process) → `sendMessage` → Telegram → operator.
 
 Each agent is a self-contained unit: its own bot token, its own state directory,
@@ -145,7 +155,9 @@ All messages persist in `$CLAUDE_CODE_TELEGRAMMER_AGENT_STATE_DIR/messages.db` (
 - **messages** — direction, chat_id, message_id, user_id, username, text,
   timestamps (telegram_ts, received_at, read_at, replied_at), threading
   (reply_to_message_id, reply_to_row_id), identity (host, project, agent_id,
-  bot_token_hash), raw_json.
+  bot_token_hash), raw_json, forward_json, pending_notification (cross-process
+  live-push relay payload — see `notify-relay` above; NULL once delivered or
+  when wake-enabled, since that mode never populates it).
 - **attachments** — message_row_id (FK), kind, file_id, file_name, mime_type,
   file_size, local_path, downloaded_at.
 - **meta** — key-value store for schema_version, update_offset, last_poll_ts
