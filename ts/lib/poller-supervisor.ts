@@ -45,7 +45,6 @@ import {
   pollerPidfilePath,
   readPidfile,
   isProcessMatching,
-  POLLER_CMDLINE_MARKER,
 } from "./takeover.js";
 import { log } from "./log.js";
 import { broadcastSystemAlert } from "./loudfail.js";
@@ -60,9 +59,21 @@ export interface SpawnedProcessHandle {
   exited: Promise<number>;
 }
 
-/** How long after a successful spawn() call an early exit is treated as a
- * startup failure worth alerting on, rather than normal process lifecycle
- * (e.g. preempted by a newer poller's takeover, which happens later). */
+/**
+ * How long after a successful spawn() call an early exit is treated as a
+ * POSSIBLE startup failure worth investigating (see the pidfile re-check
+ * in the exit observer below — this window is NOT itself proof of a
+ * crash). RECONCILED (round-2 adversarial review: two comments in this
+ * file previously disagreed on this): a legitimate "newest wins" takeover
+ * preemption (lib/takeover.ts::claimAuthoritative's SIGTERM) does NOT
+ * happen "much later" — it happens as soon as a newer poller's own
+ * startPolling() runs claimAuthoritative(), which is the FIRST thing that
+ * function does, i.e. essentially immediately after that newer poller's
+ * own process starts. Combined with the losing poller's own shutdown()
+ * taking a fixed 2000ms (ts/telegram-poller.ts), a clean, correct
+ * preemption routinely lands INSIDE this 3000ms window. That is exactly
+ * why the exit observer below does not alert on aliveMs<graceMs alone.
+ */
 const SPAWN_GRACE_MS = 3000;
 
 export interface EnsurePollerDeps {
@@ -75,10 +86,15 @@ export interface EnsurePollerDeps {
    * at (stateDir, tokenHash). */
   readPid?: (stateDir: string, tokenHash: string) => { pid: number } | null;
   /** Injectable liveness check; defaults to an IDENTITY-AWARE check
-   * (lib/takeover.ts::isProcessMatching against POLLER_CMDLINE_MARKER),
-   * not a bare kill(pid,0) — a stale pidfile's PID can be reused by the
-   * OS for an unrelated process, which a plain existence check can't
-   * tell apart from the real poller. */
+   * (lib/takeover.ts::isProcessMatching against THIS agent's own
+   * pollerScriptPath, not the generic POLLER_CMDLINE_MARKER — round-2
+   * adversarial review: the generic "telegram-poller" substring would
+   * also match a genuinely-real telegram-poller process belonging to a
+   * DIFFERENT agent on a busy multi-agent host, if a stale pidfile's PID
+   * got reused for one. Matching the full, agent-specific script path
+   * closes that almost for free), not a bare kill(pid,0) — a stale
+   * pidfile's PID can be reused by the OS for an unrelated process, which
+   * a plain existence check can't tell apart from the real poller. */
   isAlive?: (pid: number) => boolean;
   /** Injectable spawn primitive; defaults to a detached, stdio-ignored
    * Bun.spawn of [process.execPath, "run", pollerScriptPath]. */
@@ -145,9 +161,15 @@ export function ensurePollerRunning(
   deps: EnsurePollerDeps,
 ): EnsurePollerResult {
   const readPid = deps.readPid ?? defaultReadPid;
+  // Agent-specific: matches THIS agent's own poller script path, not the
+  // generic POLLER_CMDLINE_MARKER substring (round-2 adversarial review
+  // finding #4) — closes the (admittedly narrow) gap where a stale
+  // pidfile's PID gets reused by the OS for a genuinely-real
+  // telegram-poller process belonging to a DIFFERENT agent on a busy
+  // multi-agent host.
   const isAlive =
     deps.isAlive ??
-    ((pid: number) => isProcessMatching(pid, POLLER_CMDLINE_MARKER));
+    ((pid: number) => isProcessMatching(pid, deps.pollerScriptPath));
   const spawn = deps.spawn ?? defaultSpawn;
   const graceMs = deps.graceMs ?? SPAWN_GRACE_MS;
   const logFn = deps.logFn ?? log;
@@ -187,24 +209,52 @@ export function ensurePollerRunning(
   });
 
   // Grace-window death check: a child that exits within SPAWN_GRACE_MS of
-  // being spawned is a strong signal of an immediate startup failure (e.g.
+  // being spawned is a POSSIBLE sign of an immediate startup failure (e.g.
   // issue #1's migration race, before it was fixed, or any other early
-  // crash) rather than normal lifecycle (preemption by a newer poller
-  // happens much later, driven by operator/agent restarts). Best-effort:
-  // logged + alerted, never thrown — this must not crash the caller.
+  // crash) — but NOT proof of one. A legitimate "newest wins" takeover
+  // preemption (claimAuthoritative()'s SIGTERM, lib/takeover.ts) routinely
+  // lands inside this same window (see SPAWN_GRACE_MS's docstring above —
+  // it does NOT happen "much later" as an earlier version of this comment
+  // wrongly claimed). Round-2 adversarial review finding #2: alerting on
+  // aliveMs<graceMs ALONE would cry wolf on that entirely correct,
+  // self-healing outcome (a newer poller is alive and driving delivery
+  // just fine under a different PID) — exactly the kind of false alarm
+  // that undercuts trust in every OTHER alert this PR adds. So before
+  // alerting, re-read the pidfile: if it now names a DIFFERENT, live PID,
+  // that's the signature of a legitimate takeover, not a crash — log it
+  // quietly and do not page anyone. Best-effort throughout: logged +
+  // alerted (or not), never thrown — this must not crash the caller.
   const spawnedAt = Date.now();
   void child.exited
     .then((code) => {
       const aliveMs = Date.now() - spawnedAt;
-      if (aliveMs < graceMs) {
-        const msg =
-          `FATAL: standalone poller process (pid ${child.pid}) exited ` +
-          `with code ${code} only ${aliveMs}ms after spawning — inbound ` +
-          `Telegram delivery is likely NOT running. Check the poller's ` +
-          `own logs/stderr for the real cause.`;
-        logFn("poller-supervisor", msg);
-        void broadcastSystemAlert(msg);
+      if (aliveMs >= graceMs) return; // ordinary lifecycle — nothing to check
+
+      const current = readPid(deps.stateDir, deps.tokenHash);
+      if (current && current.pid !== child.pid && isAlive(current.pid)) {
+        logFn(
+          "poller-supervisor",
+          "spawned poller exited early, but a DIFFERENT live poller now " +
+            "holds the pidfile — legitimate newest-wins takeover, not a " +
+            "crash; delivery is still running",
+          {
+            exitedPid: child.pid,
+            currentPid: current.pid,
+            aliveMs,
+            exitCode: code,
+          },
+        );
+        return;
       }
+
+      const msg =
+        `FATAL: standalone poller process (pid ${child.pid}) exited ` +
+        `with code ${code} only ${aliveMs}ms after spawning, and no ` +
+        `OTHER live poller has taken over the pidfile — inbound Telegram ` +
+        `delivery is likely NOT running. Check the poller's own ` +
+        `logs/stderr for the real cause.`;
+      logFn("poller-supervisor", msg);
+      void broadcastSystemAlert(msg);
     })
     .catch((err) => {
       // .exited itself rejecting is exotic but must not go unnoticed either.

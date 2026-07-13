@@ -32,8 +32,8 @@
  * `duplicate column name` error reliably (~45% per single attempt,
  * verified empirically). This test races ensureColumn directly (via
  * fixtures/ensure-column-race-fixture.ts) in a loop of independent
- * attempts against fresh DBs, so the overall test has a near-certain
- * (>99.9%, 1-0.55^10) chance of exercising the race at least once even
+ * attempts against fresh DBs, so the overall test has a
+ * 1-0.55^10 ≈ 99.75% chance of exercising the race at least once even
  * though any SINGLE attempt is probabilistic.
  */
 

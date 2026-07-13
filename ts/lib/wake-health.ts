@@ -47,8 +47,26 @@ export interface WakeFailureState {
 }
 
 const META_KEY = "wake_failure_state";
-const PERSIST_MAX_ATTEMPTS = 3;
+// Round-2 adversarial review finding #3: sleepSync really does BLOCK this
+// process's single JS thread (Atomics.wait — confirmed empirically), and
+// each attempt previously opened a fresh connection with busy_timeout=5000
+// — so 3 attempts could independently each block up to 5000ms, worst case
+// ~15.1s total, in the exact process whose whole job is staying responsive
+// to Telegram polling. Tightened: ONE retry (not two), and a MUCH shorter
+// busy_timeout on that retry specifically — the first attempt's own 5000ms
+// already gives lock contention a fair chance to clear; a second identical
+// 5000ms wait 50ms later has narrow odds of a different outcome, and does
+// nothing for non-lock failures (disk-full, permissions) this code cannot
+// tell apart from contention anyway. wake-health's own data is a best-
+// effort HEALTH SIGNAL, not user message data (which keeps the full
+// 5000ms everywhere else in this codebase) — a shorter timeout here is a
+// deliberate, reasoned deviation for that reason, not an oversight.
+const PERSIST_MAX_ATTEMPTS = 2;
 const PERSIST_RETRY_DELAY_MS = 50;
+const FIRST_ATTEMPT_BUSY_TIMEOUT_MS = 2000;
+const RETRY_ATTEMPT_BUSY_TIMEOUT_MS = 500;
+// New worst case: 2000 + 50 + 500 = 2550ms — a small multiple of a
+// second, not ~15.
 
 let count = 0;
 let lastCategory: WakeFailCategory | null = null;
@@ -65,15 +83,14 @@ function sleepSync(ms: number): void {
   Atomics.wait(ia, 0, 0, ms);
 }
 
-function realPersistAttempt(): void {
+function realPersistAttempt(busyTimeoutMs: number): void {
   const db = new Database(DB_PATH);
   try {
     // busy_timeout is per-CONNECTION — an ad hoc handle like this one does
     // NOT inherit it from the file's WAL-mode schema (adversarial-review
-    // finding #6). Belt-and-braces here: persist() already retries this
-    // whole attempt on ANY failure, but setting it avoids relying on that
-    // retry loop to paper over ordinary lock contention.
-    db.exec("PRAGMA busy_timeout = 5000;");
+    // finding #6). Deliberately SHORTER than the 5000ms used elsewhere in
+    // this codebase for retry attempts — see the constants above.
+    db.exec(`PRAGMA busy_timeout = ${busyTimeoutMs};`);
     db.prepare(
       `INSERT INTO meta (key, value) VALUES (?, ?)
        ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
@@ -86,12 +103,14 @@ function realPersistAttempt(): void {
   }
 }
 
-let persistAttempt: () => void = realPersistAttempt;
+let persistAttempt: (busyTimeoutMs: number) => void = realPersistAttempt;
 
 /** Test-only: override the single-attempt persist implementation, to
  * force failures deterministically without touching the real DB. Returns
  * the previous implementation. */
-export function _setPersistAttempt(impl: () => void): () => void {
+export function _setPersistAttempt(
+  impl: (busyTimeoutMs: number) => void,
+): (busyTimeoutMs: number) => void {
   const prev = persistAttempt;
   persistAttempt = impl;
   return prev;
@@ -115,8 +134,12 @@ export function _resetPersistAttempt(): void {
  */
 function persist(): void {
   for (let attempt = 1; attempt <= PERSIST_MAX_ATTEMPTS; attempt++) {
+    const busyTimeoutMs =
+      attempt === 1
+        ? FIRST_ATTEMPT_BUSY_TIMEOUT_MS
+        : RETRY_ATTEMPT_BUSY_TIMEOUT_MS;
     try {
-      persistAttempt();
+      persistAttempt(busyTimeoutMs);
       return;
     } catch (err) {
       if (attempt < PERSIST_MAX_ATTEMPTS) {

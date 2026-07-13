@@ -394,7 +394,18 @@ describe("takeover: isProcessMatching (adversarial-review finding #2)", () => {
       // match on that rather than the inline script text, which does not
       // appear verbatim in /proc/<pid>/cmdline the same way a file path
       // spawn's script argument would.
-      expect(isProcessMatching(child.pid, "bun")).toBe(true);
+      //
+      // Poll briefly rather than asserting immediately: Bun.spawn() returns
+      // as soon as fork() completes, but there is a short window before the
+      // child's execve() replaces its process image — /proc/<pid>/cmdline
+      // can be transiently inconsistent during that window (observed
+      // empirically as an occasional flake asserting immediately).
+      let matched = false;
+      for (let i = 0; i < 20 && !matched; i++) {
+        matched = isProcessMatching(child.pid, "bun");
+        if (!matched) await new Promise((r) => setTimeout(r, 10));
+      }
+      expect(matched).toBe(true);
       expect(isProcessMatching(child.pid, "definitely-not-a-match-xyz")).toBe(
         false,
       );

@@ -171,18 +171,62 @@ export interface NotifyRelayHandle {
  * Production entry point: poll every intervalMs (default 1000ms), unref'd
  * so it never keeps the MCP server process alive on its own. Called from
  * ts/telegram-server.ts only when !wakeEnabled().
+ *
+ * SELF-RESCHEDULING, not a bare setInterval (round-2 adversarial-review
+ * finding #1 — real duplicate delivery, confirmed via
+ * ts/test/notify-relay.test.ts): relayPendingNotificationsOnce takes a
+ * snapshot then sequentially awaits mcp.notification()+clearPending() per
+ * row, uncapped. A bare setInterval fires on a fixed wall-clock schedule
+ * REGARDLESS of whether the previous tick finished — so a tick slower than
+ * intervalMs (one slow notification round-trip, or a modest backlog; the
+ * realistic trigger is a long-lived detached poller draining an
+ * accumulated backlog in a burst the moment an MCP-server session
+ * connects) lets the NEXT tick start while the SAME rows are still
+ * uncleared, re-relaying them — the operator sees the same message twice.
+ * Scheduling the next tick only AFTER the current one's promise settles
+ * makes that structurally impossible: at most one tick is ever in flight.
  */
 export function startNotifyRelay(
   deps: NotifyRelayDeps,
   intervalMs = 1000,
 ): NotifyRelayHandle {
-  const handle = setInterval(() => {
-    void relayPendingNotificationsOnce(deps);
-  }, intervalMs);
-  if (typeof handle === "object" && handle && "unref" in handle) {
-    (handle as { unref: () => void }).unref();
-  }
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const logFn = deps.logFn ?? log;
+
+  const unrefTimer = (h: ReturnType<typeof setTimeout>) => {
+    if (typeof h === "object" && h && "unref" in h) {
+      (h as { unref: () => void }).unref();
+    }
+  };
+
+  const scheduleNext = () => {
+    if (stopped) return;
+    timer = setTimeout(tick, intervalMs);
+    unrefTimer(timer);
+  };
+
+  const tick = () => {
+    void relayPendingNotificationsOnce(deps)
+      .catch((err) => {
+        // relayPendingNotificationsOnce already catches per-row errors
+        // internally and never rejects in practice, but guard here too —
+        // a throw must not silently kill the reschedule loop.
+        logFn("notify-relay", "unexpected error in relay tick", {
+          error: String(err),
+        });
+      })
+      .finally(() => {
+        scheduleNext();
+      });
+  };
+
+  scheduleNext();
+
   return {
-    stop: () => clearInterval(handle),
+    stop: () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+    },
   };
 }

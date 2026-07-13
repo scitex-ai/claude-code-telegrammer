@@ -239,27 +239,38 @@ describe("persist(): retry + loud-alert-on-exhaustion (adversarial-review findin
     _resetSystemAlertSender();
   });
 
-  test("a persist that fails every attempt is retried 3 times total, then broadcasts a loud alert", () => {
+  test("a persist that fails every attempt is retried 2 times total (1 extra attempt, round-2 adversarial-review finding #3), then broadcasts a loud alert", () => {
     let attempts = 0;
-    _setPersistAttempt(() => {
+    const seenBusyTimeouts: number[] = [];
+    _setPersistAttempt((busyTimeoutMs) => {
       attempts += 1;
+      seenBusyTimeouts.push(busyTimeoutMs);
       throw new Error("simulated disk-full");
     });
 
     recordWakeFailure("server_error", "HTTP 500", 12345);
 
-    expect(attempts).toBe(3);
+    expect(attempts).toBe(2);
+    // First attempt uses the "normal" (longer) busy_timeout; the retry
+    // uses a deliberately SHORT one — see wake-health.ts's constants for
+    // why (worst-case blocking time was ~15s with 3x5000ms; now a small
+    // multiple of a second).
+    expect(seenBusyTimeouts).toEqual([2000, 500]);
     expect(alerts.length).toBe(1);
     expect(alerts[0]).toContain("FATAL");
-    expect(alerts[0]).toContain("3 attempts");
+    expect(alerts[0]).toContain("2 attempts");
     expect(alerts[0]).toContain("simulated disk-full");
   });
 
   test("a persist that fails once then succeeds does NOT alert (transient recovery)", () => {
     let attempts = 0;
-    _setPersistAttempt(() => {
+    _setPersistAttempt((busyTimeoutMs) => {
       attempts += 1;
-      if (attempts === 1) throw new Error("transient blip");
+      if (attempts === 1) {
+        expect(busyTimeoutMs).toBe(2000); // first attempt
+        throw new Error("transient blip");
+      }
+      expect(busyTimeoutMs).toBe(500); // retry
       // second attempt: succeeds (a no-op stand-in is enough — persist()
       // only cares whether persistAttempt() throws, not what it does).
     });

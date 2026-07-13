@@ -425,4 +425,58 @@ describe("ensurePollerRunning: post-spawn grace-window death check (adversarial-
 
     expect(alerts.length).toBe(0);
   });
+
+  test("a legitimate newest-wins takeover (a DIFFERENT live PID now holds the pidfile) does NOT alert — round-2 adversarial-review finding #2", async () => {
+    // Mechanics being reproduced: claimAuthoritative() SIGTERMs a losing
+    // poller almost immediately after a newer one starts (its very first
+    // action in startPolling()), and the losing poller's own shutdown()
+    // takes a fixed 2000ms — landing comfortably inside the exit
+    // observer's grace window. Naively alerting on aliveMs<graceMs alone
+    // would cry wolf on this entirely correct, self-healing outcome.
+    const spawnedHandle = fakeSpawnHandle(8080, Promise.resolve(0));
+    let readPidCalls = 0;
+    const result = ensurePollerRunning({
+      pollerScriptPath: "/fake/telegram-poller.ts",
+      stateDir: "/fake/state",
+      tokenHash: "legit-takeover",
+      // First call (the initial "is one already running?" check): no
+      // pidfile yet. Second call (the exit observer's re-check, AFTER our
+      // spawned pid 8080 already exited): a DIFFERENT, live pid — the
+      // newer poller that won the race.
+      readPid: () => {
+        readPidCalls += 1;
+        return readPidCalls === 1 ? null : { pid: 9090 };
+      },
+      isAlive: (pid) => pid === 9090, // only the newer poller is alive
+      spawn: () => spawnedHandle,
+      graceMs: 50,
+    });
+    expect(result).toEqual({ action: "spawned", pid: 8080 });
+
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(alerts.length).toBe(0);
+    expect(readPidCalls).toBe(2);
+  });
+
+  test("an early exit with NO other live poller in the pidfile still alerts (genuine crash, not a takeover)", async () => {
+    const spawnedHandle = fakeSpawnHandle(8181, Promise.resolve(1));
+    const result = ensurePollerRunning({
+      pollerScriptPath: "/fake/telegram-poller.ts",
+      stateDir: "/fake/state",
+      tokenHash: "genuine-crash",
+      // The pidfile still names OUR OWN (now-dead) pid — no takeover.
+      readPid: () => ({ pid: 8181 }),
+      isAlive: () => false,
+      spawn: () => spawnedHandle,
+      graceMs: 50,
+    });
+    expect(result).toEqual({ action: "spawned", pid: 8181 });
+
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(alerts.length).toBe(1);
+    expect(alerts[0]).toContain("FATAL");
+    expect(alerts[0]).toContain("no OTHER live poller");
+  });
 });

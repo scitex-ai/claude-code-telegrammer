@@ -7,12 +7,14 @@
  * on the message's own row; the MCP-server process (this module) polls
  * for pending rows and delivers them.
  *
- * startNotifyRelay() itself (the real-setInterval production wrapper) has
- * no direct test here, matching this repo's own established convention
- * (lib/poll-watchdog.ts::startStallWatchdog is likewise untested directly
- * — only its pure decision function, createStallWatchdog, is). All the
- * actual relay DECISION logic lives in relayPendingNotificationsOnce,
- * which is thoroughly covered below with injected dependencies.
+ * The relay DECISION logic (relayPendingNotificationsOnce) is thoroughly
+ * covered below with injected dependencies. startNotifyRelay() (the
+ * production timer wrapper) gets ONE direct test too — unlike
+ * lib/poll-watchdog.ts::startStallWatchdog (untested directly; only its
+ * pure createStallWatchdog is), this wrapper owns real scheduling
+ * behaviour worth pinning: the reentrancy guard (round-2 adversarial-
+ * review finding #1) that stops a slow/backlogged tick from overlapping
+ * with the next scheduled one and double-relaying the same rows.
  */
 
 import { describe, test, expect, beforeAll } from "bun:test";
@@ -20,6 +22,7 @@ import { initStore, saveInbound } from "../lib/store.js";
 import {
   savePendingNotification,
   relayPendingNotificationsOnce,
+  startNotifyRelay,
   type PendingNotificationPayload,
 } from "../lib/notify-relay.js";
 
@@ -192,5 +195,74 @@ describe("relayPendingNotificationsOnce: injected deps (no real store)", () => {
     });
     expect(delivered).toBe(0);
     expect(calls.length).toBe(0);
+  });
+});
+
+describe("startNotifyRelay: reentrancy guard (round-2 adversarial-review finding #1)", () => {
+  test("a tick slower than intervalMs never overlaps with the next scheduled tick — no row is relayed twice", async () => {
+    // Realistic trigger: a long-lived detached poller accumulates a
+    // backlog while no MCP-server session is running, then it drains in a
+    // burst the moment a session connects — several rows in one tick,
+    // comfortably over the poll interval. Simulated here with a SHORT
+    // intervalMs (20ms) and a notification call slower than that (60ms
+    // per row), so a bare `setInterval` (no reentrancy guard) would fire
+    // several more times WHILE the first tick is still mid-flight,
+    // re-relaying the still-uncleared rows.
+    const rows = [
+      {
+        id: 1,
+        pending_notification: JSON.stringify({ content: "row-1", meta: {} }),
+      },
+      {
+        id: 2,
+        pending_notification: JSON.stringify({ content: "row-2", meta: {} }),
+      },
+    ];
+    const cleared = new Set<number>();
+    const deliveryCounts: Record<string, number> = {};
+
+    const getPending = () => rows.filter((r) => !cleared.has(r.id));
+    const clearPending = (id: number) => cleared.add(id);
+    const mcp = {
+      notification: async (n: { params: PendingNotificationPayload }) => {
+        deliveryCounts[n.params.content] =
+          (deliveryCounts[n.params.content] ?? 0) + 1;
+        await new Promise((r) => setTimeout(r, 60)); // slower than intervalMs
+      },
+    } as any;
+
+    const handle = startNotifyRelay({ mcp, getPending, clearPending }, 20);
+    try {
+      // Let several 20ms intervals elapse while the (2 rows x 60ms =
+      // ~120ms) first tick is still mid-flight, plus margin for a second
+      // tick to run once the first one legitimately finishes.
+      await new Promise((r) => setTimeout(r, 400));
+    } finally {
+      handle.stop();
+    }
+
+    expect(cleared.size).toBe(2);
+    expect(deliveryCounts["row-1"]).toBe(1);
+    expect(deliveryCounts["row-2"]).toBe(1);
+  });
+
+  test("stop() prevents any further ticks, including one already scheduled", async () => {
+    let getPendingCalls = 0;
+    const { mcp } = fakeMcp();
+    const handle = startNotifyRelay(
+      {
+        mcp,
+        getPending: () => {
+          getPendingCalls += 1;
+          return [];
+        },
+      },
+      15,
+    );
+    await new Promise((r) => setTimeout(r, 40));
+    handle.stop();
+    const countAtStop = getPendingCalls;
+    await new Promise((r) => setTimeout(r, 80));
+    expect(getPendingCalls).toBe(countAtStop);
   });
 });
