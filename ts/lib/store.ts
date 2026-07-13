@@ -7,6 +7,8 @@ import { Database, Statement } from "bun:sqlite";
 import { join } from "path";
 import { STATE_DIR } from "./config.js";
 import { log } from "./log.js";
+import { ensureColumn } from "./store-migrations.js";
+export { ensureColumn } from "./store-migrations.js";
 
 // Scitex-standard DB filename (was "messages.db"): self-describing in the
 // ~/.scitex/claude-code-telegrammer runtime tree. SQLite derives the -wal/-shm
@@ -46,9 +48,10 @@ let stmtContextChat: Statement | null = null;
 
 // ── Schema ─────────────────────────────────────────────────────────────────
 
+// busy_timeout FIRST (concurrency fix — see ts/test/multiprocess-sqlite.test.ts):
 const SCHEMA_SQL = `
-PRAGMA journal_mode = WAL;
 PRAGMA busy_timeout = 5000;
+PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
 PRAGMA foreign_keys = ON;
 
@@ -105,30 +108,6 @@ CREATE TABLE IF NOT EXISTS attachments (
 CREATE INDEX IF NOT EXISTS idx_att_message ON attachments(message_row_id);
 `;
 
-// ── Migration helpers ──────────────────────────────────────────────────────
-
-/**
- * Idempotent ALTER TABLE ADD COLUMN.
- *
- * SQLite's CREATE TABLE IF NOT EXISTS does NOT update existing tables
- * when columns are added to the schema. We use this helper to bring
- * older databases forward without dropping data. Guarded by
- * PRAGMA table_info so it never throws on a re-run.
- */
-export function ensureColumn(
-  database: Database,
-  table: string,
-  column: string,
-  decl: string,
-): void {
-  const cols = database.prepare(`PRAGMA table_info(${table})`).all() as Array<{
-    name: string;
-  }>;
-  if (!cols.some((c) => c.name === column)) {
-    database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${decl}`);
-  }
-}
-
 // ── Init ───────────────────────────────────────────────────────────────────
 
 export function initStore(): void {
@@ -145,6 +124,9 @@ export function initStore(): void {
   // databases need an explicit ALTER. Guarded by table_info check so
   // it's idempotent and safe to re-run on every startup.
   ensureColumn(db, "messages", "forward_json", "TEXT");
+  // ── Migration: pending_notification (added 2026-07) — lib/notify-relay.ts
+  // cross-process live-push relay for interactive-CLI (!wakeEnabled()) mode.
+  ensureColumn(db, "messages", "pending_notification", "TEXT");
 
   // Cache prepared statements
   stmtInsertInbound = db.prepare(`

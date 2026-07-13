@@ -25,7 +25,14 @@ let processing = false;
 // ── DB access (reuse the same DB file as store.ts) ────────────────────────
 
 function getDb(): Database {
-  return new Database(DB_PATH);
+  const db = new Database(DB_PATH);
+  // busy_timeout is per-CONNECTION, not persisted in the file — WAL mode
+  // (set once, at schema-creation time) does NOT imply every later
+  // connection inherits a nonzero busy_timeout (adversarial-review finding
+  // #6: this ad hoc handle had none, defaulting to 0 — zero tolerance for
+  // lock contention against the poller's own writes).
+  db.exec("PRAGMA busy_timeout = 5000;");
+  return db;
 }
 
 // ── Public API ────────────────────────────────────────────────────────────

@@ -421,12 +421,19 @@ export function registerTools(mcp: Server): void {
           };
         }
         case "health": {
-          // MCP-tool variant: this server process IS the poller, so the
-          // poller_alive check reports our own pid ("self") instead of the
-          // lockfile/pidfile round-trip the CLI probe does. The serialized
-          // report has the raw token redacted (belt-and-braces — the checks
-          // never include it in the first place).
-          const report = await runHealth({ poller: "self" });
+          // Architecture fix (incident-cct-inbound-dies-silently-with-mcp-
+          // server-20260711 follow-up, 2026-07): this server process is NO
+          // LONGER the poller — the getUpdates loop now runs in a separate,
+          // standalone process (ts/telegram-poller.ts; see
+          // docs/architecture.md). "self" would report OUR OWN pid, which
+          // is always trivially alive and tells you nothing about whether
+          // the actual poller process is up. Use "external" — the same
+          // lockfile/pidfile round-trip the CLI probe does (reads the
+          // per-token pidfile via lib/takeover.ts and kill-0s the recorded
+          // PID) — so this tool reports the REAL poller's liveness. The
+          // serialized report has the raw token redacted (belt-and-braces —
+          // the checks never include it in the first place).
+          const report = await runHealth({ poller: "external" });
           return {
             content: [{ type: "text", text: serializeHealthReport(report) }],
           };

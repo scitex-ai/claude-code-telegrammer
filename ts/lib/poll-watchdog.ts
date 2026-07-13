@@ -32,11 +32,11 @@
  * noted follow-ups. The actionable alarm tells the operator to restart.
  */
 
-import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { log } from "./log.js";
-import { BOT_TOKEN_HASH, STATE_DIR, CHANNEL_SOURCE } from "./config.js";
+import { BOT_TOKEN_HASH, STATE_DIR } from "./config.js";
 import { saveLastPollTs } from "./store.js";
 import { getenv } from "./env.js";
+import { broadcastSystemAlert } from "./loudfail.js";
 
 /** Default stall threshold (seconds) — well above the 30s long-poll cap
  * plus the 3s error backoff margin, so a healthy loop never trips it. */
@@ -136,16 +136,13 @@ function stallMessage(stallMs: number, thresholdMs: number): string {
   );
 }
 
-/** Default emit: same channel-notification mechanism the poller's
- * 409-fatal path and poller-batch's emitLoud use (meta.type "error"). */
-function defaultEmit(mcp: Server, content: string): void {
+/** Default emit: same direct-Telegram broadcast the poller's 409-fatal path
+ * and poller-batch's emitLoud use (lib/loudfail.ts::broadcastSystemAlert) —
+ * this runs in the standalone poller process, with no mcp/Server object to
+ * notify through. */
+function defaultEmit(content: string): void {
   log("poller", content);
-  mcp
-    .notification({
-      method: "notifications/claude/channel",
-      params: { content, meta: { source: CHANNEL_SOURCE, type: "error" } },
-    })
-    .catch(() => {});
+  void broadcastSystemAlert(content);
 }
 
 /**
@@ -196,10 +193,7 @@ export interface WatchdogHandle {
  * setInterval watchdog, and return a handle whose stop() clears it.
  * Called by startPolling; its stop() runs on every poll-loop exit path.
  */
-export function startStallWatchdog(
-  mcp: Server,
-  isPolling: () => boolean,
-): WatchdogHandle {
+export function startStallWatchdog(isPolling: () => boolean): WatchdogHandle {
   const thresholdMs = resolveStallThresholdMs();
   const checkIntervalMs = Math.min(MAX_CHECK_INTERVAL_MS, thresholdMs / 4);
 
@@ -211,7 +205,7 @@ export function startStallWatchdog(
   const watchdog = createStallWatchdog({
     isPolling,
     thresholdMs,
-    emit: (content) => defaultEmit(mcp, content),
+    emit: (content) => defaultEmit(content),
   });
 
   log(
