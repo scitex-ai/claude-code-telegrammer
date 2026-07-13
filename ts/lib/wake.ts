@@ -55,7 +55,9 @@ export interface WakeMeta {
  *   - timeout            — fetch throws an AbortError / timeout / network
  *                          stall. Likely cause: agent is mid-turn and over
  *                          its per-turn deadline, OR network partition.
- *   - connection_refused — fetch throws ECONNREFUSED. Likely cause: the
+ *   - connection_refused — fetch cannot open the connection (node spells this
+ *                          ECONNREFUSED; Bun says "Unable to connect ..." with
+ *                          code "ConnectionRefused"). Likely cause: the
  *                          SDK-runner process is dead and nothing is bound
  *                          to its /v1/turn port.
  *   - auth               — HTTP 401 / 403. Likely cause: TURN_BEARER is
@@ -170,23 +172,69 @@ export function categoriseStatus(status: number): WakeFailCategory {
 }
 
 /**
- * Map a thrown Error from the fetch path to a WakeFailCategory. Pattern-
- * matches well-known node/undici/Bun error messages; falls back to
- * "unknown" for unrecognised shapes.
+ * Lowercased fragments that identify a category, matched against BOTH the
+ * error message and the error's `code` property.
+ *
+ * Every runtime spells these differently, so every runtime we actually run on
+ * must be listed. This bridge runs on **Bun**, whose fetch reports a refused
+ * connection as:
+ *
+ *     "Unable to connect. Is the computer able to access the url?"   (message)
+ *     code: "ConnectionRefused"
+ *
+ * — which contains NEITHER "ECONNREFUSED" nor "connection refused". Listing
+ * only the node/undici spellings meant the single most common real failure
+ * (the agent's /v1/turn is down) fell through to "unknown", so the operator
+ * got that raw internal string echoed back with the wrong retry advice
+ * instead of "connection refused — retry in ~30s" (incident 2026-07-13).
+ *
+ * Order matters: the first category with a matching fragment wins.
+ */
+const CATEGORY_FRAGMENTS: ReadonlyArray<
+  readonly [WakeFailCategory, readonly string[]]
+> = [
+  [
+    "connection_refused",
+    [
+      "econnrefused", // node / undici message + code
+      "connection refused", // generic / libc phrasing
+      "connectionrefused", // Bun err.code
+      "unable to connect", // Bun fetch message
+    ],
+  ],
+  [
+    "timeout",
+    [
+      "timeout",
+      "timed out",
+      "aborterror",
+      "etimedout",
+    ],
+  ],
+];
+
+/**
+ * Map a thrown Error from the fetch path to a WakeFailCategory.
+ *
+ * Matches the error's `code` as well as its message: `code` is the stable
+ * machine-readable signal (Bun sets "ConnectionRefused", node "ECONNREFUSED"),
+ * while message wording drifts between runtime versions.
+ *
+ * Falls back to "unknown" only for genuinely unrecognised shapes. A failure
+ * landing in "unknown" is a signal the table above is missing this runtime's
+ * spelling — wakeTurn logs the raw error, so add the fragment here rather than
+ * letting the operator see an uncategorised string.
  */
 export function categoriseError(err: unknown): WakeFailCategory {
-  const msg = err instanceof Error ? err.message : String(err);
-  const m = msg.toLowerCase();
-  if (m.includes("econnrefused") || m.includes("connection refused")) {
-    return "connection_refused";
-  }
-  if (
-    m.includes("timeout") ||
-    m.includes("timed out") ||
-    m.includes("aborterror") ||
-    m.includes("etimedout")
-  ) {
-    return "timeout";
+  const message = err instanceof Error ? err.message : String(err);
+  const rawCode = (err as { code?: unknown } | null | undefined)?.code;
+  const code = typeof rawCode === "string" ? rawCode : "";
+  const haystack = `${message} ${code}`.toLowerCase();
+
+  for (const [category, fragments] of CATEGORY_FRAGMENTS) {
+    if (fragments.some((fragment) => haystack.includes(fragment))) {
+      return category;
+    }
   }
   return "unknown";
 }

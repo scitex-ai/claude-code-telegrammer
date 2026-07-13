@@ -149,6 +149,29 @@ describe("WakeFailCategory classification", () => {
     );
   });
 
+  // Regression (incident 2026-07-13): the bridge runs on Bun, whose fetch
+  // reports a refused connection with NEITHER "ECONNREFUSED" nor "connection
+  // refused". The categoriser only knew the node/undici spellings, so the
+  // single most common real failure — the agent's /v1/turn is down — fell
+  // through to "unknown" and the operator got this raw string echoed back
+  // instead of "connection refused — retry in ~30s".
+  //
+  // The literal below is copied verbatim from the loud-fail Telegram message
+  // the operator received, so this test pins the real wire text, not a guess.
+  test("categoriseError: Bun's connect failure → connection_refused", () => {
+    expect(
+      categoriseError(
+        new Error("Unable to connect. Is the computer able to access the url?"),
+      ),
+    ).toBe("connection_refused");
+  });
+
+  test("categoriseError: Bun's ConnectionRefused code → connection_refused", () => {
+    const err = new Error("Unable to connect.") as Error & { code?: string };
+    err.code = "ConnectionRefused";
+    expect(categoriseError(err)).toBe("connection_refused");
+  });
+
   test("categoriseError: timeout / abort variants → timeout", () => {
     expect(categoriseError(new Error("network timeout"))).toBe("timeout");
     expect(categoriseError(new Error("ETIMEDOUT"))).toBe("timeout");
