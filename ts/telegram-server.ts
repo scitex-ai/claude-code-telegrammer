@@ -339,10 +339,20 @@ if (TELEGRAM_ENABLED) {
 // persists the message has no mcp/Server object at all. This process still
 // holds the live `mcp` object throughout the session, so it polls the
 // shared store for pending rows (lib/handle-update.ts::savePendingNotification)
-// and delivers them itself. Only started for !wakeEnabled(): wake-enabled
-// (SDK-runner/fleet) agents deliver via the already mcp-independent
-// /v1/turn POST and never populate pending rows, so this would be a
-// pointless poll for them. See lib/notify-relay.ts.
-if (TELEGRAM_ENABLED && !wakeEnabled()) {
+// and delivers them itself. See lib/notify-relay.ts.
+//
+// Started for WAKE-ENABLED deployments too (incident-cct-operator-messages-
+// not-arriving-20260714). The wake path POSTs to sac's a2a sidecar, so when
+// that sidecar is down the operator's ONLY channel to the fleet went silent
+// and the message was dropped outright — he had to notice and resend by hand.
+// handle-update.ts now persists a pending row when the wake FAILS, making this
+// relay the fallback delivery path: it reaches an attached session without
+// going through sac at all, and a row that cannot be delivered yet simply
+// stays pending until this process is back, which is redelivery for free.
+//
+// This does NOT reintroduce the 2026-06-18 "sent twice" double-delivery: rows
+// are only ever written when the wake FAILED, so a healthy wake-enabled agent
+// still has exactly one delivery path and the relay finds nothing to do.
+if (TELEGRAM_ENABLED) {
   startNotifyRelay({ mcp });
 }

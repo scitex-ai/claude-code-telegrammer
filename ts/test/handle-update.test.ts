@@ -36,6 +36,8 @@ import { _resetCache } from "../lib/access.js";
 import { ACCESS_FILE, STATE_DIR } from "../lib/config.js";
 import { setTurnPoster, wakeEnabled, type WakeMeta } from "../lib/wake.js";
 import { handleReaction, handleUpdate } from "../lib/handle-update.js";
+import { relayPendingNotificationsOnce } from "../lib/notify-relay.js";
+import { setLoudFailSender, _resetLoudFail } from "../lib/loudfail.js";
 
 const USER_ID = "8675309";
 const CHAT_ID = "8675309";
@@ -153,5 +155,87 @@ describe("handleUpdate: regular text message still reaches wakeTurn (mcp removed
     // takes (or needs) an mcp/Server argument at all.
     expect(calls.length).toBe(1);
     expect(calls[0].body.text).toContain("hello from the split poller");
+  });
+});
+
+/**
+ * incident-cct-operator-messages-not-arriving-20260714.
+ *
+ * The wake POST targets sac's a2a sidecar. A failed wake used to end at
+ * "mark ❌ + loud-fail reply", with the message itself DROPPED — the
+ * getUpdates offset had already advanced, so nothing redelivered it and the
+ * operator had to notice the failure and resend by hand. That made sac's
+ * sidecar a single point of failure on his ONLY channel to the fleet.
+ *
+ * A failed wake now also persists the payload for the MCP-server-side notify
+ * relay, which reaches an attached session WITHOUT going through sac.
+ */
+describe("handleUpdate: a failed wake falls back to the notify relay", () => {
+  /** Let the fire-and-forget `void wakeTurn(...).then(...)` chain settle. */
+  const settleWake = () => new Promise((r) => setTimeout(r, 10));
+
+  function textUpdate(updateId: number, messageId: number, text: string) {
+    return {
+      update_id: updateId,
+      message: {
+        message_id: messageId,
+        from: { id: Number(USER_ID), is_bot: false, username: "alice" },
+        chat: { id: Number(CHAT_ID), type: "private" },
+        date: 1717000200,
+        text,
+      },
+    };
+  }
+
+  function collectRelayed() {
+    const delivered: unknown[] = [];
+    const mcp = {
+      notification: async (n: unknown) => {
+        delivered.push(n);
+      },
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return { delivered, mcp: mcp as any };
+  }
+
+  test("wake FAILURE queues the message for relay instead of dropping it", async () => {
+    const loudFails: string[] = [];
+    setLoudFailSender(async (_chatId, text) => {
+      loudFails.push(text); // stubbed: a test must never post to real Telegram
+    });
+    captureTurnCalls(503); // sac's sidecar is down
+
+    const text = "sent while the sidecar was down";
+    expect(await handleUpdate(textUpdate(3, 101, text))).toBe("ok");
+    await settleWake();
+
+    const { delivered, mcp } = collectRelayed();
+    const relayed = await relayPendingNotificationsOnce({ mcp });
+
+    // The message survived the sidecar being down.
+    expect(relayed).toBe(1);
+    expect(JSON.stringify(delivered)).toContain(text);
+
+    // ...and the failure is still LOUD. A fallback that hid the outage would
+    // just be a silent fallback wearing a nicer hat.
+    expect(loudFails.length).toBe(1);
+
+    _resetLoudFail();
+  });
+
+  test("wake SUCCESS queues nothing (no 'sent twice' regression)", async () => {
+    captureTurnCalls(200); // healthy sidecar
+
+    const text = "sent while the sidecar was healthy";
+    expect(await handleUpdate(textUpdate(4, 102, text))).toBe("ok");
+    await settleWake();
+
+    const { delivered, mcp } = collectRelayed();
+    await relayPendingNotificationsOnce({ mcp });
+
+    // A healthy wake-enabled agent still has exactly ONE delivery path. If
+    // this ever fails, the operator is getting every message twice again
+    // (his 2026-06-18 report), which is why the relay must stay failure-only.
+    expect(JSON.stringify(delivered)).not.toContain(text);
   });
 });

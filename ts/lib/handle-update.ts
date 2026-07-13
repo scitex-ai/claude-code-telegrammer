@@ -413,6 +413,32 @@ export async function handleUpdate(update: any): Promise<UpdateStatus> {
         recordWakeFailure(result.category, result.reason);
         void markFailed(chatId, String(msg.message_id));
         void sendLoudFailReply(chatId, Number(msg.message_id), result);
+
+        // FALLBACK (incident-cct-operator-messages-not-arriving-20260714).
+        //
+        // The wake POST goes to sac's a2a sidecar. Until now a failed wake
+        // ended right here: the message was marked ❌, the operator got a
+        // loud-fail, and the message itself was DROPPED — the getUpdates
+        // offset had already advanced, so nothing would ever redeliver it and
+        // he had to notice and resend by hand. sac's sidecar is therefore a
+        // single point of failure on the operator's ONLY channel to the fleet.
+        //
+        // Persisting the payload here hands it to the notify relay in the MCP
+        // server process (lib/notify-relay.ts), which reaches an attached
+        // session over the MCP stdio transport WITHOUT going through sac. The
+        // two paths fail independently, which is the whole point. If the MCP
+        // server is also down the row simply stays pending and the relay
+        // drains it on its next tick, so the message survives rather than
+        // evaporating.
+        //
+        // Only on FAILURE — never on the ok path. A successful wake must not
+        // also queue a notification or the operator gets the message twice
+        // (the "sent twice" he reported 2026-06-18, which is exactly why the
+        // notification above is gated on !wakeEnabled()).
+        savePendingNotification(rowId, {
+          content: neutralizeChannelEnvelope(deliveredText),
+          meta,
+        });
       }
     });
   }
