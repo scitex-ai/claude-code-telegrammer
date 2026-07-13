@@ -28,6 +28,7 @@ import {
   claimAuthoritative,
   isAuthoritative,
   isPidAlive,
+  isProcessMatching,
   pollerPidfilePath,
   readPidfile,
   releaseAuthoritative,
@@ -357,5 +358,60 @@ describe("takeover: isPidAlive", () => {
     // Linux's pid_max default is 2^22, but on most systems much lower.
     // 2^30 is comfortably beyond any allocated PID.
     expect(isPidAlive(2 ** 30)).toBe(false);
+  });
+});
+
+describe("takeover: isProcessMatching (adversarial-review finding #2)", () => {
+  test("false for a definitely-dead PID regardless of the substring", () => {
+    expect(isProcessMatching(2 ** 30, "anything")).toBe(false);
+  });
+
+  test("false for our OWN (definitely alive) pid against a substring it does not have", () => {
+    // This bun:test process's cmdline legitimately does not contain
+    // "telegram-poller" — the exact case a reused PID would hit, and the
+    // exact case that must NOT be trusted as "already running".
+    expect(
+      isProcessMatching(process.pid, "telegram-poller-definitely-not-this"),
+    ).toBe(false);
+  });
+
+  test("true for our OWN (alive) pid against a substring its real cmdline DOES contain", () => {
+    // Every invocation of this test runs via `bun test ...` (or `bun run
+    // .../bunfig` under the hood) — "bun" is reliably present in argv[0].
+    expect(isProcessMatching(process.pid, "bun")).toBe(true);
+  });
+
+  test("a real spawned child process is correctly matched via its actual script path", async () => {
+    // End-to-end: spawn a REAL, short-lived, non-detached child whose
+    // command line contains a distinctive marker, and confirm
+    // isProcessMatching recognizes it WHILE it's alive.
+    const child = Bun.spawn(
+      [process.execPath, "-e", "setTimeout(() => {}, 2000)"],
+      { stdout: "ignore", stderr: "ignore" },
+    );
+    try {
+      // Bun's own argv0 for a `-e` script is the bun binary path itself —
+      // match on that rather than the inline script text, which does not
+      // appear verbatim in /proc/<pid>/cmdline the same way a file path
+      // spawn's script argument would.
+      //
+      // Poll briefly rather than asserting immediately: Bun.spawn() returns
+      // as soon as fork() completes, but there is a short window before the
+      // child's execve() replaces its process image — /proc/<pid>/cmdline
+      // can be transiently inconsistent during that window (observed
+      // empirically as an occasional flake asserting immediately).
+      let matched = false;
+      for (let i = 0; i < 20 && !matched; i++) {
+        matched = isProcessMatching(child.pid, "bun");
+        if (!matched) await new Promise((r) => setTimeout(r, 10));
+      }
+      expect(matched).toBe(true);
+      expect(isProcessMatching(child.pid, "definitely-not-a-match-xyz")).toBe(
+        false,
+      );
+    } finally {
+      child.kill();
+      await child.exited;
+    }
   });
 });

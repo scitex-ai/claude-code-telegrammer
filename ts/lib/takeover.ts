@@ -112,6 +112,65 @@ export function isPidAlive(pid: number): boolean {
 }
 
 /**
+ * Distinctive cmdline substrings for identity verification beyond plain
+ * PID existence (see isProcessMatching). Chosen to match what scitex-
+ * agent-container's own orphan reaper
+ * (_lifecycle/_orphan_mcp_cleanup.py::kill_orphan_mcp_children) already
+ * looks for in a process's cmdline — one shared source of truth for
+ * "is this really ours", not two different heuristics maintained
+ * separately.
+ */
+export const POLLER_CMDLINE_MARKER = "telegram-poller";
+export const SERVER_CMDLINE_MARKER = "telegram-server";
+
+// Cached once at module load: does this host even have /proc? Avoids a
+// syscall per check on platforms where /proc never exists (e.g. macOS).
+const HAS_PROC = existsSync("/proc");
+
+/**
+ * Identity-aware liveness check beyond isPidAlive's plain existence test
+ * (adversarial-review finding: a stale pidfile's PID can be REUSED by the
+ * OS for an unrelated process after the original poller exited —
+ * plausible on a long-lived, busy, multi-agent host where PIDs wrap. A
+ * bare kill(pid,0) can't tell that apart from the real thing, which would
+ * make a consumer conclude "already running/alive" and never notice the
+ * real process is gone — silently, until something else forces a
+ * restart. Both lib/poller-supervisor.ts::ensurePollerRunning and
+ * lib/health-adapters.ts::probePoller read this SAME function so there is
+ * one shared verification, not two different heuristics.
+ *
+ * Reads /proc/<pid>/cmdline (Linux) and requires it to contain
+ * `cmdlineSubstring`. Biased toward FALSE NEGATIVES over false positives,
+ * on purpose: wrongly concluding "not ours" merely triggers an extra
+ * poller spawn (self-heals via the newest-wins takeover protocol below);
+ * wrongly concluding "alive and ours" is the silent, unrecoverable-until-
+ * restart failure this exists to prevent. An unreadable/mismatched
+ * cmdline on a /proc-having host therefore returns false, not "assume
+ * it's fine".
+ *
+ * On a platform with no /proc at all (checked once at module load), falls
+ * back to the plain existence check — preserves prior behaviour there
+ * rather than making every non-Linux host permanently distrust its own
+ * processes.
+ */
+export function isProcessMatching(
+  pid: number,
+  cmdlineSubstring: string,
+): boolean {
+  if (!isPidAlive(pid)) return false;
+  if (!HAS_PROC) return true;
+  try {
+    const cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(
+      /\0/g,
+      " ",
+    );
+    return cmdline.includes(cmdlineSubstring);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Atomically (best-effort) claim authoritativeness for `tokenHash` from
  * inside `stateDir`. Returns a snapshot of the OUTGOING claim (the
  * record that was in the pidfile before we wrote ours), or null if the

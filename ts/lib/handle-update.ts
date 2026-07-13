@@ -9,7 +9,6 @@
  * (saveInbound threw → must NOT advance, so Telegram redelivers it).
  */
 
-import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { tgApi } from "./telegram-api.js";
 import { isAllowed } from "./access.js";
 import { log } from "./log.js";
@@ -37,6 +36,7 @@ import {
 import { sendLoudFailReply } from "./loudfail.js";
 import { recordWakeFailure, recordWakeSuccess } from "./wake-health.js";
 import { neutralizeChannelEnvelope } from "./sanitize.js";
+import { savePendingNotification } from "./notify-relay.js";
 
 /**
  * Outcome of handling ONE inbound update, consumed by the poller batch
@@ -57,7 +57,7 @@ import { neutralizeChannelEnvelope } from "./sanitize.js";
  */
 export type UpdateStatus = "ok" | "duplicate" | "persistError";
 
-export async function handleReaction(mcp: Server, update: any): Promise<void> {
+export async function handleReaction(update: any): Promise<void> {
   const reaction = update.message_reaction;
   if (!reaction?.user || !reaction?.new_reaction) return;
 
@@ -93,26 +93,45 @@ export async function handleReaction(mcp: Server, update: any): Promise<void> {
 
   const text = `(reaction: ${emojis} on message ${reaction.message_id})`;
   log("poller", `delivering reaction from ${userId} in ${chatId}`, { emojis });
-  mcp
-    .notification({
-      method: "notifications/claude/channel",
-      params: { content: text, meta },
-    })
-    .catch((err) => {
-      log("poller", "failed to deliver reaction to Claude", {
-        error: String(err),
-      });
-    });
+
+  // Post-split (incident incident-cct-inbound-dies-silently-with-mcp-
+  // server-20260711): this runs in the standalone poller process (ts/
+  // telegram-poller.ts), which has no mcp/Server object — the
+  // `mcp.notification(...)` push this used to do is categorically
+  // impossible from a separate OS process (it required being co-located
+  // with the live MCP stdio transport). Mirror how a regular inbound
+  // message reaches an idle/SDK-runner agent: the /v1/turn wake POST
+  // (mcp-independent, plain HTTP — see lib/wake.ts). Reactions were
+  // already a best-effort, non-persisted, fire-and-forget signal (no
+  // saveInbound row, no receipts) — reusing wakeTurn preserves that exact
+  // risk profile, it just swaps the transport.
+  //
+  // Deliberately NOT routed through lib/loudfail.ts's operator-facing
+  // broadcastSystemAlert: a reaction is agent-directed context
+  // (informational, "the user reacted"), not an operator alarm — echoing
+  // "(reaction: 👍 on message 123)" back to the operator as a brand-new
+  // Telegram message would be confusing self-referential noise, not a fix.
+  if (wakeEnabled()) {
+    void wakeTurn(text, meta);
+  } else {
+    // Interactive-CLI (no TURN_URL): there is no live-push path left once
+    // the poller is a separate process from the MCP stdio transport, and
+    // reactions have no durable store to fall back on either (never
+    // persisted). Known, accepted consequence of decoupling the poller
+    // from the MCP server — logged (never silent), never guessed at
+    // further. See docs/architecture.md.
+    log(
+      "poller",
+      "reaction not delivered — wake disabled and no mcp connection available from the standalone poller (interactive-CLI mode)",
+    );
+  }
 }
 
-export async function handleUpdate(
-  mcp: Server,
-  update: any,
-): Promise<UpdateStatus> {
+export async function handleUpdate(update: any): Promise<UpdateStatus> {
   // Reactions have no saveInbound persistence — always "ok", always
   // advance (PR-B requirement 4).
   if (update.message_reaction) {
-    await handleReaction(mcp, update);
+    await handleReaction(update);
     return "ok";
   }
 
@@ -328,23 +347,25 @@ export async function handleUpdate(
   // Interactive CLI (no TURN_URL) keeps the notification — its live event
   // loop surfaces it, and there is no wake to duplicate.
   if (!wakeEnabled()) {
-    // Neutralize any <channel>-envelope markup in the body so a message that
-    // itself contains `<channel ...>` / `</channel>` cannot open or close the
-    // envelope the Claude Code CLI wraps this content in (mis-parse / fake
-    // notification / injection). Only the wake path frames its own envelope
-    // (lib/wake.ts already neutralizes there); here the CLI frames it, so we
-    // neutralize the content we hand it. The stored DB text (saved above via
-    // saveInbound) and `meta` are left untouched — history stays faithful.
-    mcp
-      .notification({
-        method: "notifications/claude/channel",
-        params: { content: neutralizeChannelEnvelope(deliveredText), meta },
-      })
-      .catch((err) => {
-        log("poller", "failed to deliver inbound to Claude", {
-          error: String(err),
-        });
-      });
+    // Post-split (incident incident-cct-inbound-dies-silently-with-mcp-
+    // server-20260711): this handler now runs in the standalone poller
+    // process (ts/telegram-poller.ts), which has no mcp/Server object — a
+    // DIRECT `mcp.notification(...)` call requires being co-located with
+    // the live MCP stdio transport, impossible from a separate OS process.
+    // Adversarial-review finding #3: rather than leaving this a documented
+    // gap, the payload is persisted on the message's own row
+    // (messages.pending_notification) and relayed by the MCP-server
+    // process itself — see lib/notify-relay.ts for the full cross-process
+    // design (mirrors lib/wake-health.ts's own pattern). The MCP server
+    // polls for pending rows (default every 1s) and calls
+    // mcp.notification() when it finds one, so the interactive-CLI session
+    // still sees inbound messages live — with a short relay delay instead
+    // of an immediate push, the necessary cost of crossing a process
+    // boundary via disk instead of a function call.
+    savePendingNotification(rowId, {
+      content: neutralizeChannelEnvelope(deliveredText),
+      meta,
+    });
   }
 
   // Wake-on-push — when CLAUDE_CODE_TELEGRAMMER_TURN_URL is set

@@ -48,6 +48,7 @@ import { sendMessage } from "./telegram-api.js";
 import { AGENT_ID, isLoudFailEnabled } from "./config.js";
 import { log } from "./log.js";
 import { formatResetTime, readQuotaReset } from "./usage.js";
+import { loadAccess } from "./access.js";
 import type { WakeFailCategory, WakeResult } from "./wake.js";
 
 /**
@@ -222,4 +223,90 @@ export async function sendLoudFailReply(
       error: String(err),
     });
   }
+}
+
+// ── System-level alarms (no anchoring inbound message) ──────────────────────
+//
+// Architecture fix (incident-cct-inbound-dies-silently-with-mcp-server-
+// 20260711 follow-up, 2026-07): the getUpdates poller now runs in its own
+// standalone process (ts/telegram-poller.ts), decoupled from the MCP server.
+// Three system-level alarms (batch persist-failure in poller-batch.ts, the
+// 409-conflict-exhausted alarm in poller.ts, and the ingestion-stall alarm in
+// poll-watchdog.ts) used to push an `mcp.notification(...)` — impossible now
+// that the poller has no mcp/Server object at all (that requires being
+// co-located with the live MCP stdio transport). Unlike sendLoudFailReply
+// above, these alarms have no anchoring (chat_id, message_id) of their own —
+// they are systemic (a persistence failure, a 409 storm, a wedged long-poll),
+// not tied to one inbound update — so there is nothing to "reply" to.
+//
+// broadcastSystemAlert sends the alarm text directly to Telegram (bypassing
+// mcp entirely, same "must work when the mcp/agent side is unreachable"
+// contract as sendLoudFailReply) to every chat_id in the CURRENT allowlist
+// (access.ts loadAccess().allowFrom) — the exact set of Telegram identities
+// already trusted to DM this bot, which in the overwhelmingly common single-
+// operator deployment IS the operator. This also fixes a latent gap for
+// wake-enabled (SDK-runner/fleet) agents: the old mcp.notification path never
+// advanced an IDLE session (see handle-update.ts), so these alarms were
+// already invisible to a parked fleet agent even BEFORE this split — routing
+// them straight to Telegram makes them reach the operator regardless of
+// whether the agent's own process is idle, busy, or its MCP server is dead.
+
+type SystemAlertSender = (chatId: string, text: string) => Promise<unknown>;
+
+let systemAlertSender: SystemAlertSender = (chatId, text) =>
+  sendMessage(chatId, text);
+
+/** Test-only: override the system-alert sender. Returns the previous sender. */
+export function setSystemAlertSender(
+  sender: SystemAlertSender,
+): SystemAlertSender {
+  const prev = systemAlertSender;
+  systemAlertSender = sender;
+  return prev;
+}
+
+/** Test-only: restore the default (real sendMessage-backed) sender. */
+export function _resetSystemAlertSender(): void {
+  systemAlertSender = (chatId, text) => sendMessage(chatId, text);
+}
+
+/**
+ * Broadcast a system-level alarm to every allowlisted chat_id. Best-effort
+ * per recipient — one recipient's send failure is logged and does not block
+ * delivery to the others. NEVER throws or rejects (every branch is caught),
+ * so callers may fire-and-forget with a bare `void broadcastSystemAlert(...)`
+ * exactly like sendLoudFailReply's callers do. Respects the same
+ * CLAUDE_CODE_TELEGRAMMER_LOUD_FAIL kill-switch sendLoudFailReply honours —
+ * an operator who muted loud-fail replies has also opted out of these.
+ * No-op (logged) when the allowlist is empty — there is nobody to tell.
+ */
+export async function broadcastSystemAlert(
+  text: string,
+  recipients: string[] = loadAccess().allowFrom,
+): Promise<void> {
+  if (!isLoudFailEnabled()) return;
+
+  if (recipients.length === 0) {
+    log(
+      "loudfail",
+      "system alert has no recipients (empty allowlist) — dropped",
+      { text: text.slice(0, 200) },
+    );
+    return;
+  }
+
+  await Promise.all(
+    recipients.map(async (chatId) => {
+      try {
+        await systemAlertSender(chatId, text);
+        log("loudfail", "broadcast system alert", { chat_id: chatId });
+      } catch (err) {
+        log("loudfail", "WARNING: failed to broadcast system alert", {
+          level: "warning",
+          chat_id: chatId,
+          error: String(err),
+        });
+      }
+    }),
+  );
 }

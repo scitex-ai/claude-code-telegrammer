@@ -48,7 +48,13 @@ import { LEGACY_PREFIX } from "./env.js";
 import { validateBotToken } from "./startup-validate.js";
 import { getMeRaw } from "./telegram-api.js";
 import { loadAccess } from "./access.js";
-import { pollerPidfilePath, readPidfile, isPidAlive } from "./takeover.js";
+import {
+  pollerPidfilePath,
+  readPidfile,
+  isProcessMatching,
+  POLLER_CMDLINE_MARKER,
+  SERVER_CMDLINE_MARKER,
+} from "./takeover.js";
 import { DB_PATH } from "./store.js";
 import { wakeEnabled } from "./wake.js";
 import { getWakeFailureState } from "./wake-health.js";
@@ -116,8 +122,12 @@ export async function probeWebhook(): Promise<WebhookProbe> {
  * Poller-liveness inputs. "self" short-circuits to our own pid (the MCP-tool
  * variant runs inside the server process, which IS the poller). "external"
  * reads the single-instance lock file + the per-token pidfile
- * (poller-<hash>.pid, lib/takeover.ts format) and kill-0s the recorded PIDs —
- * kill-0, not `ps -p`, because it survives PID-namespace boundaries.
+ * (poller-<hash>.pid, lib/takeover.ts format) and verifies the recorded PIDs
+ * via isProcessMatching (kill-0 PLUS a cmdline identity check — not `ps -p`,
+ * because it survives PID-namespace boundaries; not a bare kill-0 either,
+ * because a stale PID can be reused by the OS for an unrelated process,
+ * which would otherwise read as a healthy poller — adversarial-review
+ * finding #2).
  */
 export function probePoller(mode: "self" | "external"): PollerProbe {
   if (mode === "self") return { kind: "self", pid: process.pid };
@@ -137,9 +147,12 @@ export function probePoller(mode: "self" | "external"): PollerProbe {
   return {
     kind: "external",
     lockPid,
-    lockAlive: lockPid !== null && isPidAlive(lockPid),
+    lockAlive:
+      lockPid !== null && isProcessMatching(lockPid, SERVER_CMDLINE_MARKER),
     pidfilePid,
-    pidfileAlive: pidfilePid !== null && isPidAlive(pidfilePid),
+    pidfileAlive:
+      pidfilePid !== null &&
+      isProcessMatching(pidfilePid, POLLER_CMDLINE_MARKER),
     pidfilePath,
   };
 }
@@ -199,6 +212,11 @@ export function probeDb(dbPath: string = DB_PATH): DbProbe {
   let db: Database;
   try {
     db = new Database(dbPath, { readonly: true });
+    // busy_timeout is per-CONNECTION, not inherited from the file's WAL-
+    // mode schema (adversarial-review finding #6) — this ad hoc handle had
+    // none, meaning zero tolerance for lock contention against the live
+    // poller's own writes.
+    db.exec("PRAGMA busy_timeout = 5000;");
   } catch (err) {
     return {
       exists: true,
