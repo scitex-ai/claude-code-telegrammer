@@ -163,9 +163,41 @@ jobs:
       - name: Verify the release actually landed on PyPI
         run: |
           set -euo pipefail
-          VERSION="${{ needs.build.outputs.version }}"
-          VERSION="${VERSION#v}"
+          RAW="${{ needs.build.outputs.version }}"
+
+          # AN EMPTY VERSION IS A BROKEN WORKFLOW, NOT A GHOST RELEASE.
+          #
+          # Caught by sac, who found the same hole in their own copy of this
+          # guard before shipping it. The build job resolves the version from
+          # GITHUB_REF on a tag push, but from `inputs.version` on a manual
+          # workflow_dispatch — and a dispatch with the field left blank yields
+          # "". That would build the URL
+          #
+          #     https://pypi.org/pypi/claude-code-telegrammer//json
+          #
+          # which 404s, so the guard below would have shouted GHOST RELEASE and
+          # FAILED A PERFECTLY GOOD RELEASE. A false RED whose remedy is "do not
+          # ship" is worse than the ghost it exists to catch.
+          #
+          # This is the same bug I spent 2026-07-14 fixing in the poller: one red
+          # collapsing two states that need different answers ("the artifact is
+          # missing" vs "you never told me what to look for"). Say which.
+          if [ -z "$RAW" ]; then
+            echo "::error::BROKEN WORKFLOW — the version input is EMPTY, so there is nothing to verify."
+            echo "This is NOT a ghost release. The build job resolved no version:"
+            echo "  - tag push        -> version comes from GITHUB_REF"
+            echo "  - workflow_dispatch -> version comes from inputs.version (was it left blank?)"
+            exit 1
+          fi
+
+          # Production passes the TAG (e.g. v0.5.7), not a bare version — the
+          # build job sets version="${GITHUB_REF#refs/tags/}". Strip the leading
+          # v so the PyPI API sees 0.5.7. Proven against BOTH forms, because a
+          # guard proven only against an input production never sends is not
+          # proven at all.
+          VERSION="${RAW#v}"
           URL="https://pypi.org/pypi/claude-code-telegrammer/${VERSION}/json"
+          echo "verifying: raw='${RAW}' -> version='${VERSION}'"
 
           for attempt in 1 2 3 4 5 6; do
             CODE=$(curl -sS -o /tmp/pypi.json -w '%{http_code}' "$URL" || echo 000)
