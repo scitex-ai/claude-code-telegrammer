@@ -41,7 +41,7 @@
  * "probably inherited" was not good enough here.
  */
 
-import { readdirSync, statSync } from "fs";
+import { readdirSync, statSync, openSync } from "fs";
 import { dirname, join } from "path";
 import {
   pollerPidfilePath,
@@ -78,6 +78,17 @@ export interface SpawnedProcessHandle {
  */
 const SPAWN_GRACE_MS = 3000;
 
+/**
+ * How many times this MCP-server process will respawn a poller that died with
+ * nobody taking over, before giving up LOUDLY.
+ *
+ * Bounded on purpose: a poller that crashes on every start (bad token, corrupt
+ * DB, unwritable state dir) must not become a fork bomb. Five attempts absorbs
+ * a transient crash; a genuinely broken poller stops and pages instead of
+ * spinning in silence.
+ */
+const MAX_RESPAWNS = 5;
+
 export interface EnsurePollerDeps {
   /** Absolute path to the standalone poller entrypoint script
    * (ts/telegram-poller.ts) to spawn when no live poller is found. */
@@ -106,9 +117,10 @@ export interface EnsurePollerDeps {
    * pidfile's PID can be reused by the OS for an unrelated process, which
    * a plain existence check can't tell apart from the real poller. */
   isAlive?: (pid: number) => boolean;
-  /** Injectable spawn primitive; defaults to a detached, stdio-ignored
-   * Bun.spawn of [process.execPath, "run", pollerScriptPath]. */
-  spawn?: (cmd: string[]) => SpawnedProcessHandle;
+  /** Injectable spawn primitive; defaults to a detached Bun.spawn of
+   * [process.execPath, "run", pollerScriptPath] with stderr appended to
+   * logPath (so a dead poller can still say why it died). */
+  spawn?: (cmd: string[], logPath?: string) => SpawnedProcessHandle;
   /** Injectable grace-window threshold (ms) for the post-spawn early-death
    * alert; defaults to SPAWN_GRACE_MS. Tests inject a tiny value instead
    * of waiting out the real 3s default. */
@@ -160,16 +172,42 @@ export function newestCodeMtimeMs(pollerScriptPath: string): number {
   return newest;
 }
 
-function defaultSpawn(cmd: string[]): SpawnedProcessHandle {
+/** Where the detached poller's stderr is persisted. */
+export function pollerLogPath(stateDir: string, tokenHash: string): string {
+  return join(stateDir, `poller-${tokenHash}.log`);
+}
+
+function defaultSpawn(
+  cmd: string[],
+  logPath?: string,
+): SpawnedProcessHandle {
   // detached:true (POSIX setsid) so the child survives this process exiting
-  // /restarting; stdio:"ignore" so it never blocks on an inherited pipe
-  // nobody is reading; env:process.env EXPLICITLY (not omitted — see the
-  // module header) so the spawned poller reliably carries
-  // SAC_NAME/SCITEX_AGENT_CONTAINER_NAME and every CCT_*/
-  // CLAUDE_CODE_TELEGRAMMER_* var this MCP-server process itself resolved
-  // from. See the module header for why Bun.spawn specifically.
+  // /restarting; env:process.env EXPLICITLY (not omitted — see the module
+  // header) so the spawned poller reliably carries SAC_NAME/
+  // SCITEX_AGENT_CONTAINER_NAME and every CCT_*/CLAUDE_CODE_TELEGRAMMER_* var
+  // this MCP-server process itself resolved from.
+  //
+  // STDERR IS NO LONGER DISCARDED (2026-07-14). It used to be "ignore", which
+  // meant the poller's only channel for explaining itself went to /dev/null —
+  // so when it died, the FATAL alert could only ever say "check the poller's
+  // logs" about logs that did not exist. We hit exactly that today: the poller
+  // vanished after 37 minutes and its cause of death was, by construction,
+  // unrecoverable. lib/log.ts writes every entry to stderr, so appending it to
+  // a file is the whole fix. stdin/stdout stay ignored: nothing reads them, and
+  // an inherited pipe nobody drains is its own hang risk.
+  let stderr: "ignore" | number = "ignore";
+  if (logPath) {
+    try {
+      stderr = openSync(logPath, "a");
+    } catch {
+      // An unwritable log path must NOT stop the poller from starting —
+      // degraded observability beats no inbound delivery at all.
+      stderr = "ignore";
+    }
+  }
+
   return Bun.spawn(cmd, {
-    stdio: ["ignore", "ignore", "ignore"],
+    stdio: ["ignore", "ignore", stderr],
     detached: true,
     env: process.env,
   });
@@ -274,7 +312,10 @@ export function ensurePollerRunning(
   // vanish until the next MCP-server restart with nobody the wiser.
   let child: SpawnedProcessHandle;
   try {
-    child = spawn([process.execPath, "run", deps.pollerScriptPath]);
+    child = spawn(
+      [process.execPath, "run", deps.pollerScriptPath],
+      pollerLogPath(deps.stateDir, deps.tokenHash),
+    );
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     const msg =
@@ -308,18 +349,82 @@ export function ensurePollerRunning(
   // quietly and do not page anyone. Best-effort throughout: logged +
   // alerted (or not), never thrown — this must not crash the caller.
   const spawnedAt = Date.now();
+  observePollerExit(child, spawnedAt, deps, {
+    readPid,
+    isAlive,
+    spawn,
+    graceMs,
+    logFn,
+  });
+
+  return { action: "spawned", pid: child.pid };
+}
+
+/** Resolved deps, threaded through the exit observer so it can respawn. */
+interface ResolvedDeps {
+  readPid: (
+    stateDir: string,
+    tokenHash: string,
+  ) => { pid: number; startMs?: number } | null;
+  isAlive: (pid: number) => boolean;
+  spawn: (cmd: string[]) => SpawnedProcessHandle;
+  graceMs: number;
+  logFn: typeof log;
+}
+
+/**
+ * Watch a spawned poller FOR ITS WHOLE LIFE, and heal it if it dies.
+ *
+ * THE BUG THIS REPLACES (found the hard way, 2026-07-14 — it fired live while
+ * the incident it belongs to was still open):
+ *
+ *     if (aliveMs >= graceMs) return; // ordinary lifecycle — nothing to check
+ *
+ * Any poller death more than 3 seconds after spawn was silently ignored. A
+ * poller that ran for 37 minutes and then died was "ordinary lifecycle". It was
+ * not: inbound Telegram delivery simply STOPPED, with
+ *
+ *   - no alarm      (this early-return),
+ *   - no log        (the poller is spawned stdio:"ignore", so its stderr — the
+ *                    only place it explains itself — goes to /dev/null),
+ *   - no watchdog   (poll-watchdog.ts runs INSIDE the poller, so it dies with
+ *                    the very process it exists to watch),
+ *   - no respawn    (ensurePollerRunning only runs at MCP-server startup).
+ *
+ * Four independent safety nets, all downstream of the process being alive. The
+ * operator saw silence and had no way to tell it from us having nothing to say —
+ * which is the ENTIRE incident this file was written for, recurring in a new
+ * shape after the first fix.
+ *
+ * The age gate bought nothing anyway: the thing that actually distinguishes a
+ * crash from a legitimate "newest wins" takeover is whether a DIFFERENT live
+ * poller now holds the pidfile, and that question is just as answerable at 37
+ * minutes as at 300ms. So ask it at any age, and treat every other exit as what
+ * it is — an outage.
+ */
+function observePollerExit(
+  child: SpawnedProcessHandle,
+  spawnedAt: number,
+  deps: EnsurePollerDeps,
+  r: ResolvedDeps,
+  respawnsSoFar = 0,
+): void {
   void child.exited
     .then((code) => {
       const aliveMs = Date.now() - spawnedAt;
-      if (aliveMs >= graceMs) return; // ordinary lifecycle — nothing to check
 
-      const current = readPid(deps.stateDir, deps.tokenHash);
-      if (current && current.pid !== child.pid && isAlive(current.pid)) {
-        logFn(
+      // A DIFFERENT live poller holds the pidfile ⇒ legitimate newest-wins
+      // takeover (claimAuthoritative()'s preemption, or a stale-code takeover
+      // that can preempt an incumbent hours old). Delivery is still running
+      // under another PID. Do not page anyone — a false alarm here is what
+      // teaches people to ignore the alarm that matters.
+      const current = r.readPid(deps.stateDir, deps.tokenHash);
+      if (current && current.pid !== child.pid && r.isAlive(current.pid)) {
+        r.logFn(
           "poller-supervisor",
-          "spawned poller exited early, but a DIFFERENT live poller now " +
-            "holds the pidfile — legitimate newest-wins takeover, not a " +
-            "crash; delivery is still running",
+          "poller exited but a DIFFERENT live poller now holds the pidfile — " +
+            "legitimate newest-wins takeover, not a crash; delivery is still " +
+            "running",
           {
             exitedPid: child.pid,
             currentPid: current.pid,
@@ -330,22 +435,60 @@ export function ensurePollerRunning(
         return;
       }
 
+      // Nobody took over ⇒ inbound Telegram delivery is DOWN, right now.
+      const lived = aliveMs < r.graceMs ? `only ${aliveMs}ms` : `${aliveMs}ms`;
+
+      if (respawnsSoFar >= MAX_RESPAWNS) {
+        const msg =
+          `FATAL: the standalone poller (pid ${child.pid}) exited with code ` +
+          `${code} after ${lived}, nothing took over the pidfile, and it has ` +
+          `already been respawned ${respawnsSoFar} times — GIVING UP. Inbound ` +
+          `Telegram delivery is NOT running and will not self-heal. Restart ` +
+          `the MCP server and check the poller log for the cause.`;
+        r.logFn("poller-supervisor", msg);
+        void broadcastSystemAlert(msg);
+        return;
+      }
+
       const msg =
-        `FATAL: standalone poller process (pid ${child.pid}) exited ` +
-        `with code ${code} only ${aliveMs}ms after spawning, and no ` +
-        `OTHER live poller has taken over the pidfile — inbound Telegram ` +
-        `delivery is likely NOT running. Check the poller's own ` +
-        `logs/stderr for the real cause.`;
-      logFn("poller-supervisor", msg);
+        `the standalone poller (pid ${child.pid}) exited with code ${code} ` +
+        `after ${lived} and nothing took over the pidfile — inbound Telegram ` +
+        `delivery is DOWN. Respawning (attempt ${respawnsSoFar + 1}/` +
+        `${MAX_RESPAWNS}).`;
+      r.logFn("poller-supervisor", msg);
       void broadcastSystemAlert(msg);
+
+      // Self-heal. Bounded: a poller that crashes on every start must not turn
+      // into a fork bomb, so give up loudly after MAX_RESPAWNS rather than
+      // retrying forever in silence.
+      let replacement: SpawnedProcessHandle;
+      try {
+        replacement = r.spawn(
+          [process.execPath, "run", deps.pollerScriptPath],
+          pollerLogPath(deps.stateDir, deps.tokenHash),
+        );
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        const failMsg =
+          `FATAL: failed to RESPAWN the poller after it died ` +
+          `(${deps.pollerScriptPath}): ${errMsg} — inbound Telegram delivery ` +
+          `is NOT running.`;
+        r.logFn("poller-supervisor", failMsg);
+        void broadcastSystemAlert(failMsg);
+        return;
+      }
+      replacement.unref();
+      r.logFn("poller-supervisor", "respawned the standalone poller", {
+        pid: replacement.pid,
+        attempt: respawnsSoFar + 1,
+      });
+      observePollerExit(replacement, Date.now(), deps, r, respawnsSoFar + 1);
     })
     .catch((err) => {
       // .exited itself rejecting is exotic but must not go unnoticed either.
-      logFn("poller-supervisor", "failed to observe spawned poller exit", {
+      r.logFn("poller-supervisor", "failed to observe spawned poller exit", {
         pid: child.pid,
         error: String(err),
       });
     });
-
-  return { action: "spawned", pid: child.pid };
 }

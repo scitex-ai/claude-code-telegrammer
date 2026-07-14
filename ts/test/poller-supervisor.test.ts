@@ -379,15 +379,29 @@ describe("ensurePollerRunning: post-spawn grace-window death check (adversarial-
 
     // The exit-observer is fire-and-forget (`void child.exited.then(...)`)
     // — give its microtask/short-timer chain a tick to run before asserting.
-    await new Promise((r) => setTimeout(r, 10));
+    await new Promise((r) => setTimeout(r, 60));
 
-    expect(alerts.length).toBe(1);
-    expect(alerts[0]).toContain("FATAL");
+    expect(alerts.length).toBeGreaterThan(0);
     expect(alerts[0]).toContain("pid 5050");
     expect(alerts[0]).toContain("exited with code 1");
+    expect(alerts[0]).toContain("DOWN");
   });
 
-  test("a child that exits well after the grace window does NOT alert", async () => {
+  // BEHAVIOUR CHANGE, and the whole point of the fix.
+  //
+  // This test used to assert `alerts.length === 0` — it PINNED THE BUG as a
+  // requirement: a poller that died any time after the grace window produced no
+  // alert, no log and no respawn, and inbound Telegram delivery just stopped.
+  //
+  // That is not a hypothetical. It fired live on 2026-07-14: the poller vanished
+  // 37 minutes in, and the operator's only channel to the fleet went silent with
+  // every safety net downstream of the process being alive. "Ordinary lifecycle"
+  // was never a safe reading of a dead poller.
+  //
+  // The age of the corpse is not the signal. Whether ANOTHER live poller took
+  // over the pidfile is — and that question is just as answerable at 37 minutes
+  // as at 300ms (see the takeover test below, which still expects silence).
+  test("a child that exits well AFTER the grace window now alerts too (it used to be silent — that was the bug)", async () => {
     const spawnedHandle = fakeSpawnHandle(
       6060,
       new Promise<number>((resolve) => setTimeout(() => resolve(0), 60)),
@@ -396,7 +410,7 @@ describe("ensurePollerRunning: post-spawn grace-window death check (adversarial-
       pollerScriptPath: "/fake/telegram-poller.ts",
       stateDir: "/fake/state",
       tokenHash: "dies-later",
-      readPid: () => null,
+      readPid: () => null, // nobody took over ⇒ delivery really is down
       isAlive: () => false,
       spawn: () => spawnedHandle,
       graceMs: 10, // the child "survives" past this before exiting
@@ -405,7 +419,8 @@ describe("ensurePollerRunning: post-spawn grace-window death check (adversarial-
 
     await new Promise((r) => setTimeout(r, 100));
 
-    expect(alerts.length).toBe(0);
+    expect(alerts.length).toBeGreaterThan(0);
+    expect(alerts[0]).toContain("DOWN");
   });
 
   test("a still-running child (exited never resolves) never alerts", async () => {
@@ -473,10 +488,10 @@ describe("ensurePollerRunning: post-spawn grace-window death check (adversarial-
     });
     expect(result).toEqual({ action: "spawned", pid: 8181 });
 
-    await new Promise((r) => setTimeout(r, 20));
+    await new Promise((r) => setTimeout(r, 60));
 
-    expect(alerts.length).toBe(1);
-    expect(alerts[0]).toContain("FATAL");
-    expect(alerts[0]).toContain("no OTHER live poller");
+    expect(alerts.length).toBeGreaterThan(0);
+    expect(alerts[0]).toContain("nothing took over the pidfile");
+    expect(alerts[0]).toContain("DOWN");
   });
 });
