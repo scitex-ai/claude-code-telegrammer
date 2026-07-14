@@ -243,6 +243,41 @@ export function isAuthoritative(opts: {
 }
 
 /**
+ * Why the pidfile does not name us — the distinction isAuthoritative() throws
+ * away, and the one that cost the operator his inbound channel repeatedly on
+ * 2026-07-14.
+ *
+ *   "ours"      — the pidfile records us. Keep polling.
+ *   "preempted" — it records a DIFFERENT pid. A newer poller genuinely won the
+ *                 race; stand down immediately so we never issue another
+ *                 getUpdates and start a 409 storm against the new incumbent.
+ *   "vacant"    — there is NO pidfile. Nobody preempted us. Nobody owns it.
+ *
+ * isAuthoritative() collapses "vacant" and "preempted" into a single `false`,
+ * and the poll loop then logged "preempted by newer poller" and killed itself.
+ * But a file that VANISHED is not a successor. Deleting a file must never kill
+ * a healthy process — and it did: the log shows a poller exiting "cleanly"
+ * while its replacement started up finding "no prior poller recorded", i.e.
+ * nobody had taken over at all. Inbound Telegram delivery just stopped.
+ */
+export type AuthorityState =
+  | { kind: "ours" }
+  | { kind: "vacant" }
+  | { kind: "preempted"; byPid: number };
+
+export function checkAuthority(opts: {
+  stateDir: string;
+  tokenHash: string;
+  pid?: number;
+}): AuthorityState {
+  const pid = opts.pid ?? process.pid;
+  const snap = readPidfile(pollerPidfilePath(opts.stateDir, opts.tokenHash));
+  if (!snap) return { kind: "vacant" };
+  if (snap.pid === pid) return { kind: "ours" };
+  return { kind: "preempted", byPid: snap.pid };
+}
+
+/**
  * Release our claim by unlinking the pidfile — but ONLY if we still own
  * it. If a newer poller has overwritten it, we must NOT delete their
  * record. Best-effort; failures are silent.
