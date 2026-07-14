@@ -22,7 +22,7 @@ import { validateBotToken } from "../lib/startup-validate.js";
 import { FAKE_TOKEN, healthyInputs, byName } from "./health-fixtures.js";
 
 describe("shared contract shape", () => {
-  test("healthy inputs → ok:true, all 12 checks present, passing hints null", () => {
+  test("healthy inputs → ok:true, all 13 checks present, passing hints null", () => {
     const report = buildHealthReport(healthyInputs());
     expect(report.package).toBe("claude-code-telegrammer");
     expect(report.ok).toBe(true);
@@ -39,6 +39,11 @@ describe("shared contract shape", () => {
       "env_legacy",
       "wake_target_reachable",
       "wake_delivery_backlog",
+      // #83: "am I running the code that is on disk?" — the default fixture
+      // supplies no codeCurrency probe, so this skips (ok, hint null) rather
+      // than failing the report. A doctor that crashes on a missing input is
+      // worse than one that skips a check.
+      "code_current",
     ]);
     for (const c of report.checks) {
       expect(c.ok).toBe(true);
@@ -49,7 +54,7 @@ describe("shared contract shape", () => {
     // default fixture (no TURN_URL) — still counted, still hint:null, still
     // "ok" in the summary (skipped is a legitimate healthy state here, same
     // as the tokenless-skip pattern elsewhere in this report).
-    expect(report.summary).toContain("12/12");
+    expect(report.summary).toContain("13/13");
   });
 
   test("every failing check carries a non-null hint (fail-loud, actionable)", () => {
