@@ -41,6 +41,8 @@
  * "probably inherited" was not good enough here.
  */
 
+import { readdirSync, statSync } from "fs";
+import { dirname, join } from "path";
 import {
   pollerPidfilePath,
   readPidfile,
@@ -83,8 +85,16 @@ export interface EnsurePollerDeps {
   stateDir: string;
   tokenHash: string;
   /** Injectable pidfile reader; defaults to the real lib/takeover.ts pidfile
-   * at (stateDir, tokenHash). */
-  readPid?: (stateDir: string, tokenHash: string) => { pid: number } | null;
+   * at (stateDir, tokenHash). `startMs` is the incumbent's claim time, used
+   * by the stale-code check below. */
+  readPid?: (
+    stateDir: string,
+    tokenHash: string,
+  ) => { pid: number; startMs?: number } | null;
+  /** Injectable "when was the poller's code last modified" probe; defaults to
+   * newestCodeMtimeMs(pollerScriptPath). Tests inject a fixed value rather
+   * than touching real files. */
+  codeMtimeMs?: () => number;
   /** Injectable liveness check; defaults to an IDENTITY-AWARE check
    * (lib/takeover.ts::isProcessMatching against THIS agent's own
    * pollerScriptPath, not the generic POLLER_CMDLINE_MARKER — round-2
@@ -114,8 +124,40 @@ export type EnsurePollerResult =
 function defaultReadPid(
   stateDir: string,
   tokenHash: string,
-): { pid: number } | null {
+): { pid: number; startMs: number } | null {
   return readPidfile(pollerPidfilePath(stateDir, tokenHash));
+}
+
+/**
+ * Newest mtime (ms) across the poller's own source: its entrypoint plus every
+ * ts/lib/*.ts it imports. Returns 0 if nothing can be stat'd.
+ *
+ * Used to answer one question: "could the running poller possibly have loaded
+ * the code that is on disk right now?" If a source file was modified AFTER the
+ * poller claimed the pidfile, then no — that process is running stale code.
+ */
+export function newestCodeMtimeMs(pollerScriptPath: string): number {
+  let newest = 0;
+  const consider = (path: string) => {
+    try {
+      const { mtimeMs } = statSync(path);
+      if (mtimeMs > newest) newest = mtimeMs;
+    } catch {
+      // Unreadable file — ignore it rather than let one bad stat decide that
+      // a healthy poller is stale. See the fail-safe note in the caller.
+    }
+  };
+
+  consider(pollerScriptPath);
+  const libDir = join(dirname(pollerScriptPath), "lib");
+  try {
+    for (const entry of readdirSync(libDir)) {
+      if (entry.endsWith(".ts")) consider(join(libDir, entry));
+    }
+  } catch {
+    // No lib dir (unexpected layout) — the entrypoint mtime alone still works.
+  }
+  return newest;
 }
 
 function defaultSpawn(cmd: string[]): SpawnedProcessHandle {
@@ -176,12 +218,53 @@ export function ensurePollerRunning(
 
   const snap = readPid(deps.stateDir, deps.tokenHash);
   if (snap && isAlive(snap.pid)) {
+    // STALE-CODE TAKEOVER (incident-cct-operator-messages-not-arriving-
+    // 20260714). Surviving an MCP-server restart is the whole point of the
+    // detached poller — but it means the poller ALSO survives a code update,
+    // so "restart the server to deploy" silently does nothing to it. Every
+    // agent on this host launches the SAME checkout
+    // (/home/ywatanabe/proj/claude-code-telegrammer), so a `git pull` would
+    // otherwise leave 49 pollers running pre-pull code indefinitely, with a
+    // freshly-updated MCP server sitting next to each one and no signal that
+    // the two disagree. That is exactly the drift that produced this incident
+    // (v0.5.6 was released, merged and NEVER running).
+    //
+    // If any poller source file was modified after the incumbent claimed the
+    // pidfile, it cannot have loaded that code. Fall through and spawn: the
+    // new poller's claimAuthoritative() wins the pidfile and the incumbent
+    // stands down on its next per-iteration isAuthoritative() check
+    // (lib/poller.ts), which is the takeover path this design already has.
+    //
+    // FAIL-SAFE, deliberately: only when we can positively establish
+    // staleness (both timestamps known, code strictly newer). A failed stat
+    // (0) or an unparseable startMs (0) leaves the incumbent ALONE — an
+    // unnecessary respawn of a healthy poller is worse than a late deploy.
+    // This cannot loop: ensurePollerRunning runs once per MCP-server start.
+    const codeMtimeMs = (
+      deps.codeMtimeMs ?? (() => newestCodeMtimeMs(deps.pollerScriptPath))
+    )();
+    const startMs = snap.startMs ?? 0;
+    const isStale = codeMtimeMs > 0 && startMs > 0 && codeMtimeMs > startMs;
+
+    if (!isStale) {
+      logFn(
+        "poller-supervisor",
+        "external poller already running — not spawning a new one",
+        { pid: snap.pid },
+      );
+      return { action: "already-running", pid: snap.pid };
+    }
+
     logFn(
       "poller-supervisor",
-      "external poller already running — not spawning a new one",
-      { pid: snap.pid },
+      "live poller is running STALE code (its source was modified after it " +
+        "started) — spawning a replacement to take over the pidfile",
+      {
+        stale_pid: String(snap.pid),
+        poller_started_at: new Date(startMs).toISOString(),
+        code_modified_at: new Date(codeMtimeMs).toISOString(),
+      },
     );
-    return { action: "already-running", pid: snap.pid };
   }
 
   // The spawn call itself can throw (missing binary, exhausted process
