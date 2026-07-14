@@ -54,6 +54,12 @@ _USAGE = (
     "                    {package, ok, checks[], summary}, WITHOUT starting the\n"
     "                    server. Exits 0 even when unhealthy — a false `ok` is a\n"
     "                    finding, not a crash. The raw token is never printed.\n"
+    "  send --chat-id <id> --text <msg> [--reply-to <message_id>]\n"
+    "                    send ONE outbound Telegram message and exit, WITHOUT\n"
+    "                    starting the server or the poller. The MCP-INDEPENDENT\n"
+    "                    outbound path: use it when the cct MCP tools are\n"
+    "                    unavailable and an agent would otherwise be unable to\n"
+    "                    reach the operator at all. Exits NON-ZERO on failure.\n"
     "  --version         print the package version and exit\n"
 )
 
@@ -123,6 +129,21 @@ def main(argv: "list[str] | None" = None) -> int:
         # resolves without starting the server/poller and exits 0 regardless
         # of the health verdict — the JSON `ok` field is the finding.
         return _exec_server("health", *args[1:])
+
+    if args[0] == "send":
+        # Forward to the TS `send` mode: deliver ONE outbound message and exit,
+        # without starting the MCP server or the poller.
+        #
+        # This is the MCP-INDEPENDENT outbound path (card
+        # cct-cli-send-outbound-path-independent-of-mcp). When the cct MCP
+        # server is down — or when its instructions load but its TOOLS do not
+        # resolve — an agent has no `reply` tool and cannot reach the operator
+        # at all. It goes mute, and he reads the silence as being ignored.
+        # A CLI does not depend on MCP tool-schema exposure, so an agent can
+        # always shell out to this. Unlike `config`/`health`, a failure here
+        # exits NON-ZERO: an agent must never believe it delivered when it did
+        # not.
+        return _exec_server("send", *args[1:])
 
     sys.stderr.write(f"claude-code-telegrammer: unknown command {args[0]!r}\n\n")
     sys.stderr.write(_USAGE)
