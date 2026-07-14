@@ -28,8 +28,12 @@
  *      processBatch.
  *
  * PR-A is DETECTION/ALARM ONLY. It deliberately does NOT add an
- * HTTP-level timeout to tgApi, nor auto-restart the bridge — those are
- * noted follow-ups. The actionable alarm tells the operator to restart.
+ * HTTP-level timeout to tgApi — that remains a noted follow-up.
+ *
+ * It DOES now auto-restart the bridge (2026-07-14): on stall the poller
+ * self-terminates and lib/poller-supervisor.ts respawns it. The previous
+ * behaviour — shout, then sit there wedged waiting for a human — is what made
+ * this alarm ignorable. See selfTerminateForRespawn() below.
  */
 
 import { log } from "./log.js";
@@ -109,6 +113,15 @@ export interface StallWatchdogDeps {
   isPolling: () => boolean;
   /** Stall threshold in ms. */
   thresholdMs: number;
+  /**
+   * ACTUATOR — what to DO about a stall, after the alarm has been emitted.
+   *
+   * Defaults to a NO-OP on purpose: this factory is pure and unit-tested, and
+   * a default that terminated the process would kill the test runner itself.
+   * The production wiring is injected by startStallWatchdog() below, which is
+   * the only caller that should ever be able to end the process.
+   */
+  onStall?: () => void;
 }
 
 export interface StallWatchdog {
@@ -131,9 +144,48 @@ function stallMessage(stallMs: number, thresholdMs: number): string {
     `A liveness/kill-0 check would still pass, so this is invisible ` +
     `WITHOUT this alarm. Likely cause: a network black-hole, a hung ` +
     `socket, or a wedged long-poll (the getUpdates await never resolved). ` +
-    `ACTION: restart the bridge to recover. ` +
+    `SELF-HEALING: this poller is now terminating itself so the supervisor ` +
+    `respawns it — no human action needed. If inbound does NOT recover within ` +
+    `~30s, the MCP server supervising it predates the respawn fix and must be ` +
+    `restarted. ` +
     `(token=${BOT_TOKEN_HASH} state_dir=${STATE_DIR})`
   );
+}
+
+/**
+ * EX_TEMPFAIL — "transient failure, please retry". Distinguishes a watchdog
+ * self-terminate from a crash in the supervisor's log.
+ */
+const STALL_EXIT_CODE = 75;
+
+/**
+ * Let the Telegram alert above actually leave the process before we exit.
+ * Terminating in the same tick would kill the very send that explains why.
+ * Matches the poller's own shutdown() grace.
+ */
+const STALL_EXIT_DELAY_MS = 2000;
+
+/**
+ * The ACTUATOR (grant, 2026-07-14 — the sharpest review note of the day).
+ *
+ * The alarm used to say "ACTION: restart the bridge to recover" and then leave
+ * the bridge wedged, waiting for a human. grant put the problem exactly:
+ *
+ *     "an alarm with no actuator, that shouts and then leaves the bridge wedged
+ *      for a human, will still get ignored eventually — not because it lies,
+ *      but because it is not actionable by the agent that receives it."
+ *
+ * A wedged poller cannot fix itself in place: the getUpdates await will never
+ * resolve, so there is nothing to retry from inside. But it CAN die — and
+ * lib/poller-supervisor.ts (#82) already respawns a poller that exits with
+ * nobody holding the pidfile, and now persists its stderr so the next one is
+ * explainable.
+ *
+ * Detector we already had. Actuator we already had. This is the wire between
+ * them, and it is the whole fix.
+ */
+function selfTerminateForRespawn(): void {
+  setTimeout(() => process.exit(STALL_EXIT_CODE), STALL_EXIT_DELAY_MS);
 }
 
 /** Default emit: same direct-Telegram broadcast the poller's 409-fatal path
@@ -157,6 +209,8 @@ export function createStallWatchdog(deps: StallWatchdogDeps): StallWatchdog {
   const getLastPoll = deps.getLastPoll ?? getLastSuccessfulPoll;
   const { emit, isPolling, thresholdMs } = deps;
 
+  const onStall = deps.onStall ?? (() => {});
+
   let alreadyAlarmed = false;
   let lastSeenPoll = getLastPoll();
 
@@ -177,6 +231,9 @@ export function createStallWatchdog(deps: StallWatchdogDeps): StallWatchdog {
       if (stallMs > thresholdMs && !alreadyAlarmed) {
         emit(stallMessage(stallMs, thresholdMs));
         alreadyAlarmed = true;
+        // ...and then ACT. Alarming and doing nothing is what made this alarm
+        // ignorable in the first place (see onStall's docstring).
+        onStall();
       }
     },
   };
@@ -206,6 +263,9 @@ export function startStallWatchdog(isPolling: () => boolean): WatchdogHandle {
     isPolling,
     thresholdMs,
     emit: (content) => defaultEmit(content),
+    // The ONLY place the real actuator is wired. createStallWatchdog defaults
+    // onStall to a no-op so no unit test can ever terminate the test runner.
+    onStall: selfTerminateForRespawn,
   });
 
   log(
