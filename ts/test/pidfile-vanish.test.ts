@@ -60,14 +60,25 @@ describe("checkAuthority: tells the three worlds apart", () => {
     expect(a.kind).toBe("ours");
   });
 
-  test("PREEMPTED — the pidfile records a DIFFERENT pid", () => {
+  // NOTE: preemption requires the preemptor to be ALIVE (see
+  // ts/test/stale-preemptor.test.ts — a pidfile naming a DEAD pid is a stale
+  // claim, not a successor, and standing down for it is what killed the
+  // operator's bridge). These fake pids do not exist, so liveness is injected.
+  const preemptorIsAlive = (pid: number) => pid !== 4242;
+
+  test("PREEMPTED — the pidfile records a DIFFERENT, LIVE pid", () => {
     claimAuthoritative({
       stateDir,
       tokenHash: TOKEN,
       pid: 9999,
       signalOutgoing: false,
     });
-    const a = checkAuthority({ stateDir, tokenHash: TOKEN, pid: 4242 });
+    const a = checkAuthority({
+      stateDir,
+      tokenHash: TOKEN,
+      pid: 4242,
+      isAlive: preemptorIsAlive,
+    });
     expect(a.kind).toBe("preempted");
     if (a.kind === "preempted") expect(a.byPid).toBe(9999);
   });
@@ -110,7 +121,7 @@ describe("checkAuthority: tells the three worlds apart", () => {
   // The correct behaviour is PRESERVED: a genuine takeover must still stand the
   // loser down immediately, or two pollers hit one bot token and Telegram
   // answers with a 409 Conflict storm (getUpdates is single-consumer).
-  test("a genuine takeover still preempts — the 409 guard is not weakened", () => {
+  test("a genuine (LIVE) takeover still preempts — the 409 guard is not weakened", () => {
     claimAuthoritative({ stateDir, tokenHash: TOKEN, pid: 4242 });
     claimAuthoritative({
       stateDir,
@@ -119,7 +130,12 @@ describe("checkAuthority: tells the three worlds apart", () => {
       signalOutgoing: false,
     });
 
-    const a = checkAuthority({ stateDir, tokenHash: TOKEN, pid: 4242 });
+    const a = checkAuthority({
+      stateDir,
+      tokenHash: TOKEN,
+      pid: 4242,
+      isAlive: preemptorIsAlive,
+    });
     expect(a.kind).toBe("preempted");
   });
 });
