@@ -144,6 +144,52 @@ jobs:
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
 
+      # PROVE IT LANDED. A green publish step is not evidence the artifact
+      # exists — it is only evidence the upload call returned.
+      #
+      # v0.5.1 and v0.5.2 are tagged, pushed, and 404 on PyPI. They were cut
+      # during a workflow migration on 2026-07-11 and simply never published.
+      # Nobody noticed for three days, because nothing ever asked PyPI whether
+      # the release had actually arrived. sac found EIGHT such ghost tags in
+      # their own package — a third of a release line, silent for months.
+      #
+      # Query the VERSION-SPECIFIC JSON API, never /simple/: the simple index
+      # is CDN-cached and can answer 200 for a version that is not really there
+      # yet (or serve a stale listing), which would make this check a liar.
+      #
+      # Retry, because PyPI's API is eventually consistent for a minute or so
+      # after an upload. Failing here turns a SILENT ghost into a RED release —
+      # which is the entire point.
+      - name: Verify the release actually landed on PyPI
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.build.outputs.version }}"
+          VERSION="${VERSION#v}"
+          URL="https://pypi.org/pypi/claude-code-telegrammer/${VERSION}/json"
+
+          for attempt in 1 2 3 4 5 6; do
+            CODE=$(curl -sS -o /tmp/pypi.json -w '%{http_code}' "$URL" || echo 000)
+            if [ "$CODE" = "200" ]; then
+              echo "PyPI confirms ${VERSION} is live:"
+              python3 -c "
+          import json
+          d = json.load(open('/tmp/pypi.json'))
+          assert d['info']['version'] == '${VERSION}', d['info']['version']
+          urls = d['urls']
+          assert urls, 'version exists but has NO uploaded files'
+          for u in urls:
+              print(f\"  {u['packagetype']:12s} {u['filename']}  {u['size']}B\")
+          "
+              exit 0
+            fi
+            echo "attempt ${attempt}: PyPI says HTTP ${CODE} for ${VERSION} — retrying in 15s"
+            sleep 15
+          done
+
+          echo "::error::GHOST RELEASE — tag ${VERSION} was published by this workflow, but PyPI still 404s it."
+          echo "The upload step went green and the artifact never arrived. Do NOT trust the tag."
+          exit 1
+
   release:
     needs: [build, publish]
     runs-on: ubuntu-latest
