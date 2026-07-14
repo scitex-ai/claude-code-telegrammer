@@ -1,0 +1,20 @@
+# Repo-root bunfig so `bun test` is hermetic from ANY working directory.
+#
+# Bun reads bunfig.toml from the CURRENT WORKING DIRECTORY. The only bunfig
+# used to live in ts/, so:
+#
+#   cd ts && bun test                -> preload APPLIES -> hermetic (497 pass)
+#   bun test ts/test/...  (repo root) -> preload NEVER LOADS
+#
+# In that second case the tests inherit the real CCT_* env of whatever shell
+# ran them. On an agent host that resolves to the LIVE bridge state dir, and
+# the suite opens the PRODUCTION database. ts/test/store.test.ts calls
+# saveOffset(99999) — which on 2026-07-14 overwrote the live Telegram
+# getUpdates watermark (348318289 -> 99999) and the wake-health state on the
+# operator's own bridge. Nothing warned; it just worked, against the wrong DB.
+#
+# The preload itself was never the problem — it is correct and thorough. The
+# problem was that losing it was SILENT and cwd-dependent. This file removes
+# the cwd dependency; ts/lib/store.ts's hermeticity guard removes the silence.
+[test]
+preload = ["./ts/test/preload.ts"]

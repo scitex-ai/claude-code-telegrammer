@@ -5,9 +5,11 @@
 
 import { Database, Statement } from "bun:sqlite";
 import { join } from "path";
+import { tmpdir } from "os";
 import { STATE_DIR } from "./config.js";
 import { log } from "./log.js";
 import { ensureColumn } from "./store-migrations.js";
+import { assertHermeticTestStore } from "./hermetic-guard.js";
 export { ensureColumn } from "./store-migrations.js";
 
 // Scitex-standard DB filename (was "messages.db"): self-describing in the
@@ -111,6 +113,13 @@ CREATE INDEX IF NOT EXISTS idx_att_message ON attachments(message_row_id);
 // ── Init ───────────────────────────────────────────────────────────────────
 
 export function initStore(): void {
+  // FAIL LOUD before we touch a single byte: a test run whose hermetic preload
+  // did not load is about to open the LIVE production database. Silently
+  // writing to the real bridge is the single most destructive thing this
+  // process can do, and on 2026-07-14 it did exactly that (see
+  // lib/hermetic-guard.ts). Guard the act, not the intention.
+  assertHermeticTestStore(process.env.NODE_ENV, STATE_DIR, tmpdir());
+
   db = new Database(DB_PATH, { create: true });
   db.exec(SCHEMA_SQL);
 
