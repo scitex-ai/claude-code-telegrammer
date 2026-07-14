@@ -263,17 +263,41 @@ export function isAuthoritative(opts: {
 export type AuthorityState =
   | { kind: "ours" }
   | { kind: "vacant" }
+  | { kind: "stale"; byPid: number }
   | { kind: "preempted"; byPid: number };
 
 export function checkAuthority(opts: {
   stateDir: string;
   tokenHash: string;
   pid?: number;
+  /** Injectable liveness probe (tests); defaults to a kill(pid, 0). */
+  isAlive?: (pid: number) => boolean;
 }): AuthorityState {
   const pid = opts.pid ?? process.pid;
+  const alive = opts.isAlive ?? isPidAlive;
+
   const snap = readPidfile(pollerPidfilePath(opts.stateDir, opts.tokenHash));
   if (!snap) return { kind: "vacant" };
   if (snap.pid === pid) return { kind: "ours" };
+
+  // A pidfile naming a DEAD process is not a successor either.
+  //
+  // This is the same mistake as "vacant", wearing a disguise. The record exists,
+  // so it LOOKS like someone took over — but the process it names is gone. It is
+  // a stale claim, and standing down for it hands the bot token to nobody and
+  // takes inbound Telegram delivery with it.
+  //
+  // This is exactly how it happened on 2026-07-14: a test run whose hermetic
+  // preload had not loaded (see lib/hermetic-guard.ts) resolved STATE_DIR to the
+  // LIVE bridge and called claimAuthoritative() against it, stamping the live
+  // pidfile with the TEST process's pid. The test exited seconds later. The real,
+  // healthy poller then read a pidfile naming a pid that no longer existed,
+  // concluded it had been preempted, and killed itself. The operator's channel
+  // died for a corpse.
+  //
+  // Preemption is only real if the preemptor is ALIVE.
+  if (!alive(snap.pid)) return { kind: "stale", byPid: snap.pid };
+
   return { kind: "preempted", byPid: snap.pid };
 }
 

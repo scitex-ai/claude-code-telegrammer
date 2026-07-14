@@ -169,19 +169,31 @@ export async function startPolling(): Promise<void> {
         return;
       }
 
-      if (authority.kind === "vacant") {
-        // The pidfile is GONE and we are still alive and polling. Whatever
-        // removed it (a stray cleanup, a rogue process, an `rm`), we are still
-        // the only poller for this token. RE-CLAIM it and carry on.
+      if (authority.kind === "vacant" || authority.kind === "stale") {
+        // Nobody real holds the pidfile, and we are still alive and polling.
         //
-        // signalOutgoing:false — there is no outgoing poller to SIGTERM; the
-        // file is simply absent, and signalling here could only ever hit an
-        // unrelated PID.
+        //   vacant — the file is GONE. Something deleted it out from under us.
+        //   stale  — the file names a pid that NO LONGER EXISTS. It looks like a
+        //            successor, but it is a corpse. On 2026-07-14 a test run
+        //            whose hermetic preload had not loaded stamped the LIVE
+        //            pidfile with its own pid, exited seconds later, and the
+        //            real poller killed itself for that dead pid.
+        //
+        // Either way we are still the only poller for this token. RE-CLAIM and
+        // carry on. Neither an absent file nor a dead pid is a successor, and
+        // neither is a reason to take the operator's inbound channel down.
+        //
+        // signalOutgoing:false — there is nothing live to SIGTERM, and signalling
+        // a recycled PID could only ever hit an unrelated process.
+        const why =
+          authority.kind === "vacant"
+            ? "pidfile VANISHED (nobody holds it)"
+            : `pidfile records a DEAD pid (${authority.byPid}) — a stale claim, not a successor`;
+
         log(
           "poller",
-          `pidfile VANISHED (nobody holds it) — re-claiming it and continuing; ` +
-            `we are still the only poller for this token. Something deleted it ` +
-            `out from under us (token=${BOT_TOKEN_HASH} state_dir=${STATE_DIR})`,
+          `${why} — re-claiming it and continuing; we are still the only poller ` +
+            `for this token (token=${BOT_TOKEN_HASH} state_dir=${STATE_DIR})`,
           { ourPid: process.pid },
         );
         claimAuthoritative({
