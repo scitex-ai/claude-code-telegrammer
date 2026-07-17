@@ -41,6 +41,7 @@ import { BOT_TOKEN_HASH, STATE_DIR } from "./config.js";
 import { saveLastPollTs } from "./store.js";
 import { getenv } from "./env.js";
 import { broadcastSystemAlert } from "./loudfail.js";
+import { STALL_EXIT_CODE } from "./exit-codes.js";
 
 /** Default stall threshold (seconds) — well above the 30s long-poll cap
  * plus the 3s error backoff margin, so a healthy loop never trips it. */
@@ -131,32 +132,59 @@ export interface StallWatchdog {
 }
 
 /**
- * Build the loud, actionable stall message. Names the stall duration, the
- * "alive but not polling" nature, the likely causes, and the fix.
+ * Build the stall message the OPERATOR reads on his phone.
+ *
+ * Short, listed, and free of jargon — because he told us, holding a screenshot
+ * of the old one (2026-07-17): 「文章が長すぎて読む気にならないですね
+ * リストにするなりしてなんか読ませる気がないというか」. The old text was ~700
+ * characters of network-black-hole / hung-socket / kill-0 / "predates the
+ * respawn fix", plus a token hash and an absolute state_dir path. Our OWN
+ * outbound hook caps a human-authored Telegram message at 512 chars and demands
+ * numbered lines, on the grounds that "the operator reads on a phone and cannot
+ * scan walls of text" — and these alarms simply bypassed it. We enforced
+ * readability on ourselves and exempted the machine.
+ *
+ * The diagnostics did not vanish; they moved to the poller log (see the caller),
+ * which is where a human goes when they want them and nowhere near the phone
+ * when they don't.
+ *
+ * What he needs from this message, in this order: is it broken, must I act,
+ * will it fix itself. Nothing else.
  */
 function stallMessage(stallMs: number, thresholdMs: number): string {
   const stallSec = Math.round(stallMs / 1000);
   const thresholdSec = Math.round(thresholdMs / 1000);
   return (
-    `INGESTION STALL: getUpdates has not returned successfully for ` +
-    `~${stallSec}s (threshold ${thresholdSec}s). The bridge process is ` +
-    `ALIVE but NOT polling — no Telegram messages are being ingested. ` +
-    `A liveness/kill-0 check would still pass, so this is invisible ` +
-    `WITHOUT this alarm. Likely cause: a network black-hole, a hung ` +
-    `socket, or a wedged long-poll (the getUpdates await never resolved). ` +
-    `SELF-HEALING: this poller is now terminating itself so the supervisor ` +
-    `respawns it — no human action needed. If inbound does NOT recover within ` +
-    `~30s, the MCP server supervising it predates the respawn fix and must be ` +
-    `restarted. ` +
-    `(token=${BOT_TOKEN_HASH} state_dir=${STATE_DIR})`
+    `INGESTION STALL — recovering by itself, no action needed.\n` +
+    `1. No Telegram fetch for ~${stallSec}s (limit ${thresholdSec}s).\n` +
+    `2. Restarting the poller now.\n` +
+    `3. You will hear from me again ONLY if it does not recover.`
   );
 }
 
+/** The full diagnosis — for the poller log, not the operator's phone. */
+function stallDiagnostics(stallMs: number, thresholdMs: number): object {
+  return {
+    stallMs,
+    thresholdMs,
+    tokenHash: BOT_TOKEN_HASH,
+    stateDir: STATE_DIR,
+    note:
+      "process ALIVE but not polling; a liveness/kill-0 check would still " +
+      "pass. Likely: network black-hole, hung socket, or a wedged long-poll " +
+      "(the getUpdates await never resolved). Self-terminating for respawn.",
+  };
+}
+
 /**
- * EX_TEMPFAIL — "transient failure, please retry". Distinguishes a watchdog
- * self-terminate from a crash in the supervisor's log.
+ * Re-exported for the poller's own use. The number itself, and the contract it
+ * carries, live in lib/exit-codes.ts — the supervisor in the OTHER process
+ * reads the same constant, which is the only thing that makes this exit code
+ * mean anything. It used to be a private const here whose doc-comment claimed
+ * it "distinguishes a watchdog self-terminate from a crash in the supervisor's
+ * log" — while the supervisor never actually read it (#92).
  */
-const STALL_EXIT_CODE = 75;
+export { STALL_EXIT_CODE };
 
 /**
  * Let the Telegram alert above actually leave the process before we exit.
@@ -229,6 +257,12 @@ export function createStallWatchdog(deps: StallWatchdogDeps): StallWatchdog {
 
       const stallMs = now() - lastPoll;
       if (stallMs > thresholdMs && !alreadyAlarmed) {
+        // Full diagnosis to the LOG, four short lines to the PHONE. The
+        // operator gets what he must decide on; the log keeps what someone
+        // debugging this later will want.
+        log("poll-watchdog", "INGESTION STALL — self-terminating for respawn", {
+          ...stallDiagnostics(stallMs, thresholdMs),
+        });
         emit(stallMessage(stallMs, thresholdMs));
         alreadyAlarmed = true;
         // ...and then ACT. Alarming and doing nothing is what made this alarm
