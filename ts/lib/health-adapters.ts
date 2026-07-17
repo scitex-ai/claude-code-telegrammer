@@ -48,6 +48,8 @@ import { LEGACY_PREFIX } from "./env.js";
 import { validateBotToken } from "./startup-validate.js";
 import { getMeRaw } from "./telegram-api.js";
 import { loadAccess } from "./access.js";
+import { newestCodeMtimeMs } from "./poller-supervisor.js";
+import type { CodeCurrencyProbe } from "./health-checks-code.js";
 import {
   pollerPidfilePath,
   readPidfile,
@@ -129,6 +131,40 @@ export async function probeWebhook(): Promise<WebhookProbe> {
  * which would otherwise read as a healthy poller — adversarial-review
  * finding #2).
  */
+/**
+ * Gather the inputs for the code_current check — "am I running the code that is
+ * on disk?" (grant's detection-gap point, 2026-07-14).
+ *
+ * Reads the EXECUTING surface, never package metadata:
+ *   - this process's own start time, derived from process.uptime();
+ *   - the poller's pidfile claim time;
+ *   - the newest mtime across the source those processes would have loaded.
+ *
+ * A version string would be the wrong instrument here: pyproject/package.json/
+ * dist-info all report a number ABOUT the code, which can be baked, orphaned, or
+ * simply older than the source beside it. This asks a question only the running
+ * process can answer.
+ */
+export function probeCodeCurrency(): CodeCurrencyProbe {
+  // process.uptime() is seconds since THIS process started — a property of the
+  // running process itself, not a claim recorded anywhere.
+  const serverStartMs = Date.now() - process.uptime() * 1000;
+
+  const snap = readPidfile(pollerPidfilePath(STATE_DIR, BOT_TOKEN_HASH));
+  const pollerStartMs = snap?.startMs && snap.startMs > 0 ? snap.startMs : null;
+
+  // Resolved from import.meta.dir — i.e. relative to the module that is ACTUALLY
+  // EXECUTING, not from a configured path that could point somewhere else. This
+  // file lives in ts/lib/, the poller entrypoint one level up in ts/.
+  const pollerScriptPath = join(import.meta.dir, "..", "telegram-poller.ts");
+
+  // Same source-of-truth the supervisor acts on, so the check and the takeover
+  // can never disagree about what "stale" means.
+  const codeMtimeMs = newestCodeMtimeMs(pollerScriptPath);
+
+  return { serverStartMs, pollerStartMs, codeMtimeMs };
+}
+
 export function probePoller(mode: "self" | "external"): PollerProbe {
   if (mode === "self") return { kind: "self", pid: process.pid };
 
@@ -368,5 +404,6 @@ export async function runHealth(opts: {
     db: probeDb(),
     wakeReachability,
     wakeBacklog,
+    codeCurrency: probeCodeCurrency(),
   });
 }

@@ -97,17 +97,42 @@ export function readPidfile(path: string): PidfileSnapshot | null {
 }
 
 /**
- * Returns true iff `pid` looks alive (process.kill(pid, 0) doesn't
- * throw). Throws nothing — best-effort. May return a stale `true` when
- * called across PID namespaces where the local PID happens to also
- * exist locally; the pidfile-polling fallback handles that.
+ * Returns true iff `pid` exists. Throws nothing — best-effort.
+ *
+ * "I ASKED AND GOT NOTHING" IS NOT "DEAD" (sac, 2026-07-14, after their health
+ * watchdog killed a healthy daemon for exactly this). kill(pid, 0) has two
+ * distinct failure modes and the old bare `catch` swallowed both:
+ *
+ *   ESRCH — no such process.                      -> genuinely DEAD.
+ *   EPERM — the process EXISTS, we may not signal  -> ALIVE, just not ours.
+ *
+ * Reporting EPERM as dead is a lie about the world, and here it is a dangerous
+ * one: a "dead" verdict makes checkAuthority() return `stale`, which makes the
+ * poll loop RE-CLAIM the pidfile — so a second poller would start against a bot
+ * token that already has a live consumer, and Telegram answers that with a 409
+ * Conflict storm (getUpdates is single-consumer).
+ *
+ * HONESTY ABOUT SCOPE: this is LATENT, not a bug I reproduced. Every cct process
+ * runs as the same user, and I could not provoke an EPERM here (even root-owned
+ * pid 1 is signalable in this container). isProcessMatching() also verifies
+ * /proc/<pid>/cmdline, which independently rejects a foreign process. So nothing
+ * is known to be broken today.
+ *
+ * It is fixed anyway because a bare `catch` that collapses a distinguishable
+ * error into a wrong answer is a silent fallback on the liveness check that
+ * guards the operator's only channel — and today proved, three times over, what
+ * collapsing distinct states into one bit costs.
  */
 export function isPidAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (err) {
+    // EPERM means it IS there. Anything else (ESRCH, and any exotic errno we
+    // cannot interpret) is treated as gone — the fail-safe direction, since a
+    // false "alive" only delays a takeover, while a false "dead" duplicates a
+    // poller.
+    return (err as NodeJS.ErrnoException | undefined)?.code === "EPERM";
   }
 }
 
@@ -240,6 +265,65 @@ export function isAuthoritative(opts: {
   const snap = readPidfile(path);
   if (!snap) return false;
   return snap.pid === pid;
+}
+
+/**
+ * Why the pidfile does not name us — the distinction isAuthoritative() throws
+ * away, and the one that cost the operator his inbound channel repeatedly on
+ * 2026-07-14.
+ *
+ *   "ours"      — the pidfile records us. Keep polling.
+ *   "preempted" — it records a DIFFERENT pid. A newer poller genuinely won the
+ *                 race; stand down immediately so we never issue another
+ *                 getUpdates and start a 409 storm against the new incumbent.
+ *   "vacant"    — there is NO pidfile. Nobody preempted us. Nobody owns it.
+ *
+ * isAuthoritative() collapses "vacant" and "preempted" into a single `false`,
+ * and the poll loop then logged "preempted by newer poller" and killed itself.
+ * But a file that VANISHED is not a successor. Deleting a file must never kill
+ * a healthy process — and it did: the log shows a poller exiting "cleanly"
+ * while its replacement started up finding "no prior poller recorded", i.e.
+ * nobody had taken over at all. Inbound Telegram delivery just stopped.
+ */
+export type AuthorityState =
+  | { kind: "ours" }
+  | { kind: "vacant" }
+  | { kind: "stale"; byPid: number }
+  | { kind: "preempted"; byPid: number };
+
+export function checkAuthority(opts: {
+  stateDir: string;
+  tokenHash: string;
+  pid?: number;
+  /** Injectable liveness probe (tests); defaults to a kill(pid, 0). */
+  isAlive?: (pid: number) => boolean;
+}): AuthorityState {
+  const pid = opts.pid ?? process.pid;
+  const alive = opts.isAlive ?? isPidAlive;
+
+  const snap = readPidfile(pollerPidfilePath(opts.stateDir, opts.tokenHash));
+  if (!snap) return { kind: "vacant" };
+  if (snap.pid === pid) return { kind: "ours" };
+
+  // A pidfile naming a DEAD process is not a successor either.
+  //
+  // This is the same mistake as "vacant", wearing a disguise. The record exists,
+  // so it LOOKS like someone took over — but the process it names is gone. It is
+  // a stale claim, and standing down for it hands the bot token to nobody and
+  // takes inbound Telegram delivery with it.
+  //
+  // This is exactly how it happened on 2026-07-14: a test run whose hermetic
+  // preload had not loaded (see lib/hermetic-guard.ts) resolved STATE_DIR to the
+  // LIVE bridge and called claimAuthoritative() against it, stamping the live
+  // pidfile with the TEST process's pid. The test exited seconds later. The real,
+  // healthy poller then read a pidfile naming a pid that no longer existed,
+  // concluded it had been preempted, and killed itself. The operator's channel
+  // died for a corpse.
+  //
+  // Preemption is only real if the preemptor is ALIVE.
+  if (!alive(snap.pid)) return { kind: "stale", byPid: snap.pid };
+
+  return { kind: "preempted", byPid: snap.pid };
 }
 
 /**

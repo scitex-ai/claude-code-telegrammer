@@ -28,8 +28,12 @@
  *      processBatch.
  *
  * PR-A is DETECTION/ALARM ONLY. It deliberately does NOT add an
- * HTTP-level timeout to tgApi, nor auto-restart the bridge — those are
- * noted follow-ups. The actionable alarm tells the operator to restart.
+ * HTTP-level timeout to tgApi — that remains a noted follow-up.
+ *
+ * It DOES now auto-restart the bridge (2026-07-14): on stall the poller
+ * self-terminates and lib/poller-supervisor.ts respawns it. The previous
+ * behaviour — shout, then sit there wedged waiting for a human — is what made
+ * this alarm ignorable. See selfTerminateForRespawn() below.
  */
 
 import { log } from "./log.js";
@@ -37,6 +41,7 @@ import { BOT_TOKEN_HASH, STATE_DIR } from "./config.js";
 import { saveLastPollTs } from "./store.js";
 import { getenv } from "./env.js";
 import { broadcastSystemAlert } from "./loudfail.js";
+import { STALL_EXIT_CODE } from "./exit-codes.js";
 
 /** Default stall threshold (seconds) — well above the 30s long-poll cap
  * plus the 3s error backoff margin, so a healthy loop never trips it. */
@@ -109,6 +114,15 @@ export interface StallWatchdogDeps {
   isPolling: () => boolean;
   /** Stall threshold in ms. */
   thresholdMs: number;
+  /**
+   * ACTUATOR — what to DO about a stall, after the alarm has been emitted.
+   *
+   * Defaults to a NO-OP on purpose: this factory is pure and unit-tested, and
+   * a default that terminated the process would kill the test runner itself.
+   * The production wiring is injected by startStallWatchdog() below, which is
+   * the only caller that should ever be able to end the process.
+   */
+  onStall?: () => void;
 }
 
 export interface StallWatchdog {
@@ -118,22 +132,88 @@ export interface StallWatchdog {
 }
 
 /**
- * Build the loud, actionable stall message. Names the stall duration, the
- * "alive but not polling" nature, the likely causes, and the fix.
+ * Build the stall message the OPERATOR reads on his phone.
+ *
+ * Short, listed, and free of jargon — because he told us, holding a screenshot
+ * of the old one (2026-07-17): 「文章が長すぎて読む気にならないですね
+ * リストにするなりしてなんか読ませる気がないというか」. The old text was ~700
+ * characters of network-black-hole / hung-socket / kill-0 / "predates the
+ * respawn fix", plus a token hash and an absolute state_dir path. Our OWN
+ * outbound hook caps a human-authored Telegram message at 512 chars and demands
+ * numbered lines, on the grounds that "the operator reads on a phone and cannot
+ * scan walls of text" — and these alarms simply bypassed it. We enforced
+ * readability on ourselves and exempted the machine.
+ *
+ * The diagnostics did not vanish; they moved to the poller log (see the caller),
+ * which is where a human goes when they want them and nowhere near the phone
+ * when they don't.
+ *
+ * What he needs from this message, in this order: is it broken, must I act,
+ * will it fix itself. Nothing else.
  */
 function stallMessage(stallMs: number, thresholdMs: number): string {
   const stallSec = Math.round(stallMs / 1000);
   const thresholdSec = Math.round(thresholdMs / 1000);
   return (
-    `INGESTION STALL: getUpdates has not returned successfully for ` +
-    `~${stallSec}s (threshold ${thresholdSec}s). The bridge process is ` +
-    `ALIVE but NOT polling — no Telegram messages are being ingested. ` +
-    `A liveness/kill-0 check would still pass, so this is invisible ` +
-    `WITHOUT this alarm. Likely cause: a network black-hole, a hung ` +
-    `socket, or a wedged long-poll (the getUpdates await never resolved). ` +
-    `ACTION: restart the bridge to recover. ` +
-    `(token=${BOT_TOKEN_HASH} state_dir=${STATE_DIR})`
+    `INGESTION STALL — recovering by itself, no action needed.\n` +
+    `1. No Telegram fetch for ~${stallSec}s (limit ${thresholdSec}s).\n` +
+    `2. Restarting the poller now.\n` +
+    `3. You will hear from me again ONLY if it does not recover.`
   );
+}
+
+/** The full diagnosis — for the poller log, not the operator's phone. */
+function stallDiagnostics(stallMs: number, thresholdMs: number): object {
+  return {
+    stallMs,
+    thresholdMs,
+    tokenHash: BOT_TOKEN_HASH,
+    stateDir: STATE_DIR,
+    note:
+      "process ALIVE but not polling; a liveness/kill-0 check would still " +
+      "pass. Likely: network black-hole, hung socket, or a wedged long-poll " +
+      "(the getUpdates await never resolved). Self-terminating for respawn.",
+  };
+}
+
+/**
+ * Re-exported for the poller's own use. The number itself, and the contract it
+ * carries, live in lib/exit-codes.ts — the supervisor in the OTHER process
+ * reads the same constant, which is the only thing that makes this exit code
+ * mean anything. It used to be a private const here whose doc-comment claimed
+ * it "distinguishes a watchdog self-terminate from a crash in the supervisor's
+ * log" — while the supervisor never actually read it (#92).
+ */
+export { STALL_EXIT_CODE };
+
+/**
+ * Let the Telegram alert above actually leave the process before we exit.
+ * Terminating in the same tick would kill the very send that explains why.
+ * Matches the poller's own shutdown() grace.
+ */
+const STALL_EXIT_DELAY_MS = 2000;
+
+/**
+ * The ACTUATOR (grant, 2026-07-14 — the sharpest review note of the day).
+ *
+ * The alarm used to say "ACTION: restart the bridge to recover" and then leave
+ * the bridge wedged, waiting for a human. grant put the problem exactly:
+ *
+ *     "an alarm with no actuator, that shouts and then leaves the bridge wedged
+ *      for a human, will still get ignored eventually — not because it lies,
+ *      but because it is not actionable by the agent that receives it."
+ *
+ * A wedged poller cannot fix itself in place: the getUpdates await will never
+ * resolve, so there is nothing to retry from inside. But it CAN die — and
+ * lib/poller-supervisor.ts (#82) already respawns a poller that exits with
+ * nobody holding the pidfile, and now persists its stderr so the next one is
+ * explainable.
+ *
+ * Detector we already had. Actuator we already had. This is the wire between
+ * them, and it is the whole fix.
+ */
+function selfTerminateForRespawn(): void {
+  setTimeout(() => process.exit(STALL_EXIT_CODE), STALL_EXIT_DELAY_MS);
 }
 
 /** Default emit: same direct-Telegram broadcast the poller's 409-fatal path
@@ -157,6 +237,8 @@ export function createStallWatchdog(deps: StallWatchdogDeps): StallWatchdog {
   const getLastPoll = deps.getLastPoll ?? getLastSuccessfulPoll;
   const { emit, isPolling, thresholdMs } = deps;
 
+  const onStall = deps.onStall ?? (() => {});
+
   let alreadyAlarmed = false;
   let lastSeenPoll = getLastPoll();
 
@@ -175,8 +257,17 @@ export function createStallWatchdog(deps: StallWatchdogDeps): StallWatchdog {
 
       const stallMs = now() - lastPoll;
       if (stallMs > thresholdMs && !alreadyAlarmed) {
+        // Full diagnosis to the LOG, four short lines to the PHONE. The
+        // operator gets what he must decide on; the log keeps what someone
+        // debugging this later will want.
+        log("poll-watchdog", "INGESTION STALL — self-terminating for respawn", {
+          ...stallDiagnostics(stallMs, thresholdMs),
+        });
         emit(stallMessage(stallMs, thresholdMs));
         alreadyAlarmed = true;
+        // ...and then ACT. Alarming and doing nothing is what made this alarm
+        // ignorable in the first place (see onStall's docstring).
+        onStall();
       }
     },
   };
@@ -206,6 +297,9 @@ export function startStallWatchdog(isPolling: () => boolean): WatchdogHandle {
     isPolling,
     thresholdMs,
     emit: (content) => defaultEmit(content),
+    // The ONLY place the real actuator is wired. createStallWatchdog defaults
+    // onStall to a no-op so no unit test can ever terminate the test runner.
+    onStall: selfTerminateForRespawn,
   });
 
   log(

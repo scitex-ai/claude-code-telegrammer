@@ -15,6 +15,7 @@ import { BOT_TOKEN_HASH, STATE_DIR } from "./config.js";
 import { saveOffset, loadOffset } from "./store.js";
 import {
   claimAuthoritative,
+  checkAuthority,
   isAuthoritative,
   releaseAuthoritative,
 } from "./takeover.js";
@@ -134,21 +135,72 @@ export async function startPolling(): Promise<void> {
 
   try {
     while (polling) {
-      // Per-iteration authoritativeness check. A newer poller would have
-      // overwritten our pidfile; we exit cleanly without ever issuing the
-      // next getUpdates so we never produce a 409 storm against the new
-      // incumbent. The fs check is cheap (~µs).
-      if (
-        !isAuthoritative({ stateDir: STATE_DIR, tokenHash: BOT_TOKEN_HASH })
-      ) {
+      // Per-iteration authority check.
+      //
+      // This USED to be `if (!isAuthoritative(...)) exit`, which collapsed two
+      // completely different situations into one:
+      //
+      //   - a NEWER poller overwrote our pidfile  -> stand down (correct)
+      //   - the pidfile simply VANISHED           -> ...also stand down (WRONG)
+      //
+      // A file that disappeared is not a successor. Nobody preempted us; nobody
+      // owns the pidfile at all. But the loop logged "preempted by newer poller"
+      // and killed a perfectly healthy poller — and the operator's inbound
+      // Telegram channel died with it, repeatedly, on 2026-07-14. The evidence
+      // is unambiguous in the poller log: one process exits "cleanly" claiming
+      // preemption, and its replacement starts up finding "no prior poller
+      // recorded". Nobody had taken over. Deleting a file must never kill a
+      // healthy process.
+      const authority = checkAuthority({
+        stateDir: STATE_DIR,
+        tokenHash: BOT_TOKEN_HASH,
+      });
+
+      if (authority.kind === "preempted") {
+        // A genuinely newer poller holds the pidfile. Exit WITHOUT issuing
+        // another getUpdates, so we never 409-storm the new incumbent.
         log(
           "poller",
-          `preempted by newer poller (pidfile no longer records our PID) — exiting cleanly (token=${BOT_TOKEN_HASH} state_dir=${STATE_DIR})`,
-          { ourPid: process.pid },
+          `preempted by newer poller (pid ${authority.byPid} now holds the pidfile) — exiting cleanly (token=${BOT_TOKEN_HASH} state_dir=${STATE_DIR})`,
+          { ourPid: process.pid, byPid: authority.byPid },
         );
         polling = false;
         // Do NOT release the pidfile — it belongs to the successor now.
         return;
+      }
+
+      if (authority.kind === "vacant" || authority.kind === "stale") {
+        // Nobody real holds the pidfile, and we are still alive and polling.
+        //
+        //   vacant — the file is GONE. Something deleted it out from under us.
+        //   stale  — the file names a pid that NO LONGER EXISTS. It looks like a
+        //            successor, but it is a corpse. On 2026-07-14 a test run
+        //            whose hermetic preload had not loaded stamped the LIVE
+        //            pidfile with its own pid, exited seconds later, and the
+        //            real poller killed itself for that dead pid.
+        //
+        // Either way we are still the only poller for this token. RE-CLAIM and
+        // carry on. Neither an absent file nor a dead pid is a successor, and
+        // neither is a reason to take the operator's inbound channel down.
+        //
+        // signalOutgoing:false — there is nothing live to SIGTERM, and signalling
+        // a recycled PID could only ever hit an unrelated process.
+        const why =
+          authority.kind === "vacant"
+            ? "pidfile VANISHED (nobody holds it)"
+            : `pidfile records a DEAD pid (${authority.byPid}) — a stale claim, not a successor`;
+
+        log(
+          "poller",
+          `${why} — re-claiming it and continuing; we are still the only poller ` +
+            `for this token (token=${BOT_TOKEN_HASH} state_dir=${STATE_DIR})`,
+          { ourPid: process.pid },
+        );
+        claimAuthoritative({
+          stateDir: STATE_DIR,
+          tokenHash: BOT_TOKEN_HASH,
+          signalOutgoing: false,
+        });
       }
 
       try {

@@ -32,6 +32,7 @@ import {
 } from "../lib/loudfail.js";
 import { _resetCache } from "../lib/access.js";
 import { ACCESS_FILE, STATE_DIR } from "../lib/config.js";
+import { STALL_EXIT_CODE } from "../lib/exit-codes.js";
 
 // broadcastSystemAlert (used by the spawn-failure / early-death alerts
 // below) defaults its recipients to loadAccess().allowFrom — give it a
@@ -379,15 +380,30 @@ describe("ensurePollerRunning: post-spawn grace-window death check (adversarial-
 
     // The exit-observer is fire-and-forget (`void child.exited.then(...)`)
     // — give its microtask/short-timer chain a tick to run before asserting.
-    await new Promise((r) => setTimeout(r, 10));
+    await new Promise((r) => setTimeout(r, 60));
 
-    expect(alerts.length).toBe(1);
-    expect(alerts[0]).toContain("FATAL");
-    expect(alerts[0]).toContain("pid 5050");
+    expect(alerts.length).toBeGreaterThan(0);
     expect(alerts[0]).toContain("exited with code 1");
+    expect(alerts[0]).toContain("stopped unexpectedly");
+    // Not DOWN — it is being respawned right now. See #92.
+    expect(alerts[0]).not.toContain("DOWN");
   });
 
-  test("a child that exits well after the grace window does NOT alert", async () => {
+  // BEHAVIOUR CHANGE, and the whole point of the fix.
+  //
+  // This test used to assert `alerts.length === 0` — it PINNED THE BUG as a
+  // requirement: a poller that died any time after the grace window produced no
+  // alert, no log and no respawn, and inbound Telegram delivery just stopped.
+  //
+  // That is not a hypothetical. It fired live on 2026-07-14: the poller vanished
+  // 37 minutes in, and the operator's only channel to the fleet went silent with
+  // every safety net downstream of the process being alive. "Ordinary lifecycle"
+  // was never a safe reading of a dead poller.
+  //
+  // The age of the corpse is not the signal. Whether ANOTHER live poller took
+  // over the pidfile is — and that question is just as answerable at 37 minutes
+  // as at 300ms (see the takeover test below, which still expects silence).
+  test("a child that exits well AFTER the grace window now alerts too (it used to be silent — that was the bug)", async () => {
     const spawnedHandle = fakeSpawnHandle(
       6060,
       new Promise<number>((resolve) => setTimeout(() => resolve(0), 60)),
@@ -396,7 +412,7 @@ describe("ensurePollerRunning: post-spawn grace-window death check (adversarial-
       pollerScriptPath: "/fake/telegram-poller.ts",
       stateDir: "/fake/state",
       tokenHash: "dies-later",
-      readPid: () => null,
+      readPid: () => null, // nobody took over ⇒ delivery really is down
       isAlive: () => false,
       spawn: () => spawnedHandle,
       graceMs: 10, // the child "survives" past this before exiting
@@ -405,7 +421,11 @@ describe("ensurePollerRunning: post-spawn grace-window death check (adversarial-
 
     await new Promise((r) => setTimeout(r, 100));
 
-    expect(alerts.length).toBe(0);
+    // Still alerts — an unexplained exit is news whenever it happens. But it no
+    // longer claims DOWN: the supervisor respawns it on the spot (#92).
+    expect(alerts.length).toBeGreaterThan(0);
+    expect(alerts[0]).toContain("stopped unexpectedly");
+    expect(alerts[0]).not.toContain("DOWN");
   });
 
   test("a still-running child (exited never resolves) never alerts", async () => {
@@ -473,10 +493,92 @@ describe("ensurePollerRunning: post-spawn grace-window death check (adversarial-
     });
     expect(result).toEqual({ action: "spawned", pid: 8181 });
 
-    await new Promise((r) => setTimeout(r, 20));
+    await new Promise((r) => setTimeout(r, 60));
 
-    expect(alerts.length).toBe(1);
-    expect(alerts[0]).toContain("FATAL");
-    expect(alerts[0]).toContain("no OTHER live poller");
+    // An unexplained crash IS worth telling him about — that contract stands.
+    expect(alerts.length).toBeGreaterThan(0);
+    expect(alerts[0]).toContain("stopped unexpectedly");
+    // ...but it must NOT claim DOWN. This test used to assert it did. That
+    // assertion was the bug, pinned: the respawn happens in the same function,
+    // so the real gap is about a second. DOWN is reserved for the FATAL path,
+    // where it is true (#92).
+    expect(alerts[0]).not.toContain("DOWN");
+  });
+
+  /**
+   * THE BUG THE OPERATOR SCREENSHOTTED (#92, 2026-07-17).
+   *
+   * poll-watchdog exits STALL_EXIT_CODE (75) to ASK for a respawn, having
+   * already told him "recovering by itself, no action needed". The supervisor
+   * then reported that same event as "inbound Telegram delivery is DOWN" —
+   * because it never looked at the exit code, despite 75 having been chosen
+   * precisely so it could be told apart from a crash.
+   *
+   * Two messages, seconds apart, one event, opposite meanings — and the second
+   * one false, as he could see for himself:
+   * 「そのメッセージがあっても普通に届きますからね」.
+   *
+   * This is the alarm channel. A false alarm here teaches him to mute it, and
+   * then a REAL outage reaches nobody. Silence on a planned restart is not a
+   * missing feature; it is the feature.
+   */
+  test("a PLANNED stall restart (exit 75) respawns SILENTLY — the watchdog already spoke", async () => {
+    // The real sequence: the poller stalls ONCE, self-terminates asking for a
+    // respawn, and its replacement comes up healthy (never exits). Handing the
+    // same instantly-exiting handle back on every respawn would instead model a
+    // poller that can NEVER start — which burns all 5 attempts and correctly
+    // pages via the FATAL path. That is a different scenario, covered below.
+    const stalled = fakeSpawnHandle(8282, Promise.resolve(STALL_EXIT_CODE));
+    const healthy = fakeSpawnHandle(8283, new Promise<number>(() => {}));
+    let spawnCount = 0;
+    const result = ensurePollerRunning({
+      pollerScriptPath: "/fake/telegram-poller.ts",
+      stateDir: "/fake/state",
+      tokenHash: "planned-stall-restart",
+      // Same situation as the genuine-crash case above — nobody took over.
+      // The ONLY difference is the exit code, and that must be enough.
+      readPid: () => ({ pid: 8282 }),
+      isAlive: () => false,
+      spawn: () => {
+        spawnCount += 1;
+        return spawnCount === 1 ? stalled : healthy;
+      },
+      graceMs: 50,
+    });
+    expect(result).toEqual({ action: "spawned", pid: 8282 });
+
+    await new Promise((r) => setTimeout(r, 60));
+
+    // Not one word to the operator...
+    expect(alerts).toEqual([]);
+    // ...and it still gets fixed. Silence here must mean "handled", never
+    // "ignored" — the respawn is what earns the right to stay quiet.
+    expect(spawnCount).toBe(2);
+  });
+
+  /**
+   * The other half of the contract: staying quiet about a planned restart must
+   * NOT extend to a poller that cannot come back. If every respawn stalls again,
+   * the supervisor exhausts MAX_RESPAWNS and pages — loudly, and truthfully,
+   * because by then delivery really is down.
+   */
+  test("a poller that stalls forever still ends up paging via the FATAL path", async () => {
+    const alwaysStalls = fakeSpawnHandle(8484, Promise.resolve(STALL_EXIT_CODE));
+    const result = ensurePollerRunning({
+      pollerScriptPath: "/fake/telegram-poller.ts",
+      stateDir: "/fake/state",
+      tokenHash: "stalls-forever",
+      readPid: () => ({ pid: 8484 }),
+      isAlive: () => false,
+      spawn: () => alwaysStalls,
+      graceMs: 50,
+    });
+    expect(result).toEqual({ action: "spawned", pid: 8484 });
+
+    await new Promise((r) => setTimeout(r, 100));
+
+    expect(alerts.length).toBeGreaterThan(0);
+    // Here — and only here — "DOWN" is the truth.
+    expect(alerts[alerts.length - 1]).toContain("DOWN");
   });
 });

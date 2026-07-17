@@ -52,7 +52,8 @@ import { startNotifyRelay } from "./lib/notify-relay.js";
 import { wakeEnabled } from "./lib/wake.js";
 import { resolveConfigProbe, wantsGetMe } from "./lib/config-probe.js";
 import { runHealth, serializeHealthReport } from "./lib/health-adapters.js";
-import { tgApi, getMeRaw } from "./lib/telegram-api.js";
+import { tgApi, getMeRaw, sendMessage } from "./lib/telegram-api.js";
+import { parseSendArgs, SEND_USAGE } from "./lib/send-cli.js";
 import {
   validateBotToken,
   describeAccessGating,
@@ -118,6 +119,56 @@ if (process.argv.slice(2).includes("config")) {
   );
   process.stdout.write(JSON.stringify(probe, null, 2) + "\n");
   process.exit(0);
+}
+
+// ── One-shot outbound send (no MCP transport, no poller) ────────────────────
+//
+// `bun run ts/telegram-server.ts send --chat-id <id> --text <msg>` sends ONE
+// Telegram message and exits. The MCP-independent outbound path.
+//
+// Reported by `grant` (card cct-cli-send-outbound-path-independent-of-mcp)
+// after it cost a real deadline: it had a time-critical finding for the
+// operator, the cct MCP server was down, and it simply could not deliver.
+//
+// Inbound is redundant now (standalone poller + wake-failure fallback to the
+// notify relay + redelivery). Outbound was not: it went exclusively through
+// this server's `reply` MCP tool, so when the server dropped — or when its
+// instructions loaded but its TOOLS did not resolve, which is the shape `grant`
+// actually saw — every agent went MUTE, and the operator read that silence as
+// being ignored. The `health` tool is no escape hatch either: it is itself an
+// MCP tool, so it disappears in exactly the failure it would need to report.
+//
+// A CLI does not depend on MCP tool-schema exposure, and Bash is always
+// available. Placed here — after the unexpanded-env guard (a junk token must
+// still fail loud) but BEFORE acquireLock() — because sending one message must
+// never contend for the single-instance lock held by the running server.
+if (process.argv.slice(2)[0] === "send") {
+  const parsed = parseSendArgs(process.argv.slice(3));
+  if (!parsed.ok) {
+    process.stderr.write(`claude-code-telegrammer send: ${parsed.error}\n\n`);
+    process.stderr.write(SEND_USAGE);
+    process.exit(2);
+  }
+  try {
+    const messageId = await sendMessage(
+      parsed.args.chatId,
+      parsed.args.text,
+      parsed.args.replyTo,
+    );
+    process.stdout.write(
+      JSON.stringify({ ok: true, message_id: messageId }) + "\n",
+    );
+    process.exit(0);
+  } catch (err) {
+    // Fail LOUD and non-zero. A send that silently "succeeds" here would
+    // recreate the exact bug this mode exists to fix: an agent believing it
+    // reached the operator when it did not.
+    const reason = err instanceof Error ? err.message : String(err);
+    process.stderr.write(
+      `claude-code-telegrammer send: FAILED to deliver: ${reason}\n`,
+    );
+    process.exit(1);
+  }
 }
 
 // ── Fail loud on renamed env vars ───────────────────────────────────────────

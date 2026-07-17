@@ -56,10 +56,15 @@ import {
   checkWakeTargetReachable,
   checkWakeDeliveryBacklog,
 } from "./health-checks-wake.js";
+import {
+  checkCodeCurrent,
+  type CodeCurrencyProbe,
+} from "./health-checks-code.js";
 
 // Re-export the builders + skip marker so callers/tests have one import surface.
 export * from "./health-checks.js";
 export * from "./health-checks-wake.js";
+export * from "./health-checks-code.js";
 
 // ── Report shape (shared contract) ──────────────────────────────────────────
 
@@ -173,6 +178,12 @@ export interface HealthInputs {
   wakeReachability: WakeReachabilityProbe;
   /** Consecutive-wake-failure counter; null ⇔ skipped (wake disabled). */
   wakeBacklog: WakeFailureState | null;
+  /**
+   * Process start times vs source mtime — "am I running the code on disk?".
+   * Optional so existing callers/fixtures stay valid; absent ⇔ the check skips
+   * rather than failing the report.
+   */
+  codeCurrency?: CodeCurrencyProbe;
 }
 
 // ── Report assembly ─────────────────────────────────────────────────────────
@@ -195,6 +206,7 @@ export function buildHealthReport(inputs: HealthInputs): HealthReport {
     checkEnvLegacy(inputs.legacyEnvNames),
     checkWakeTargetReachable(inputs.wakeReachability),
     checkWakeDeliveryBacklog(inputs.wakeBacklog),
+    checkCodeCurrent(inputs.codeCurrency),
   ];
 
   const checks = outcomes.map((o) => o.entry);
