@@ -89,10 +89,14 @@ describe("createStallWatchdog — fires once per stall episode", () => {
     expect(h.alarms.length).toBe(1);
     const msg = h.alarms[0];
     expect(msg).toContain("INGESTION STALL");
-    expect(msg).toContain("ALIVE");
     expect(msg.toLowerCase()).toContain("restart");
     // Names the stall duration (~185s) in the message.
     expect(msg).toMatch(/~1\d\ds/);
+    // "The bridge process is ALIVE but NOT polling" used to be asserted here.
+    // That is mechanism, not decision: it tells an engineer why a kill-0 check
+    // missed this, and tells the operator nothing he can act on. It moved to
+    // the poller log with the rest of the diagnosis (#92) — the message he
+    // actually reads is now four short lines.
   });
 
   test("no alarm just BELOW the threshold", () => {

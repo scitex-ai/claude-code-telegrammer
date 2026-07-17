@@ -48,8 +48,36 @@ describe("stall watchdog: actuator", () => {
     const h = harness({ pollAt: 0, nowAt: 200_000 });
     h.wd.tick();
 
-    expect(h.emitted[0]).toContain("SELF-HEALING");
+    // The contract, not the wording: it must say it recovers on its own, and
+    // must not send a human off to restart anything.
+    expect(h.emitted[0].toLowerCase()).toContain("no action needed");
     expect(h.emitted[0]).not.toContain("ACTION: restart the bridge");
+  });
+
+  /**
+   * The operator, 2026-07-17, holding a screenshot of this very alarm:
+   * 「文章が長すぎて読む気にならないですねリストにするなりして
+   *   なんか読ませる気がないというか」
+   *
+   * The alarm was ~700 characters of network-black-hole / kill-0 / "predates
+   * the respawn fix" / token= / state_dir=. Our own outbound hook caps a
+   * HUMAN-authored Telegram message at 512 chars and demands numbered lines,
+   * because he reads on a phone — and these machine alarms bypassed it
+   * entirely. An alarm nobody will read is an alarm that does not exist, and
+   * this is the channel we cannot afford to have muted.
+   *
+   * No test asserted this, which is why it rotted. Now one does.
+   */
+  test("the alarm is short enough to actually be read on a phone", () => {
+    const h = harness({ pollAt: 0, nowAt: 200_000 });
+    h.wd.tick();
+
+    expect(h.emitted[0].length).toBeLessThanOrEqual(512);
+    // Listed, not a wall of prose.
+    expect(h.emitted[0]).toContain("\n1. ");
+    // The diagnostics belong in the poller log, not in his face.
+    expect(h.emitted[0]).not.toContain("state_dir=");
+    expect(h.emitted[0]).not.toContain("token=");
   });
 
   test("a healthy bridge neither alarms nor actuates", () => {

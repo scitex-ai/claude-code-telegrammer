@@ -41,8 +41,8 @@
  * "probably inherited" was not good enough here.
  */
 
-import { readdirSync, statSync, openSync } from "fs";
-import { dirname, join } from "path";
+import { openSync } from "fs";
+import { newestCodeMtimeMs, pollerLogPath } from "./poller-paths.js";
 import {
   pollerPidfilePath,
   readPidfile,
@@ -50,6 +50,12 @@ import {
 } from "./takeover.js";
 import { log } from "./log.js";
 import { broadcastSystemAlert } from "./loudfail.js";
+import { STALL_EXIT_CODE } from "./exit-codes.js";
+import {
+  plannedRestartNote,
+  crashAlarm,
+  fatalAlarm,
+} from "./supervisor-messages.js";
 
 /** Minimal shape ensurePollerRunning needs from a spawned child handle —
  * satisfied by Bun.Subprocess, and trivially fakeable in tests. */
@@ -140,42 +146,12 @@ function defaultReadPid(
   return readPidfile(pollerPidfilePath(stateDir, tokenHash));
 }
 
-/**
- * Newest mtime (ms) across the poller's own source: its entrypoint plus every
- * ts/lib/*.ts it imports. Returns 0 if nothing can be stat'd.
- *
- * Used to answer one question: "could the running poller possibly have loaded
- * the code that is on disk right now?" If a source file was modified AFTER the
- * poller claimed the pidfile, then no — that process is running stale code.
- */
-export function newestCodeMtimeMs(pollerScriptPath: string): number {
-  let newest = 0;
-  const consider = (path: string) => {
-    try {
-      const { mtimeMs } = statSync(path);
-      if (mtimeMs > newest) newest = mtimeMs;
-    } catch {
-      // Unreadable file — ignore it rather than let one bad stat decide that
-      // a healthy poller is stale. See the fail-safe note in the caller.
-    }
-  };
-
-  consider(pollerScriptPath);
-  const libDir = join(dirname(pollerScriptPath), "lib");
-  try {
-    for (const entry of readdirSync(libDir)) {
-      if (entry.endsWith(".ts")) consider(join(libDir, entry));
-    }
-  } catch {
-    // No lib dir (unexpected layout) — the entrypoint mtime alone still works.
-  }
-  return newest;
-}
-
-/** Where the detached poller's stderr is persisted. */
-export function pollerLogPath(stateDir: string, tokenHash: string): string {
-  return join(stateDir, `poller-${tokenHash}.log`);
-}
+// Moved to lib/poller-paths.ts. Re-exported so existing importers (and their
+// tests) keep resolving them from this module's public API. NOTE the shape:
+// imported for THIS module's own callers below, and separately re-exported —
+// a bare `export { x } from "./y.js"` would forward the name without binding
+// it locally, leaving every internal call site undefined at runtime.
+export { newestCodeMtimeMs, pollerLogPath };
 
 function defaultSpawn(
   cmd: string[],
@@ -399,8 +375,15 @@ interface ResolvedDeps {
  * The age gate bought nothing anyway: the thing that actually distinguishes a
  * crash from a legitimate "newest wins" takeover is whether a DIFFERENT live
  * poller now holds the pidfile, and that question is just as answerable at 37
- * minutes as at 300ms. So ask it at any age, and treat every other exit as what
- * it is — an outage.
+ * minutes as at 300ms. So ask it at any age.
+ *
+ * "...and treat every other exit as what it is — an outage." That is what this
+ * comment used to say, and it was a boolean over three states. An exit is a
+ * TAKEOVER (someone else holds the pidfile), a PLANNED restart (STALL_EXIT_CODE
+ * — the watchdog asking to be respawned, having already told the operator so),
+ * or a CRASH. Collapsing the middle into "outage" made every successful
+ * self-heal page the operator with a contradiction and a falsehood — the exact
+ * false alarm the takeover branch below already knew to avoid (#92).
  */
 function observePollerExit(
   child: SpawnedProcessHandle,
@@ -435,28 +418,40 @@ function observePollerExit(
         return;
       }
 
-      // Nobody took over ⇒ inbound Telegram delivery is DOWN, right now.
+      // Nobody took over. Three exits, three volumes — see lib/exit-codes.ts
+      // and lib/supervisor-messages.ts.
       const lived = aliveMs < r.graceMs ? `only ${aliveMs}ms` : `${aliveMs}ms`;
 
       if (respawnsSoFar >= MAX_RESPAWNS) {
-        const msg =
-          `FATAL: the standalone poller (pid ${child.pid}) exited with code ` +
-          `${code} after ${lived}, nothing took over the pidfile, and it has ` +
-          `already been respawned ${respawnsSoFar} times — GIVING UP. Inbound ` +
-          `Telegram delivery is NOT running and will not self-heal. Restart ` +
-          `the MCP server and check the poller log for the cause.`;
+        const msg = fatalAlarm(child.pid, code, lived, respawnsSoFar);
         r.logFn("poller-supervisor", msg);
         void broadcastSystemAlert(msg);
         return;
       }
 
-      const msg =
-        `the standalone poller (pid ${child.pid}) exited with code ${code} ` +
-        `after ${lived} and nothing took over the pidfile — inbound Telegram ` +
-        `delivery is DOWN. Respawning (attempt ${respawnsSoFar + 1}/` +
-        `${MAX_RESPAWNS}).`;
-      r.logFn("poller-supervisor", msg);
-      void broadcastSystemAlert(msg);
+      // PLANNED: the poller's own stall watchdog exits STALL_EXIT_CODE to ASK
+      // for this respawn, and it has already told the operator it is recovering
+      // by itself. Respawn and stay off his channel — a second message calling
+      // the same event an outage would contradict the first, and it would be
+      // false besides: the respawn is right below.
+      if (code === STALL_EXIT_CODE) {
+        r.logFn("poller-supervisor", plannedRestartNote(child.pid, lived), {
+          exitedPid: child.pid,
+          aliveMs,
+          exitCode: code,
+          respawnsSoFar,
+        });
+      } else {
+        const msg = crashAlarm(
+          child.pid,
+          code,
+          lived,
+          respawnsSoFar + 1,
+          MAX_RESPAWNS,
+        );
+        r.logFn("poller-supervisor", msg);
+        void broadcastSystemAlert(msg);
+      }
 
       // Self-heal. Bounded: a poller that crashes on every start must not turn
       // into a fork bomb, so give up loudly after MAX_RESPAWNS rather than
