@@ -113,15 +113,17 @@ export interface EnsurePollerDeps {
    * than touching real files. */
   codeMtimeMs?: () => number;
   /** Injectable liveness check; defaults to an IDENTITY-AWARE check
-   * (lib/takeover.ts::isProcessMatching against THIS agent's own
-   * pollerScriptPath, not the generic POLLER_CMDLINE_MARKER — round-2
-   * adversarial review: the generic "telegram-poller" substring would
-   * also match a genuinely-real telegram-poller process belonging to a
-   * DIFFERENT agent on a busy multi-agent host, if a stale pidfile's PID
-   * got reused for one. Matching the full, agent-specific script path
-   * closes that almost for free), not a bare kill(pid,0) — a stale
-   * pidfile's PID can be reused by the OS for an unrelated process, which
-   * a plain existence check can't tell apart from the real poller. */
+   * (lib/takeover.ts::isProcessMatching), not a bare kill(pid,0) — a stale
+   * pidfile's PID can be reused by the OS for an unrelated process, which a
+   * plain existence check can't tell apart from the real poller.
+   *
+   * NOTE (corrected): isProcessMatching checks BOTH the pollerScriptPath in
+   * /proc/<pid>/cmdline AND the agent identity in /proc/<pid>/environ. The
+   * cmdline alone is NOT agent-specific — an earlier comment claimed matching
+   * "the full, agent-specific script path" closed the wrong-agent gap, but all
+   * ~49 agents launch the SAME shared checkout, so every poller's cmdline is
+   * identical. The reused pid could be ANOTHER agent's genuinely-running
+   * poller; only the CCT_AGENT_ID/SAC_NAME environ match rules that out. */
   isAlive?: (pid: number) => boolean;
   /** Injectable spawn primitive; defaults to a detached Bun.spawn of
    * [process.execPath, "run", pollerScriptPath] with stderr appended to
@@ -217,12 +219,12 @@ export function ensurePollerRunning(
   deps: EnsurePollerDeps,
 ): EnsurePollerResult {
   const readPid = deps.readPid ?? defaultReadPid;
-  // Agent-specific: matches THIS agent's own poller script path, not the
-  // generic POLLER_CMDLINE_MARKER substring (round-2 adversarial review
-  // finding #4) — closes the (admittedly narrow) gap where a stale
-  // pidfile's PID gets reused by the OS for a genuinely-real
-  // telegram-poller process belonging to a DIFFERENT agent on a busy
-  // multi-agent host.
+  // isProcessMatching verifies BOTH the script path (/proc/<pid>/cmdline) AND
+  // the agent identity (/proc/<pid>/environ CCT_AGENT_ID/SAC_NAME). The path is
+  // NOT agent-specific — all ~49 agents share one checkout, so a reused pid on
+  // ANOTHER agent's genuinely-running poller matches the cmdline; only the
+  // identity check rules it out. (An earlier comment credited the script path
+  // with closing that gap; it did not — the path is fleet-wide.)
   const isAlive =
     deps.isAlive ??
     ((pid: number) => isProcessMatching(pid, deps.pollerScriptPath));
