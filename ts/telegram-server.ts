@@ -53,7 +53,7 @@ import { wakeEnabled } from "./lib/wake.js";
 import { resolveConfigProbe, wantsGetMe } from "./lib/config-probe.js";
 import { runHealth, serializeHealthReport } from "./lib/health-adapters.js";
 import { tgApi, getMeRaw, sendMessage } from "./lib/telegram-api.js";
-import { parseSendArgs, SEND_USAGE } from "./lib/send-cli.js";
+import { parseSendArgs, SEND_USAGE, emptyTokenError } from "./lib/send-cli.js";
 import {
   validateBotToken,
   describeAccessGating,
@@ -148,6 +148,15 @@ if (process.argv.slice(2)[0] === "send") {
     process.stderr.write(`claude-code-telegrammer send: ${parsed.error}\n\n`);
     process.stderr.write(SEND_USAGE);
     process.exit(2);
+  }
+  // Refuse an EMPTY token HERE — this branch runs before the TELEGRAM_ENABLED
+  // guard, so without this an empty token 404s as Telegram "Not Found" and
+  // disguises an absent token as a missing request (#81). Distinct exit code 3
+  // so a caller can tell "no token" from arg-error (2) or deliver-fail (1).
+  const tokenErr = emptyTokenError(TOKEN);
+  if (tokenErr) {
+    process.stderr.write(tokenErr);
+    process.exit(3);
   }
   try {
     const messageId = await sendMessage(

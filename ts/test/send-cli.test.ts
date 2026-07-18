@@ -12,7 +12,7 @@
  */
 
 import { describe, test, expect } from "bun:test";
-import { parseSendArgs } from "../lib/send-cli.js";
+import { parseSendArgs, emptyTokenError } from "../lib/send-cli.js";
 
 describe("parseSendArgs", () => {
   test("parses the minimal invocation", () => {
@@ -93,5 +93,37 @@ describe("parseSendArgs", () => {
     const r = parseSendArgs(["--chat-id", "1", "--text", "done - all green"]);
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.args.text).toBe("done - all green");
+  });
+});
+
+/**
+ * #81 regression: the `send` branch runs BEFORE the TELEGRAM_ENABLED token
+ * guard, so an EMPTY token used to build https://api.telegram.org/bot/sendMessage
+ * and Telegram 404'd it as "Not Found" — an absent token disguised as a missing
+ * request, which sent `grant` chasing a token rotation that never happened.
+ * emptyTokenError is the pre-send guard that names the real cause instead.
+ */
+describe("emptyTokenError", () => {
+  test("returns null for a present token (send proceeds)", () => {
+    expect(emptyTokenError("123456:AA-real-looking-token")).toBeNull();
+    // A single non-empty char is enough to be 'present' — validity is Telegram's
+    // job, not this guard's; this guard only distinguishes absent from present.
+    expect(emptyTokenError("x")).toBeNull();
+  });
+
+  test("returns a loud, actionable message for an empty token", () => {
+    const msg = emptyTokenError("");
+    expect(msg).not.toBeNull();
+    // Names the real cause, not a Telegram error.
+    expect(msg).toContain("CCT_BOT_TOKEN is EMPTY");
+    // Explicitly disowns the misleading Telegram framing.
+    expect(msg).toContain("NOT a Telegram problem");
+    // Gives the safe, leak-free confirmation command (literal, for the user's
+    // shell — not the token value).
+    expect(msg).toContain('echo "len=${#CCT_BOT_TOKEN}"');
+    // Points at the actual upstream owner (sac's pool fold / a blocked direnv).
+    expect(msg).toContain("SAC_SECRETS_ENVRC");
+    // Never leaks a token value (there is none, but assert the contract).
+    expect(msg).not.toContain("123456:AA");
   });
 });
