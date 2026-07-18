@@ -24,3 +24,15 @@ build/
 **/settings.json
 **/skills/secret
 **/bin/general/rename.sh
+
+# Scratch / local-notes dirs that MUST NOT be published — this is a PUBLIC repo.
+# Both names PROMISED exclusion and neither was actually ignored, so the
+# pre-stop autosave-rescue (git add -A) committed scratch here, and the
+# operator's own instruction to save private notes under ./GITIGNORE/ would have
+# published them (card cct-gitignored-dir-is-not-gitignored-name-lies). Ignoring
+# both spellings makes the name honest: scratch and any restored
+# standing-instructions file stay local. NOTE: already-tracked files under
+# GITIGNORED/ stay tracked (gitignore never untracks); untracking those is a
+# separate, deliberate call — not a side effect of this rule.
+/GITIGNORE/
+/GITIGNORED/
