@@ -92,6 +92,39 @@ export function parseSendArgs(argv: string[]): SendArgsResult {
   return { ok: true, args };
 }
 
+/**
+ * Guard for the `send` branch, which runs BEFORE telegram-server.ts's
+ * TELEGRAM_ENABLED token check (it must — a one-shot send cannot wait on the
+ * server's single-instance lock). So the send path must refuse an EMPTY token
+ * itself, or an empty TOKEN builds `https://api.telegram.org/bot/sendMessage`
+ * and Telegram 404s it as "Not Found" — an absent token wearing a Telegram
+ * error as a disguise (#81; `grant` chased a phantom token rotation because of
+ * it). cct treats a set-but-empty token as ABSENT (lib/config.ts), which is
+ * exactly what a folded-but-unresolved `export CCT_BOT_TOKEN="$CCT_BOT_TOKEN_<SLOT>"`
+ * produces.
+ *
+ * Returns a loud, actionable error string when `token` is empty, or null when
+ * it is present. Pure (no env / no network) so it is unit-testable.
+ */
+export function emptyTokenError(token: string): string | null {
+  if (token.length > 0) return null;
+  return (
+    `claude-code-telegrammer send: CCT_BOT_TOKEN is EMPTY — refusing to send.\n` +
+    `\n` +
+    `This is NOT a Telegram problem. cct treats a set-but-empty token as ABSENT\n` +
+    `(lib/config.ts); with no token the request URL would be\n` +
+    `  https://api.telegram.org/bot/sendMessage\n` +
+    `which Telegram answers "Not Found" — an absent token disguised as a missing\n` +
+    `request. Failing here instead, so the real cause is named.\n` +
+    `\n` +
+    `Confirm in your shell:  echo "len=\${#CCT_BOT_TOKEN}"   (len=0 = empty)\n` +
+    `\n` +
+    `Likely cause: sac's token pool did not fold CCT_BOT_TOKEN_<SLOT> into\n` +
+    `CCT_BOT_TOKEN — e.g. a restart without SAC_SECRETS_ENVRC sourced, or a\n` +
+    `direnv .envrc that was blocked (unapproved) so the export never ran.\n`
+  );
+}
+
 export const SEND_USAGE =
   "usage: claude-code-telegrammer send --chat-id <id> --text <message> " +
   "[--reply-to <message_id>]\n" +
