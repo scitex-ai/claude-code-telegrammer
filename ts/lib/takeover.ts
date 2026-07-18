@@ -153,46 +153,109 @@ export const SERVER_CMDLINE_MARKER = "telegram-server";
 const HAS_PROC = existsSync("/proc");
 
 /**
- * Identity-aware liveness check beyond isPidAlive's plain existence test
- * (adversarial-review finding: a stale pidfile's PID can be REUSED by the
- * OS for an unrelated process after the original poller exited —
- * plausible on a long-lived, busy, multi-agent host where PIDs wrap. A
- * bare kill(pid,0) can't tell that apart from the real thing, which would
- * make a consumer conclude "already running/alive" and never notice the
- * real process is gone — silently, until something else forces a
- * restart. Both lib/poller-supervisor.ts::ensurePollerRunning and
- * lib/health-adapters.ts::probePoller read this SAME function so there is
- * one shared verification, not two different heuristics.
+ * Read one process's fleet agent-identity marker from /proc/<pid>/environ.
+ * Returns "" if the process carries no marker. Same resolution order as
+ * {@link ownAgentId}: CCT_AGENT_ID first, then SAC_NAME (the marker
+ * lib/poller-teardown.ts already keys on). Split out as a pure parser so the
+ * decision logic and the syscall are testable apart.
+ */
+export function agentIdFromEnviron(environ: string): string {
+  let sacName = "";
+  for (const entry of environ.split("\0")) {
+    const eq = entry.indexOf("=");
+    if (eq <= 0) continue;
+    const key = entry.slice(0, eq);
+    const val = entry.slice(eq + 1);
+    if (key === "CCT_AGENT_ID" && val) return val; // preferred, short-circuit
+    if (key === "SAC_NAME" && val) sacName = val; // fallback if no CCT_AGENT_ID
+  }
+  return sacName;
+}
+
+/** This process's own agent identity, or "" if it has none (dev / single-agent
+ * / not sac-launched). Same resolution order as agentIdFromEnviron. */
+function ownAgentId(): string {
+  return process.env.CCT_AGENT_ID || process.env.SAC_NAME || "";
+}
+
+/**
+ * Decide whether a live, cmdline-matching pid is OUR agent's poller, given our
+ * own identity and the target's environ blob (null = unreadable).
  *
- * Reads /proc/<pid>/cmdline (Linux) and requires it to contain
- * `cmdlineSubstring`. Biased toward FALSE NEGATIVES over false positives,
- * on purpose: wrongly concluding "not ours" merely triggers an extra
- * poller spawn (self-heals via the newest-wins takeover protocol below);
- * wrongly concluding "alive and ours" is the silent, unrecoverable-until-
- * restart failure this exists to prevent. An unreadable/mismatched
- * cmdline on a /proc-having host therefore returns false, not "assume
- * it's fine".
+ * This exists because the cmdline check ALONE is not enough on this fleet: all
+ * ~49 agents launch the SAME shared checkout, so every agent's poller has an
+ * IDENTICAL cmdline. A cmdline match therefore does NOT prove the pid is ours —
+ * a stale pidfile whose pid the OS reused for ANOTHER agent's poller would pass
+ * it, and the supervisor/health would report "alive & ours" while OUR inbound
+ * is dead. (The old comment claimed the script path was "agent-specific" and
+ * closed this gap; the path is fleet-wide and closed nothing.)
  *
- * On a platform with no /proc at all (checked once at module load), falls
- * back to the plain existence check — preserves prior behaviour there
- * rather than making every non-Linux host permanently distrust its own
- * processes.
+ * Bias unchanged from isProcessMatching: a false-negative is cheap (one extra
+ * bounded respawn, self-heals via newest-wins), a false "alive & ours" is the
+ * silent outage. So:
+ *   - no own identity     -> true  (cannot verify; do not regress dev/single-agent)
+ *   - environ unreadable  -> false (fail closed: unverifiable is treated as not-ours)
+ *   - target carries no id -> true (cannot disprove ownership; the cmdline stands)
+ *   - target id present   -> must equal ours, else false (the gap this closes)
+ */
+export function matchesAgentIdentity(
+  expectedAgentId: string,
+  targetEnviron: string | null,
+): boolean {
+  if (!expectedAgentId) return true;
+  if (targetEnviron === null) return false;
+  const theirId = agentIdFromEnviron(targetEnviron);
+  if (!theirId) return true;
+  return theirId === expectedAgentId;
+}
+
+/**
+ * Identity-aware liveness check beyond isPidAlive's plain existence test.
+ *
+ * Two independent reasons a live pid might NOT be our poller, both checked:
+ *   1. PID REUSE: a stale pidfile's PID gets recycled by the OS for an
+ *      unrelated process. The /proc/<pid>/cmdline check rejects that.
+ *   2. WRONG AGENT: because all ~49 agents run the SAME checkout, a cmdline
+ *      match is fleet-wide, not agent-specific — the recycled pid could be
+ *      ANOTHER agent's (genuinely-running) poller. The agent-identity check
+ *      (matchesAgentIdentity, via /proc/<pid>/environ) rejects that. Without
+ *      it, the supervisor and health-adapters (both call this ONE function)
+ *      would report our inbound "alive" off another agent's process.
+ *
+ * Biased toward FALSE NEGATIVES on purpose: concluding "not ours" merely
+ * triggers a bounded respawn (self-heals via the newest-wins protocol below);
+ * concluding "alive and ours" wrongly is the silent, unrecoverable-until-
+ * restart outage this exists to prevent. Unreadable cmdline/environ, or a
+ * mismatched identity, therefore returns false — never "assume it's fine".
+ *
+ * `expectedAgentId` defaults to this process's own identity; injectable for
+ * tests. On a platform with no /proc (checked once at module load), falls back
+ * to the plain existence check rather than making non-Linux hosts distrust
+ * their own processes.
  */
 export function isProcessMatching(
   pid: number,
   cmdlineSubstring: string,
+  expectedAgentId: string = ownAgentId(),
 ): boolean {
   if (!isPidAlive(pid)) return false;
   if (!HAS_PROC) return true;
+  let cmdline: string;
   try {
-    const cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(
-      /\0/g,
-      " ",
-    );
-    return cmdline.includes(cmdlineSubstring);
+    cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf8").replace(/\0/g, " ");
   } catch {
     return false;
   }
+  if (!cmdline.includes(cmdlineSubstring)) return false;
+  // cmdline is fleet-wide identical (shared checkout) — verify AGENT IDENTITY
+  // before trusting this pid as ours. See matchesAgentIdentity.
+  let environ: string | null;
+  try {
+    environ = readFileSync(`/proc/${pid}/environ`, "utf8");
+  } catch {
+    environ = null;
+  }
+  return matchesAgentIdentity(expectedAgentId, environ);
 }
 
 /**
