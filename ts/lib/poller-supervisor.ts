@@ -50,9 +50,10 @@ import {
 } from "./takeover.js";
 import { log } from "./log.js";
 import { broadcastSystemAlert } from "./loudfail.js";
-import { STALL_EXIT_CODE } from "./exit-codes.js";
+import { STALL_EXIT_CODE, SIGTERM_EXIT } from "./exit-codes.js";
 import {
   plannedRestartNote,
+  standDownNote,
   crashAlarm,
   fatalAlarm,
 } from "./supervisor-messages.js";
@@ -420,9 +421,25 @@ function observePollerExit(
         return;
       }
 
-      // Nobody took over. Three exits, three volumes — see lib/exit-codes.ts
-      // and lib/supervisor-messages.ts.
+      // Nobody took over. Four exits now — see lib/exit-codes.ts and
+      // lib/supervisor-messages.ts.
       const lived = aliveMs < r.graceMs ? `only ${aliveMs}ms` : `${aliveMs}ms`;
+
+      // DELIBERATE STOP: SIGTERM(143) + no successor = sac stopping this poller
+      // on purpose (contract: SIGTERM means stay dead, sac owns the restart —
+      // SIGTERM_EXIT in lib/exit-codes.ts). Stand down; respawning would fight
+      // the terminator and loop against a reaper. BEFORE the crash/MAX paths: a
+      // deliberate stop wins regardless of respawnsSoFar. SIGKILL(137) is
+      // involuntary and falls through to the crash path (respawn + page).
+      if (code === SIGTERM_EXIT) {
+        r.logFn("poller-supervisor", standDownNote(child.pid, lived), {
+          exitedPid: child.pid,
+          exitCode: code,
+          successorHeldPidfile: false,
+          decision: "stand-down",
+        });
+        return;
+      }
 
       if (respawnsSoFar >= MAX_RESPAWNS) {
         const msg = fatalAlarm(child.pid, code, lived, respawnsSoFar);

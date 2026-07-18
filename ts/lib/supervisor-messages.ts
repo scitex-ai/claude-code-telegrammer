@@ -37,6 +37,20 @@ export function plannedRestartNote(pid: number, lived: string): string {
 }
 
 /**
+ * A deliberate external stop (SIGTERM), nobody took over: LOG only — the
+ * operator must NOT be paged for a stop he (or sac) asked for. Contract with
+ * sac (2026-07-18): SIGTERM means stay dead, sac owns the restart. Respawning
+ * would fight the terminator and, against a reaper, loop.
+ */
+export function standDownNote(pid: number, lived: string): string {
+  return (
+    `poller (pid ${pid}) received SIGTERM after ${lived} and nobody took over ` +
+    `— STANDING DOWN, not respawning. A deliberate stop is sac's to reverse; ` +
+    `respawning would fight the terminator.`
+  );
+}
+
+/**
  * An UNEXPECTED exit that the supervisor is about to fix.
  *
  * Worth telling him — an unexplained crash is a real signal — but not worth
