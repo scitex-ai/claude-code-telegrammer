@@ -1,17 +1,20 @@
 /**
- * Ingestion-stall alarm (PR-A): the getUpdates poller can stay ALIVE
+ * Ingestion-stall watchdog: the getUpdates poller can stay ALIVE
  * (process up, kill-0 passes, pidfile records a live PID) yet stop
  * ingesting because getUpdates itself is WEDGED — a hung socket / network
  * black-hole / long-poll whose await never resolves. kill-0 liveness
- * checks miss it; this watchdog turns that silent stall LOUD.
+ * checks miss it; this watchdog detects the silent stall, LOGS it, and
+ * fires the actuator (onStall self-terminates so the supervisor respawns).
+ * It does NOT message the operator — a self-healing stall is not actionable
+ * and a stall-loop would flood him (2026-07-18 spam incident).
  *
  * These tests drive poll-watchdog.ts::createStallWatchdog directly — the
- * stateful checker that owns the "fire vs stay silent" decision. The clock
+ * stateful checker that owns the "actuate vs stay silent" decision. The clock
  * (`now`), the heartbeat getter (`getLastPoll`), the polling predicate
- * (`isPolling`) and the loud-notification sink (`emit`) are all injected,
- * so the alarm / re-arm / shutdown logic is exercised with NO timers and
- * NO network — the same injectable-seam approach poller-batch.ts uses for
- * processBatch.
+ * (`isPolling`) and the actuator (`onStall`) are all injected, so the
+ * actuate / re-arm / shutdown logic is exercised with NO timers and NO
+ * network. There is no operator-message seam to inject — its absence is the
+ * spam fix.
  */
 
 import { describe, test, expect, beforeAll, beforeEach } from "bun:test";
@@ -37,17 +40,22 @@ function harness() {
   let clock = 0;
   let lastPoll = 0;
   let polling = true;
-  const alarms: string[] = [];
+  let actuations = 0;
   const wd = createStallWatchdog({
     now: () => clock,
     getLastPoll: () => lastPoll,
-    emit: (content) => alarms.push(content),
     isPolling: () => polling,
     thresholdMs: THRESHOLD_MS,
+    // The watchdog's only observable output besides its log line. There is no
+    // `emit`/operator seam anymore — a self-healing stall must not reach the
+    // phone (2026-07-18 spam incident). These tests observe the ACTUATOR.
+    onStall: () => {
+      actuations += 1;
+    },
   });
   return {
     wd,
-    alarms,
+    actuations: () => actuations,
     advance: (ms: number) => {
       clock += ms;
     },
@@ -60,8 +68,8 @@ function harness() {
   };
 }
 
-describe("createStallWatchdog — fires once per stall episode", () => {
-  test("(a) no alarm while polls stay fresh", () => {
+describe("createStallWatchdog — actuates once per stall episode", () => {
+  test("(a) no actuation while polls stay fresh", () => {
     const h = harness();
     h.poll(); // initial successful poll at t=0
     // Ten healthy long-poll cycles: advance ~30s then poll each time.
@@ -70,15 +78,15 @@ describe("createStallWatchdog — fires once per stall episode", () => {
       h.poll();
       h.wd.tick();
     }
-    expect(h.alarms.length).toBe(0);
+    expect(h.actuations()).toBe(0);
   });
 
-  test("(b) EXACTLY ONE loud alarm once the stall threshold is crossed", () => {
+  test("(b) EXACTLY ONE actuation once the stall threshold is crossed", () => {
     const h = harness();
     h.poll(); // last successful poll at t=0
     // No further polls — getUpdates has wedged. Cross the threshold.
     h.advance(THRESHOLD_MS + 5_000);
-    h.wd.tick(); // alarm #1
+    h.wd.tick(); // actuate (request respawn)
 
     // Keep ticking while still stalled — must NOT re-fire this episode.
     h.advance(30_000);
@@ -86,54 +94,47 @@ describe("createStallWatchdog — fires once per stall episode", () => {
     h.advance(30_000);
     h.wd.tick();
 
-    expect(h.alarms.length).toBe(1);
-    const msg = h.alarms[0];
-    expect(msg).toContain("INGESTION STALL");
-    expect(msg.toLowerCase()).toContain("restart");
-    // Names the stall duration (~185s) in the message.
-    expect(msg).toMatch(/~1\d\ds/);
-    // "The bridge process is ALIVE but NOT polling" used to be asserted here.
-    // That is mechanism, not decision: it tells an engineer why a kill-0 check
-    // missed this, and tells the operator nothing he can act on. It moved to
-    // the poller log with the rest of the diagnosis (#92) — the message he
-    // actually reads is now four short lines.
+    // Exactly one respawn request per episode — and NO operator message: the
+    // watchdog logs and acts, it has no emit seam (2026-07-18). The message the
+    // operator used to get here was the spam this change removes.
+    expect(h.actuations()).toBe(1);
   });
 
-  test("no alarm just BELOW the threshold", () => {
+  test("no actuation just BELOW the threshold", () => {
     const h = harness();
     h.poll();
     h.advance(THRESHOLD_MS - 1_000); // still under threshold
     h.wd.tick();
-    expect(h.alarms.length).toBe(0);
+    expect(h.actuations()).toBe(0);
   });
 
-  test("(c) the alarm RE-ARMS after a fresh poll, then fires again", () => {
+  test("(c) the watchdog RE-ARMS after a fresh poll, then actuates again", () => {
     const h = harness();
     h.poll();
     h.advance(THRESHOLD_MS + 5_000);
-    h.wd.tick(); // alarm #1
-    expect(h.alarms.length).toBe(1);
+    h.wd.tick(); // actuate #1
+    expect(h.actuations()).toBe(1);
 
     // A successful poll resumes → heartbeat advances → re-arm.
     h.advance(10_000);
     h.poll();
-    h.wd.tick(); // fresh again: no alarm
-    expect(h.alarms.length).toBe(1);
+    h.wd.tick(); // fresh again: no actuation
+    expect(h.actuations()).toBe(1);
 
-    // A LATER stall must alarm again (proves the latch reset).
+    // A LATER stall must actuate again (proves the latch reset).
     h.advance(THRESHOLD_MS + 5_000);
-    h.wd.tick(); // alarm #2
-    expect(h.alarms.length).toBe(2);
+    h.wd.tick(); // actuate #2
+    expect(h.actuations()).toBe(2);
   });
 
-  test("(d) no alarm after shutdown / preemption (isPolling false)", () => {
+  test("(d) no actuation after shutdown / preemption (isPolling false)", () => {
     const h = harness();
     h.poll();
     h.stop(); // poller released authority / clean shutdown
     h.advance(THRESHOLD_MS + 60_000); // long stall AFTER shutdown
     h.wd.tick();
     h.wd.tick();
-    expect(h.alarms.length).toBe(0);
+    expect(h.actuations()).toBe(0);
   });
 });
 
