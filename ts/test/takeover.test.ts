@@ -25,10 +25,12 @@ import { join } from "path";
 import { tmpdir } from "os";
 
 import {
+  agentIdFromEnviron,
   claimAuthoritative,
   isAuthoritative,
   isPidAlive,
   isProcessMatching,
+  matchesAgentIdentity,
   pollerPidfilePath,
   readPidfile,
   releaseAuthoritative,
@@ -412,6 +414,91 @@ describe("takeover: isProcessMatching (adversarial-review finding #2)", () => {
     } finally {
       child.kill();
       await child.exited;
+    }
+  });
+});
+
+const NUL = "\0";
+
+describe("takeover: agentIdFromEnviron (identity parse)", () => {
+  test("extracts CCT_AGENT_ID", () => {
+    expect(
+      agentIdFromEnviron(`PATH=/bin${NUL}CCT_AGENT_ID=cct-abc${NUL}HOME=/h`),
+    ).toBe("cct-abc");
+  });
+
+  test("prefers CCT_AGENT_ID over SAC_NAME when both are present", () => {
+    expect(agentIdFromEnviron(`SAC_NAME=sac-x${NUL}CCT_AGENT_ID=cct-y`)).toBe(
+      "cct-y",
+    );
+  });
+
+  test("falls back to SAC_NAME when CCT_AGENT_ID is absent", () => {
+    expect(agentIdFromEnviron(`SAC_NAME=sac-x${NUL}HOME=/h`)).toBe("sac-x");
+  });
+
+  test("returns empty string when no marker is present", () => {
+    expect(agentIdFromEnviron(`PATH=/bin${NUL}HOME=/h`)).toBe("");
+  });
+
+  test("ignores an empty-valued CCT_AGENT_ID, still finds SAC_NAME", () => {
+    expect(agentIdFromEnviron(`CCT_AGENT_ID=${NUL}SAC_NAME=sac-z`)).toBe(
+      "sac-z",
+    );
+  });
+
+  test("does not match a key that merely ENDS with the marker name", () => {
+    expect(agentIdFromEnviron(`X_CCT_AGENT_ID=nope${NUL}HOME=/h`)).toBe("");
+  });
+});
+
+/**
+ * The wrong-agent gap this card closes: all ~49 agents share one checkout, so a
+ * cmdline match cannot prove a reused pid is OUR poller — it could be another
+ * agent's genuinely-running poller. matchesAgentIdentity is what rules that out.
+ */
+describe("takeover: matchesAgentIdentity", () => {
+  test("no own identity -> true (dev/single-agent; must not regress)", () => {
+    expect(matchesAgentIdentity("", `CCT_AGENT_ID=anything`)).toBe(true);
+    expect(matchesAgentIdentity("", null)).toBe(true);
+  });
+
+  test("environ unreadable -> false (fail closed: unverifiable is not-ours)", () => {
+    expect(matchesAgentIdentity("cct-me", null)).toBe(false);
+  });
+
+  test("same agent id -> true", () => {
+    expect(
+      matchesAgentIdentity("cct-me", `PATH=/b${NUL}CCT_AGENT_ID=cct-me`),
+    ).toBe(true);
+  });
+
+  test("DIFFERENT agent id -> false (another agent's reused-pid poller)", () => {
+    expect(matchesAgentIdentity("cct-me", `CCT_AGENT_ID=cct-someone-else`)).toBe(
+      false,
+    );
+  });
+
+  test("target carries no id -> true (cannot disprove; the cmdline stands)", () => {
+    expect(matchesAgentIdentity("cct-me", `PATH=/b${NUL}HOME=/h`)).toBe(true);
+  });
+});
+
+describe("takeover: isProcessMatching threads the identity check", () => {
+  test("rejects a live, cmdline-matching pid whose agent id differs from expected", () => {
+    // process.pid's environ carries THIS runner's identity (or none). Passing
+    // our OWN id must still match; passing a DIFFERENT id must reject — which
+    // proves the 3rd param actually reaches matchesAgentIdentity. Guarded so it
+    // is deterministic whether or not the runner carries an id (CI often does
+    // not, in which case there is no id to differ from).
+    const selfId = agentIdFromEnviron(
+      readFileSync(`/proc/${process.pid}/environ`, "utf8"),
+    );
+    expect(isProcessMatching(process.pid, "bun", selfId)).toBe(true);
+    if (selfId) {
+      expect(isProcessMatching(process.pid, "bun", `${selfId}-different`)).toBe(
+        false,
+      );
     }
   });
 });
