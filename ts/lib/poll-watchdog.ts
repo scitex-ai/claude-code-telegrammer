@@ -19,13 +19,14 @@
  *
  *   2. WATCHDOG — {@link createStallWatchdog} builds a stateful checker
  *      whose `tick()` compares `now - lastSuccessfulPoll` against the
- *      threshold and emits ONE loud channel notification per stall
- *      episode. It re-arms automatically once a fresh poll advances the
- *      heartbeat, and never fires while the poller is shutting down
- *      (isPolling() === false). `now`, the heartbeat getter, and the emit
- *      sink are all injectable so the whole thing is unit-testable with
- *      no timers and no network — the same seam poller-batch.ts uses for
- *      processBatch.
+ *      threshold and, on a stall, LOGS it and fires the actuator (onStall)
+ *      ONCE per stall episode. It does NOT message the operator — a
+ *      self-healing stall is not actionable, and a stall-loop would flood him
+ *      (see the rationale above stallDiagnostics). It re-arms automatically
+ *      once a fresh poll advances the heartbeat, and never fires while the
+ *      poller is shutting down (isPolling() === false). `now`, the heartbeat
+ *      getter, and the onStall actuator are all injectable so the whole thing
+ *      is unit-testable with no timers and no network.
  *
  * PR-A is DETECTION/ALARM ONLY. It deliberately does NOT add an
  * HTTP-level timeout to tgApi — that remains a noted follow-up.
@@ -40,7 +41,6 @@ import { log } from "./log.js";
 import { BOT_TOKEN_HASH, STATE_DIR } from "./config.js";
 import { saveLastPollTs } from "./store.js";
 import { getenv } from "./env.js";
-import { broadcastSystemAlert } from "./loudfail.js";
 import { STALL_EXIT_CODE } from "./exit-codes.js";
 
 /** Default stall threshold (seconds) — well above the 30s long-poll cap
@@ -107,15 +107,16 @@ export interface StallWatchdogDeps {
   now?: () => number;
   /** Heartbeat getter (defaults to the module in-process stamp). */
   getLastPoll?: () => number;
-  /** Loud-notification sink (defaults to an mcp channel notification). */
-  emit?: (content: string) => void;
   /** True while the poller is actively polling; when false the watchdog
    * stays silent (clean shutdown / preemption must not alarm). */
   isPolling: () => boolean;
   /** Stall threshold in ms. */
   thresholdMs: number;
   /**
-   * ACTUATOR — what to DO about a stall, after the alarm has been emitted.
+   * ACTUATOR — what to DO about a stall. This is the watchdog's ONLY output
+   * besides the log line: there is no operator-message seam (see the rationale
+   * block above stallDiagnostics — a self-healing stall must not reach the
+   * phone). onStall self-terminates so the supervisor respawns.
    *
    * Defaults to a NO-OP on purpose: this factory is pure and unit-tested, and
    * a default that terminated the process would kill the test runner itself.
@@ -132,35 +133,28 @@ export interface StallWatchdog {
 }
 
 /**
- * Build the stall message the OPERATOR reads on his phone.
+ * There is DELIBERATELY no operator-facing stall message anymore.
  *
- * Short, listed, and free of jargon — because he told us, holding a screenshot
- * of the old one (2026-07-17): 「文章が長すぎて読む気にならないですね
- * リストにするなりしてなんか読ませる気がないというか」. The old text was ~700
- * characters of network-black-hole / hung-socket / kill-0 / "predates the
- * respawn fix", plus a token hash and an absolute state_dir path. Our OWN
- * outbound hook caps a human-authored Telegram message at 512 chars and demands
- * numbered lines, on the grounds that "the operator reads on a phone and cannot
- * scan walls of text" — and these alarms simply bypassed it. We enforced
- * readability on ourselves and exempted the machine.
+ * A self-healing stall needs NO action from the operator — the watchdog
+ * self-terminates (onStall) and lib/poller-supervisor.ts respawns. The
+ * operator's rule, 2026-07-18, holding a screenshot of 8 of these in 6 minutes
+ * (「こんなゴミみたいなメッセージが来ても困る」): 「対応不要なら送るべきでない」 —
+ * if no action is needed, do not send. A stall that fixes itself is by
+ * definition not actionable, so it must not reach his phone AT ALL, let alone
+ * once per respawn.
  *
- * The diagnostics did not vanish; they moved to the poller log (see the caller),
- * which is where a human goes when they want them and nowhere near the phone
- * when they don't.
- *
- * What he needs from this message, in this order: is it broken, must I act,
- * will it fix itself. Nothing else.
+ * WHY THIS WAS SPAM: a stall-LOOP (the poller cannot recover — e.g. a token
+ * contention 409ing every getUpdates) exits, respawns, and the fresh poller's
+ * watchdog fires again ~one cycle later. The old code broadcast one "recovering
+ * by itself" line per respawn, so an unrecoverable loop flooded the operator.
+ * The watchdog now only LOGS (stallDiagnostics below) and acts; it has no
+ * Telegram path at all — note there is no `emit` in StallWatchdogDeps and no
+ * broadcastSystemAlert import in this file. The ONLY Telegram message about
+ * stalls comes from the SUPERVISOR, which is bounded (#92): N silent respawns,
+ * then ONE FATAL "died N times, not recovering, restart the MCP server" — the
+ * single message that IS actionable. This fixes the SPAMMING alarm the way #92
+ * fixed the FALSE alarm; both erode the one channel a real outage needs.
  */
-function stallMessage(stallMs: number, thresholdMs: number): string {
-  const stallSec = Math.round(stallMs / 1000);
-  const thresholdSec = Math.round(thresholdMs / 1000);
-  return (
-    `INGESTION STALL — recovering by itself, no action needed.\n` +
-    `1. No Telegram fetch for ~${stallSec}s (limit ${thresholdSec}s).\n` +
-    `2. Restarting the poller now.\n` +
-    `3. You will hear from me again ONLY if it does not recover.`
-  );
-}
 
 /** The full diagnosis — for the poller log, not the operator's phone. */
 function stallDiagnostics(stallMs: number, thresholdMs: number): object {
@@ -216,15 +210,6 @@ function selfTerminateForRespawn(): void {
   setTimeout(() => process.exit(STALL_EXIT_CODE), STALL_EXIT_DELAY_MS);
 }
 
-/** Default emit: same direct-Telegram broadcast the poller's 409-fatal path
- * and poller-batch's emitLoud use (lib/loudfail.ts::broadcastSystemAlert) —
- * this runs in the standalone poller process, with no mcp/Server object to
- * notify through. */
-function defaultEmit(content: string): void {
-  log("poller", content);
-  void broadcastSystemAlert(content);
-}
-
 /**
  * Create a stateful stall watchdog. Re-arm semantics live entirely in the
  * heartbeat value: each tick remembers the last heartbeat it saw; when a
@@ -235,7 +220,7 @@ function defaultEmit(content: string): void {
 export function createStallWatchdog(deps: StallWatchdogDeps): StallWatchdog {
   const now = deps.now ?? Date.now;
   const getLastPoll = deps.getLastPoll ?? getLastSuccessfulPoll;
-  const { emit, isPolling, thresholdMs } = deps;
+  const { isPolling, thresholdMs } = deps;
 
   const onStall = deps.onStall ?? (() => {});
 
@@ -257,16 +242,17 @@ export function createStallWatchdog(deps: StallWatchdogDeps): StallWatchdog {
 
       const stallMs = now() - lastPoll;
       if (stallMs > thresholdMs && !alreadyAlarmed) {
-        // Full diagnosis to the LOG, four short lines to the PHONE. The
-        // operator gets what he must decide on; the log keeps what someone
-        // debugging this later will want.
+        // LOG the stall (with full diagnostics) and ACT — never message the
+        // operator. A self-healing stall is not actionable by him, and a
+        // stall-LOOP would flood his phone one line per respawn. The only
+        // Telegram message about stalls is the supervisor's bounded FATAL when
+        // recovery genuinely fails. See the rationale above stallDiagnostics.
         log("poll-watchdog", "INGESTION STALL — self-terminating for respawn", {
           ...stallDiagnostics(stallMs, thresholdMs),
         });
-        emit(stallMessage(stallMs, thresholdMs));
         alreadyAlarmed = true;
-        // ...and then ACT. Alarming and doing nothing is what made this alarm
-        // ignorable in the first place (see onStall's docstring).
+        // ...and then ACT. Detecting and doing nothing is what made the old
+        // alarm ignorable in the first place (see onStall's docstring).
         onStall();
       }
     },
@@ -296,9 +282,10 @@ export function startStallWatchdog(isPolling: () => boolean): WatchdogHandle {
   const watchdog = createStallWatchdog({
     isPolling,
     thresholdMs,
-    emit: (content) => defaultEmit(content),
     // The ONLY place the real actuator is wired. createStallWatchdog defaults
     // onStall to a no-op so no unit test can ever terminate the test runner.
+    // There is no emit: the watchdog logs and acts, it does not message the
+    // operator (see the rationale above stallDiagnostics).
     onStall: selfTerminateForRespawn,
   });
 
