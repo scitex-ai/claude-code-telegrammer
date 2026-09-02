@@ -21,15 +21,23 @@ jobs:
           cache-dependency-glob: pyproject.toml
       - name: Set up Python ${{ matrix.python-version }} (uv-managed)
         run: uv python install ${{ matrix.python-version }}
-      - name: Install package + pyyaml in a uv venv
+      - name: Install package + test deps in a uv venv
         # Spartan self-hosted runners' Pythons are uv-managed / PEP 668
         # externally-managed, so system `pip install` fails with
         # "externally-managed-environment". uv venv + uv pip is the
         # ecosystem-standard install path on self-hosted.
+        #
+        # hatchling is here ON PURPOSE, not as a stray dev dep:
+        # tests/test_packaging.py builds a real wheel and asserts
+        # telegram-server.ts is inside it, and with no PEP 517 backend
+        # importable it SKIPS. A leg that skipped that check is exactly how
+        # 0.6.0 shipped a wheel whose CLI and MCP server were both dead.
         run: |
           uv venv --python ${{ matrix.python-version }} .venv
           uv pip install --python .venv/bin/python -e .
-          uv pip install --python .venv/bin/python pyyaml
+          uv pip install --python .venv/bin/python pyyaml pytest hatchling
+      - name: Run Python tests
+        run: .venv/bin/python -m pytest "$PWD/tests" -q -rs
       - name: Run shell tests
         # .venv/bin on PATH so the shell suite's `python3` (and pyyaml, used by
         # lib/common.sh yaml_get) resolves to the venv interpreter.

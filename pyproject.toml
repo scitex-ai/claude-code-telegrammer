@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "claude-code-telegrammer"
-version = "0.6.0"
+version = "0.6.1"
 description = "Custom Telegram MCP server + TUI auto-responder for running Claude Code as an autonomous Telegram agent"
 readme = "README.md"
 license = "AGPL-3.0"
@@ -48,3 +48,31 @@ Issues = "https://github.com/ywatanabe1989/claude-code-telegrammer/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/claude_code_telegrammer"]
+
+# The Python package is only a launcher; the SERVER is ts/telegram-server.ts.
+# Shipping the launcher without the thing it launches produced a 0.6.0 wheel
+# whose CLI and MCP server were both structurally dead — and dead only at
+# first use. `packages` cannot reach ts/ because it sits outside src/, so
+# force-include maps the runtime TS surface INTO the installed package, where
+# importlib.resources can find it (see _server_entry.py).
+#
+# PER-PATH, NOT the whole `ts` directory, and that is not a style choice:
+# `exclude` DOES NOT APPLY to force-included paths, and neither does the
+# nested ts/.gitignore. Measured 2026-09-02 — with `"ts" = ...` and an
+# `exclude` naming node_modules, a planted ts/node_modules/probe-pkg still
+# shipped in the wheel. A whole-directory mapping would therefore bake ~90
+# bun packages into every release built on a machine where `bun install` had
+# run. Listing the runtime files keeps that impossible by construction.
+#
+# tests/test_packaging.py fails if a runtime .ts file exists that is not
+# reachable through this table, so adding a new one to ts/ cannot silently
+# produce another dead wheel.
+[tool.hatch.build.targets.wheel.force-include]
+"ts/telegram-server.ts" = "claude_code_telegrammer/ts/telegram-server.ts"
+"ts/telegram-poller.ts" = "claude_code_telegrammer/ts/telegram-poller.ts"
+"ts/lib" = "claude_code_telegrammer/ts/lib"
+"ts/package.json" = "claude_code_telegrammer/ts/package.json"
+"ts/bunfig.toml" = "claude_code_telegrammer/ts/bunfig.toml"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

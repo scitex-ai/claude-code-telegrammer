@@ -24,6 +24,13 @@ per-agent bot — assert a token maps to the expected agent identity and detect
 two agents resolving to the SAME bot — without starting a poller. Extra args
 are passed through, so ``claude-code-telegrammer config --check`` reaches the
 TS ``config --check`` mode (single getMe call; never prints the raw token).
+
+Where the TS entry comes from is decided by
+:mod:`claude_code_telegrammer._server_entry`: ``$CCT_SERVER_ENTRY`` first, then
+the ``ts/`` directory shipped inside the installed package, then the
+``<repo>/ts/`` source tree. Every server-bound subcommand resolves it BEFORE
+doing anything else, so a broken install announces itself at startup with the
+full list of paths tried rather than dying quietly at first use.
 """
 
 from __future__ import annotations
@@ -31,16 +38,13 @@ from __future__ import annotations
 import os
 import shutil
 import sys
-from pathlib import Path
 
 from claude_code_telegrammer import __version__
-
-# ts/telegram-server.ts relative to the installed package: the repo layout is
-#   <repo>/src/claude_code_telegrammer/_cli.py
-#   <repo>/ts/telegram-server.ts
-# so walk up from this file: _cli.py → claude_code_telegrammer → src → <repo>.
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_SERVER = _REPO_ROOT / "ts" / "telegram-server.ts"
+from claude_code_telegrammer._server_entry import (
+    ENV_SERVER_ENTRY,
+    ServerEntryNotFound,
+    resolve_server_entry,
+)
 
 _USAGE = (
     "usage: claude-code-telegrammer <command> [args]\n"
@@ -61,6 +65,15 @@ _USAGE = (
     "                    unavailable and an agent would otherwise be unable to\n"
     "                    reach the operator at all. Exits NON-ZERO on failure.\n"
     "  --version         print the package version and exit\n"
+    "\n"
+    "environment:\n"
+    f"  {ENV_SERVER_ENTRY}\n"
+    "                    absolute path to ts/telegram-server.ts, overriding\n"
+    "                    both the packaged copy and the source tree. When set\n"
+    "                    it is AUTHORITATIVE: a path that does not exist is an\n"
+    "                    error, never a silent fallback to another server.\n"
+    "  BUN_BIN           path to the `bun` executable (default: $PATH, then\n"
+    "                    ~/.bun/bin/bun)\n"
 )
 
 
@@ -82,26 +95,35 @@ def _resolve_bun() -> str:
 
 
 def _require_server() -> str:
-    """Return the absolute path to telegram-server.ts, or exit with an error."""
-    if not _SERVER.is_file():
-        sys.stderr.write(
-            f"claude-code-telegrammer: server entry not found at {_SERVER}.\n"
-            "  Expected ts/telegram-server.ts alongside the installed package.\n"
-        )
-        raise SystemExit(2)
-    return str(_SERVER)
+    """Return the absolute path to telegram-server.ts, or exit with an error.
+
+    Resolution lives in :mod:`claude_code_telegrammer._server_entry`; this
+    only turns its exception into the CLI's stderr-plus-exit-2 contract. The
+    message names every path that was tried, because "not found at
+    <one wrong path>" told an operator nothing about which of the three
+    mechanisms — override, packaged resource, source tree — had failed.
+    """
+    try:
+        return str(resolve_server_entry())
+    except ServerEntryNotFound as exc:
+        sys.stderr.write(f"{exc}\n")
+        raise SystemExit(2) from exc
 
 
 def _exec_server(*server_args: str) -> int:
     """``execv`` bun on the TS server with the given args (does not return)."""
-    bun = _resolve_bun()
+    # Server entry FIRST, bun second: both are required, and resolving the
+    # entry up front means a packaging fault reports itself as a packaging
+    # fault instead of hiding behind a missing-bun message on hosts that
+    # happen to lack bun as well.
     server = _require_server()
+    bun = _resolve_bun()
     os.execv(bun, [bun, "run", server, *server_args])
     # os.execv replaces the process image; unreachable on success.
     return 0
 
 
-def main(argv: "list[str] | None" = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
 
     if args and args[0] in ("--version", "-V"):

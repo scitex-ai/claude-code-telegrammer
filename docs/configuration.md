@@ -19,6 +19,30 @@ counts as unset.
 | `READ_RECEIPTS` | No | `on` | Read-receipt reactions (⚡ received → 👀 surfaced → ✅ done → ❌ failed). Set `0`/`false`/`no`/`off` to disable. |
 | `TURN_URL` | No | — | Wake endpoint for idle SDK-runner sessions (see below). |
 
+## Launcher: locating the TS server
+
+The `claude-code-telegrammer` Python command is a thin launcher that `execv`s
+`bun` on `ts/telegram-server.ts`. Two variables steer it. Both are **launcher**
+settings read by Python, so unlike the table above they have **no
+`CLAUDE_CODE_TELEGRAMMER_…` alias** — the names below are the only spellings.
+
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `CCT_SERVER_ENTRY` | No | — | Absolute path to `telegram-server.ts`. **Authoritative when set**: a path that does not exist is an error, never a silent fallback to a different server. |
+| `BUN_BIN` | No | `bun` on `$PATH`, then `~/.bun/bin/bun` | Path to the `bun` executable. |
+
+Without `CCT_SERVER_ENTRY` the launcher looks, in order, for the `ts/` directory
+shipped **inside the installed package** (`importlib.resources`), then for
+`<repo>/ts/telegram-server.ts` in a source checkout. If none resolves it exits
+`2` and prints every path it tried — it does not start and then die later.
+
+> **Installing from a wheel:** the wheel ships `telegram-server.ts`,
+> `telegram-poller.ts` and all of `ts/lib/`, but **not** `node_modules` —
+> third-party bun packages do not belong in a Python distribution. Run
+> `bun install` once in the packaged `ts/` directory
+> (`python -c "import claude_code_telegrammer, pathlib; print(pathlib.Path(claude_code_telegrammer.__file__).parent / 'ts')"`)
+> or point `CCT_SERVER_ENTRY` at a checkout where you have already run it.
+
 ## Per-agent identity
 
 Each agent runs its **own** Telegram bot (own `CCT_BOT_TOKEN`) and gets its own
