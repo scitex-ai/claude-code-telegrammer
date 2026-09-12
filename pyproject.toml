@@ -48,3 +48,22 @@ Issues = "https://github.com/ywatanabe1989/claude-code-telegrammer/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/claude_code_telegrammer"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"ts/bun.lock" = "claude_code_telegrammer/ts/bun.lock"
+"ts/bunfig.toml" = "claude_code_telegrammer/ts/bunfig.toml"
+"ts/lib" = "claude_code_telegrammer/ts/lib"
+"ts/package.json" = "claude_code_telegrammer/ts/package.json"
+"ts/telegram-poller.ts" = "claude_code_telegrammer/ts/telegram-poller.ts"
+"ts/telegram-server.ts" = "claude_code_telegrammer/ts/telegram-server.ts"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "src/claude_code_telegrammer",
+    "ts/bun.lock",
+    "ts/bunfig.toml",
+    "ts/lib",
+    "ts/package.json",
+    "ts/telegram-poller.ts",
+    "ts/telegram-server.ts",
+]

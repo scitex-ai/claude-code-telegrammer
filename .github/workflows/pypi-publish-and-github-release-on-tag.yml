@@ -68,9 +68,11 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e .
-          pip install pyyaml
+          pip install build pyyaml
       - name: Run shell tests
         run: bash tests/test-state-detection.sh
+      - name: Verify the built wheel contains and launches the CCT runtime
+        run: bash tests/test-wheel-runtime-assets.sh
 
   test-ts:
     runs-on: ubuntu-latest
