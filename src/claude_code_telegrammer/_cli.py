@@ -35,12 +35,8 @@ from pathlib import Path
 
 from claude_code_telegrammer import __version__
 
-# ts/telegram-server.ts relative to the installed package: the repo layout is
-#   <repo>/src/claude_code_telegrammer/_cli.py
-#   <repo>/ts/telegram-server.ts
-# so walk up from this file: _cli.py → claude_code_telegrammer → src → <repo>.
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_SERVER = _REPO_ROOT / "ts" / "telegram-server.ts"
+_PACKAGE_SERVER = Path(__file__).resolve().parent / "ts" / "telegram-server.ts"
+_SOURCE_SERVER = Path(__file__).resolve().parents[2] / "ts" / "telegram-server.ts"
 
 _USAGE = (
     "usage: claude-code-telegrammer <command> [args]\n"
@@ -83,13 +79,18 @@ def _resolve_bun() -> str:
 
 def _require_server() -> str:
     """Return the absolute path to telegram-server.ts, or exit with an error."""
-    if not _SERVER.is_file():
-        sys.stderr.write(
-            f"claude-code-telegrammer: server entry not found at {_SERVER}.\n"
-            "  Expected ts/telegram-server.ts alongside the installed package.\n"
-        )
-        raise SystemExit(2)
-    return str(_SERVER)
+    for candidate in (_PACKAGE_SERVER, _SOURCE_SERVER):
+        if candidate.is_file():
+            return str(candidate)
+    searched = "\n".join(
+        f"  - {candidate}" for candidate in (_PACKAGE_SERVER, _SOURCE_SERVER)
+    )
+    sys.stderr.write(
+        "claude-code-telegrammer: packaged server entry is missing.\n"
+        f"Searched:\n{searched}\n"
+        "Reinstall claude-code-telegrammer from a wheel containing its ts runtime.\n"
+    )
+    raise SystemExit(2)
 
 
 def _exec_server(*server_args: str) -> int:
@@ -101,7 +102,7 @@ def _exec_server(*server_args: str) -> int:
     return 0
 
 
-def main(argv: "list[str] | None" = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
 
     if args and args[0] in ("--version", "-V"):

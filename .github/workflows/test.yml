@@ -29,13 +29,16 @@ jobs:
         run: |
           uv venv --python ${{ matrix.python-version }} .venv
           uv pip install --python .venv/bin/python -e .
-          uv pip install --python .venv/bin/python pyyaml
+          uv pip install --python .venv/bin/python build pyyaml
       - name: Run shell tests
         # .venv/bin on PATH so the shell suite's `python3` (and pyyaml, used by
         # lib/common.sh yaml_get) resolves to the venv interpreter.
         run: |
           export PATH="$PWD/.venv/bin:$PATH"
           bash tests/test-state-detection.sh
+
+      - name: Verify the built wheel contains and launches the CCT runtime
+        run: CCT_TEST_PYTHON=.venv/bin/python bash tests/test-wheel-runtime-assets.sh
 
   test-ts:
     # ubuntu-latest, NOT the self-hosted pool, because this job needs a service
