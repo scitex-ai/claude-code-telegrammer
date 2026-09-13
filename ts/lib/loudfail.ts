@@ -133,6 +133,13 @@ export function resolveFailPhrases(
         reason: "agent busy",
         retry: "retry shortly",
       };
+    case "resource_exhausted":
+      return {
+        reason: result.check?.cause
+          ? `${result.check.cause.kind} ${result.check.cause.code}: ${result.check.detail}`
+          : "storage capacity exhausted",
+        retry: result.check?.hint ?? "free space or quota, then retry",
+      };
     case "client_error":
       return {
         reason:

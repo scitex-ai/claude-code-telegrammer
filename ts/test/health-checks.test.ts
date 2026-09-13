@@ -174,9 +174,61 @@ describe("state_dir_writable", () => {
     expect(c.hint).toContain("CCT_AGENT_STATE_DIR");
     expect(c.hint).toContain("CCT_AGENT_ID");
   });
+
+  test("not writable preserves a native ENOSPC cause", () => {
+    const c = byName(
+      buildHealthReport(
+        healthyInputs({
+          stateDirProbe: {
+            path: "/tmp/x",
+            exists: true,
+            writable: false,
+            detail: "ENOSPC: no space left on device",
+            cause: {
+              kind: "errno",
+              code: "ENOSPC",
+              message: "no space left on device",
+            },
+          },
+        }),
+      ),
+      "state_dir_writable",
+    );
+    expect(c.ok).toBe(false);
+    expect(c.cause).toEqual({
+      kind: "errno",
+      code: "ENOSPC",
+      message: "no space left on device",
+    });
+  });
 });
 
 describe("db_schema_current", () => {
+  test("probe failure preserves a generic native errno cause", () => {
+    const c = byName(
+      buildHealthReport(
+        healthyInputs({
+          db: {
+            exists: true,
+            error: "EACCES: permission denied",
+            cause: {
+              kind: "errno",
+              code: "EACCES",
+              message: "permission denied",
+            },
+          },
+        }),
+      ),
+      "db_schema_current",
+    );
+    expect(c.ok).toBe(false);
+    expect(c.cause).toEqual({
+      kind: "errno",
+      code: "EACCES",
+      message: "permission denied",
+    });
+  });
+
   test("missing DB → ok, 'not yet created (first run)'", () => {
     const c = byName(
       buildHealthReport(healthyInputs({ db: { exists: false } })),

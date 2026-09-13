@@ -47,7 +47,7 @@ import { recordWakeFailure, recordWakeSuccess } from "./wake-health.js";
 import { neutralizeChannelEnvelope } from "./sanitize.js";
 import {
   savePendingNotification,
-  isNotificationPending,
+  probePendingNotification,
 } from "./notify-relay.js";
 
 /**
@@ -486,18 +486,48 @@ export async function handleUpdate(update: any): Promise<UpdateStatus> {
         // also queue a notification or the operator gets the message twice
         // (the "sent twice" he reported 2026-06-18, which is exactly why the
         // notification above is gated on !wakeEnabled()).
-        await savePendingNotification(rowId, {
+        const fallback = await savePendingNotification(rowId, {
           content: neutralizeChannelEnvelope(deliveredText),
           meta,
         });
 
+        // A failed fallback write is NOT delivery and must not be parked as
+        // though the notify relay owned it. Surface the native cause now.
+        if (!fallback.ok) {
+          const failed = {
+            ok: false as const,
+            reason: JSON.stringify(fallback.check),
+            category:
+              fallback.check.cause?.code === "ENOSPC" ||
+              fallback.check.cause?.code === "EDQUOT"
+                ? ("resource_exhausted" as const)
+                : ("unknown" as const),
+            check: fallback.check,
+          };
+          void markFailed(chatId, String(msg.message_id));
+          void sendLoudFailReply(chatId, Number(msg.message_id), failed);
+          return;
+        }
+
         // Let the independent notify-relay path have a chance to deliver
         // before we alarm the operator — it almost always wins.
         setTimeout(() => {
-          void isNotificationPending(rowId).then((stillPending) => {
-            if (!stillPending) return;
+          void probePendingNotification(rowId).then((probe) => {
+            if (probe.ok && !probe.pending) return;
+            const alarmResult = probe.ok
+              ? result
+              : {
+                  ok: false as const,
+                  reason: JSON.stringify(probe.check),
+                  category:
+                    probe.check.cause?.code === "ENOSPC" ||
+                    probe.check.cause?.code === "EDQUOT"
+                      ? ("resource_exhausted" as const)
+                      : ("unknown" as const),
+                  check: probe.check,
+                };
             void markFailed(chatId, String(msg.message_id));
-            void sendLoudFailReply(chatId, Number(msg.message_id), result);
+            void sendLoudFailReply(chatId, Number(msg.message_id), alarmResult);
           });
         }, 15000);
       }
