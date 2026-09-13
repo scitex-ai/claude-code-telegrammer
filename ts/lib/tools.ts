@@ -29,6 +29,7 @@ import {
   handleDownloadAttachment,
 } from "./tools-messages.js";
 import { runHealth, serializeHealthReport } from "./health-adapters.js";
+import { errorDetail, toolErrorResult } from "./protocol-status.js";
 
 export function registerTools(mcp: Server): void {
   mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -336,10 +337,17 @@ export function registerTools(mcp: Server): void {
               await markRead(rowId);
             }
           } catch (err) {
-            const errMsg = err instanceof Error ? err.message : String(err);
+            const errMsg = errorDetail(err);
             log("tools", "failed to save outbound to store", {
               error: errMsg,
             });
+            return toolErrorResult(
+              "reply",
+              err,
+              `Telegram accepted the reply as message ${msgId}, but the durable outbound receipt was not recorded: ${errMsg}`,
+              "Do not resend blindly: Telegram already accepted this message. Restore the message store, then reconcile message_id " +
+                `${msgId} and retry only the missing receipt write.`,
+            );
           }
           return { content: [{ type: "text", text: `sent (id: ${msgId})` }] };
         }
@@ -468,11 +476,7 @@ export function registerTools(mcp: Server): void {
           };
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return {
-        content: [{ type: "text", text: `${req.params.name} failed: ${msg}` }],
-        isError: true,
-      };
+      return toolErrorResult(req.params.name, err);
     }
   });
 }

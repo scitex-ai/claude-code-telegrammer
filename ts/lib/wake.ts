@@ -37,6 +37,11 @@
 import { TURN_URL, TURN_BEARER } from "./config.js";
 import { log } from "./log.js";
 import { neutralizeChannelEnvelope } from "./sanitize.js";
+import {
+  errnoCause,
+  failingCheck,
+  type ProtocolCheck,
+} from "./protocol-status.js";
 
 /** Metadata attached to an inbound message (subset used to frame the turn). */
 export interface WakeMeta {
@@ -84,6 +89,7 @@ export type WakeFailCategory =
   | "quota_capped"
   | "client_error"
   | "server_error"
+  | "resource_exhausted"
   | "unknown";
 
 /** Discriminated union — callers branch on result.ok then narrow. */
@@ -94,6 +100,7 @@ export type WakeResult =
       status?: number;
       reason: string;
       category: WakeFailCategory;
+      check?: ProtocolCheck;
     };
 
 /**
@@ -109,7 +116,7 @@ type TurnPoster = (
   url: string,
   body: { text: string },
   bearer: string,
-) => Promise<number>;
+) => Promise<number | { status: number; body?: string }>;
 
 let turnPoster: TurnPoster = async (url, body, bearer) => {
   const headers: Record<string, string> = {
@@ -124,8 +131,30 @@ let turnPoster: TurnPoster = async (url, body, bearer) => {
     headers,
     body: JSON.stringify(body),
   });
-  return resp.status;
+  return { status: resp.status, body: await resp.text() };
 };
+
+function checkFromBody(body: string | undefined): ProtocolCheck | undefined {
+  if (!body) return undefined;
+  try {
+    const parsed = JSON.parse(body) as Record<string, unknown>;
+    const candidate =
+      parsed.check && typeof parsed.check === "object"
+        ? (parsed.check as Record<string, unknown>)
+        : parsed;
+    if (
+      typeof candidate.name === "string" &&
+      candidate.ok === false &&
+      typeof candidate.detail === "string" &&
+      typeof candidate.hint === "string"
+    ) {
+      return candidate as unknown as ProtocolCheck;
+    }
+  } catch {
+    // Non-JSON error bodies remain available as the ordinary HTTP reason.
+  }
+  return undefined;
+}
 
 /** Test-only: override the turn poster. Returns the previous poster. */
 export function setTurnPoster(poster: TurnPoster): TurnPoster {
@@ -290,11 +319,14 @@ export async function wakeTurn(
     };
   }
   try {
-    const status = await turnPoster(
+    const posted = await turnPoster(
       TURN_URL,
       { text: wakeText(text, meta) },
       TURN_BEARER,
     );
+    const status = typeof posted === "number" ? posted : posted.status;
+    const check =
+      typeof posted === "number" ? undefined : checkFromBody(posted.body);
     if (status >= 200 && status < 300) return { ok: true, status };
     log("wake", `WARNING: /v1/turn returned ${status}`, {
       level: "warning",
@@ -306,8 +338,14 @@ export async function wakeTurn(
     return {
       ok: false,
       status,
-      reason: `HTTP ${status}`,
-      category: categoriseStatus(status),
+      reason: check
+        ? `${check.detail} Hint: ${check.hint}`
+        : `HTTP ${status}`,
+      category:
+        check?.cause?.code === "ENOSPC" || check?.cause?.code === "EDQUOT"
+          ? "resource_exhausted"
+          : categoriseStatus(status),
+      ...(check ? { check } : {}),
     };
   } catch (err) {
     const errStr = err instanceof Error ? err.message : String(err);
@@ -318,10 +356,23 @@ export async function wakeTurn(
       message_id: meta.message_id,
       error: errStr,
     });
+    const cause = errnoCause(err);
+    const check = cause
+      ? failingCheck(
+          "sac_turn_delivered",
+          `CCT could not deliver the turn to SAC: ${errStr}`,
+          "Resolve the native transport or capacity failure, then retry this exact inbound delivery.",
+          err,
+        )
+      : undefined;
     return {
       ok: false,
       reason: errStr,
-      category: categoriseError(err),
+      category:
+        cause?.code === "ENOSPC" || cause?.code === "EDQUOT"
+          ? "resource_exhausted"
+          : categoriseError(err),
+      ...(check ? { check } : {}),
     };
   }
 }

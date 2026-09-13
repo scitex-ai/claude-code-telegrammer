@@ -68,7 +68,7 @@ describe("isNotificationPending", () => {
     // store would. The shared namespace is never touched.
     const missing = "cct_test_no_such_namespace_at_all";
 
-    expect(await isNotificationPending(999, missing)).toBe(false);
+    expect(await isNotificationPending(999, missing)).toBe(true);
   });
 
   test("a row id that does not exist returns false", async () => {

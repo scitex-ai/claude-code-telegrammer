@@ -42,11 +42,24 @@ import { getSql } from "./pg.js";
 import { storeSchema } from "./store.js";
 import { statements } from "./store-schema.js";
 import { log } from "./log.js";
+import {
+  errorDetail,
+  failingCheck,
+  type ProtocolCheck,
+} from "./protocol-status.js";
 
 export interface PendingNotificationPayload {
   content: string;
   meta: Record<string, string>;
 }
+
+export type PendingNotificationWrite =
+  | { ok: true }
+  | { ok: false; check: ProtocolCheck };
+
+export type PendingNotificationProbe =
+  | { ok: true; pending: boolean }
+  | { ok: false; check: ProtocolCheck };
 
 /**
  * WRITER side — called from lib/handle-update.ts (standalone poller
@@ -61,17 +74,27 @@ export interface PendingNotificationPayload {
 export async function savePendingNotification(
   rowId: number,
   payload: PendingNotificationPayload,
-): Promise<void> {
+): Promise<PendingNotificationWrite> {
   try {
     await getSql().unsafe(statements(storeSchema()).setPendingNotification, [
       JSON.stringify(payload),
       rowId,
     ]);
+    return { ok: true };
   } catch (err) {
     log("notify-relay", "failed to persist pending notification", {
       row_id: rowId,
       error: String(err),
     });
+    return {
+      ok: false,
+      check: failingCheck(
+        "wake_fallback_persisted",
+        `wake fallback for message row ${rowId} was not persisted: ${errorDetail(err)}`,
+        "Restore writable message-store capacity, then redeliver this inbound message; it has no durable fallback notification.",
+        err,
+      ),
+    };
   }
 }
 
@@ -79,8 +102,8 @@ export async function savePendingNotification(
  * Check whether a notification saved via savePendingNotification() is still
  * pending (i.e. the notify-relay reader has not yet delivered and NULLed
  * the column). Returns true when the row exists AND its
- * pending_notification is not null. Returns false on any thrown error so a
- * broken probe never creates a false alarm.
+ * pending_notification is not null. On a thrown error the compatibility
+ * boolean returns true: unknown must not be collapsed into "delivered".
  *
  * @param rowId - The messages row to check.
  * @param schema - The namespace to read. Defaults to the initialized store's.
@@ -91,15 +114,33 @@ export async function isNotificationPending(
   rowId: number,
   schema?: string,
 ): Promise<boolean> {
+  const result = await probePendingNotification(rowId, schema);
+  // Compatibility wrapper, deliberately conservative: inability to inspect
+  // the durable fallback must never be read as "relay delivered it".
+  return result.ok ? result.pending : true;
+}
+
+export async function probePendingNotification(
+  rowId: number,
+  schema?: string,
+): Promise<PendingNotificationProbe> {
   try {
     const rows = await getSql().unsafe(
       statements(schema ?? storeSchema()).readPendingNotification,
       [rowId],
     );
     const row = rows[0] as { pending_notification: string | null } | undefined;
-    return !!row && row.pending_notification !== null;
-  } catch {
-    return false;
+    return { ok: true, pending: !!row && row.pending_notification !== null };
+  } catch (err) {
+    return {
+      ok: false,
+      check: failingCheck(
+        "wake_fallback_receipt_observed",
+        `could not verify the durable wake fallback for message row ${rowId}: ${errorDetail(err)}`,
+        "Restore message-store access, then inspect and redeliver this message; do not assume the fallback relay completed.",
+        err,
+      ),
+    };
   }
 }
 

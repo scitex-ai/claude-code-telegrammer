@@ -238,4 +238,44 @@ describe("wakeTurn returns WakeResult", () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.category).toBe("timeout");
   });
+
+  test("an ENOSPC transport error remains native and resource-exhausted", async () => {
+    setTurnPoster(async () => {
+      throw Object.assign(new Error("no space left on device"), {
+        code: "ENOSPC",
+      });
+    });
+    const r = await wakeTurn("hello", { chat_id: "100", message_id: "5" });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.category).toBe("resource_exhausted");
+      expect(r.check?.cause).toEqual({
+        kind: "errno",
+        code: "ENOSPC",
+        message: "no space left on device",
+      });
+      expect(r.check?.hint).toContain("retry this exact inbound delivery");
+    }
+  });
+
+  test("a SAC Check response survives the HTTP boundary", async () => {
+    const check = {
+      name: "hermes_turn_admitted",
+      ok: false,
+      detail: "Hermes could not persist run admission: no space left on device",
+      hint: "Free space on the Hermes state volume, then retry this dispatch.",
+      cause: { kind: "errno" as const, code: "ENOSPC", message: "no space left on device" },
+    };
+    setTurnPoster(async () => ({
+      status: 507,
+      body: JSON.stringify({ check }),
+    }));
+    const r = await wakeTurn("hello", { chat_id: "100", message_id: "5" });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.category).toBe("resource_exhausted");
+      expect(r.check).toEqual(check);
+      expect(r.reason).toContain(check.hint);
+    }
+  });
 });

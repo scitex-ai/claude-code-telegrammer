@@ -77,6 +77,25 @@ describe("resolveFailPhrases: per-category copy (lead-pinned)", () => {
     });
   });
 
+  test("resource exhaustion preserves the native cause and actionable hint", () => {
+    const r: WakeResult = {
+      ok: false,
+      reason: "no space left on device",
+      category: "resource_exhausted",
+      check: {
+        name: "wake_fallback_persisted",
+        ok: false,
+        detail: "fallback was not persisted",
+        hint: "Free space, then redeliver the message.",
+        cause: { kind: "errno", code: "ENOSPC", message: "no space left on device" },
+      },
+    };
+    expect(resolveFailPhrases(r)).toEqual({
+      reason: "errno ENOSPC: fallback was not persisted",
+      retry: "Free space, then redeliver the message.",
+    });
+  });
+
   test("client_error w/status → 'HTTP <status>' + 'retry shortly'", () => {
     const r: WakeResult = {
       ok: false,
