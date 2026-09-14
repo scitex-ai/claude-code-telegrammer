@@ -259,12 +259,20 @@ export async function handleSearchMessages(
  * immediately — no network. Otherwise download and record the path so
  * the next call short-circuits.
  *
+ * ALLOWLIST. A stored attachment's chat — and any chat_id passed — is checked
+ * BEFORE that short-circuit. This tool used to check nothing, so the cached
+ * return handed back any stored chat's file. (Rows exist only for chats that
+ * were allowlisted when the message arrived, so the reach was a chat removed
+ * from the allowlist since.) An unknown file_id with no chat_id still cannot be
+ * attributed to any chat, and is downloaded as before.
+ *
  * `download` is injectable for tests (defaults to the real downloadNow).
  */
 export async function handleDownloadAttachment(
   args: Record<string, unknown>,
   download: (fileId: string, chatId: string) => Promise<string> = downloadNow,
 ): Promise<ToolResult> {
+  if (args.chat_id) assertAllowedChat(args.chat_id as string);
   const fileIdArg = args.file_id as string | undefined;
   const rowIdArg = args.row_id != null ? Number(args.row_id) : undefined;
   if (!fileIdArg && rowIdArg == null) {
@@ -287,6 +295,8 @@ export async function handleDownloadAttachment(
   } else if (fileIdArg) {
     att = await findAttachmentByFileId(fileIdArg);
   }
+
+  if (att) assertAllowedChat(att.chat_id);
 
   if (att?.local_path && existsSync(att.local_path)) {
     return textResult(`downloaded to: ${att.local_path}`);
