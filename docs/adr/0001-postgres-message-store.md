@@ -139,11 +139,17 @@ storage layer, the test suite and two entry points.
 
 What the code change DOES do is refuse to be silent about it.
 `migrateLegacyStateDir()` detects a leftover `messages.db` /
-`claude-code-telegrammer.db` in the legacy state dir and announces it — in the
-structured result (`strandedDbFiles`) and in a log line that says the history
-was not carried forward and points here. A history gap the operator has to
-discover for himself is the incident that module was written for; announcing
-it is the alternative.
+`claude-code-telegrammer.db` in the legacy state dir or the current one and
+announces it — in the structured result (`strandedDbFiles`) and in a log line
+that says the history was not carried forward and points here. A history gap
+the operator has to discover for himself is the incident that module was
+written for; announcing it is the alternative.
+
+As first shipped it looked only in the legacy dir, which is almost never where
+the file is: every release from the state-dir switch until this one wrote the
+database into the current state dir. Measured 2026-09-14 on one host: all six
+populated stores sat there, no legacy dir existed, and none had been announced.
+Both dirs are scanned since.
 
 ### Importing the rows, when it is time
 

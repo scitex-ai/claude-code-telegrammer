@@ -289,6 +289,75 @@ describe("a legacy database file is ANNOUNCED, never touched", () => {
     expect(existsSync(join(newDir, "claude-code-telegrammer.db"))).toBe(false);
   });
 
+  // WHERE THE STORES ACTUALLY ARE. The case above seeds the OLD default dir,
+  // and until this test existed that was the only place the module looked.
+  // But every release between the state-dir switch and PostgreSQL wrote its
+  // database into the CURRENT state dir. Measured 2026-09-14 on one host: six
+  // populated stores, every one in runtime/<agent>/, and no old default dir —
+  // so not one of them was ever announced.
+  test("a store in the CURRENT state dir is announced — where every real one sits", () => {
+    const dbPath = seedLegacyDbFile(newDir, "claude-code-telegrammer.db");
+
+    const calls: Array<{ msg: string; data?: Record<string, unknown> }> = [];
+    const res = migrateLegacyStateDir({
+      env: { CCT_AGENT_ID: "scitex-dev" },
+      home,
+      newDir,
+      logFn: (_c, msg, data) => calls.push({ msg, data }),
+    });
+
+    // The production shape: a suffixed agent whose old default dir is gone.
+    expect(existsSync(res.oldDir!)).toBe(false);
+    expect(res.reason).toBe("nothing-to-migrate");
+    expect(res.strandedDbFiles).toEqual([dbPath]);
+
+    const announcement = calls.find((c) =>
+      c.msg.includes("was NOT carried forward"),
+    );
+    expect(announcement).toBeDefined();
+    expect(announcement!.data!.files).toEqual([dbPath]);
+    expect(readFileSync(dbPath, "utf8")).toBe("OPERATOR-HISTORY-BYTES");
+  });
+
+  test("…and after a completed state-dir migration", () => {
+    const dbPath = seedLegacyDbFile(newDir, "claude-code-telegrammer.db");
+    writeFileSync(join(newDir, ".migrated-from"), "{}");
+
+    const res = migrateLegacyStateDir({
+      env: { CCT_AGENT_ID: "scitex-dev" },
+      home,
+      newDir,
+      logFn: silent,
+    });
+
+    expect(res.reason).toBe("already-migrated");
+    expect(res.strandedDbFiles).toEqual([dbPath]);
+  });
+
+  test("…and in an explicit AGENT_STATE_DIR, which IS the current state dir", () => {
+    const explicit = join(root, "explicit");
+    const dbPath = seedLegacyDbFile(explicit, "claude-code-telegrammer.db");
+
+    const res = migrateLegacyStateDir({
+      env: { CCT_AGENT_STATE_DIR: explicit },
+      home,
+      newDir: explicit,
+      logFn: silent,
+    });
+
+    expect(res.reason).toBe("explicit-state-dir");
+    expect(res.strandedDbFiles).toEqual([dbPath]);
+  });
+
+  test("stores in BOTH dirs are both named", () => {
+    const inOld = seedLegacyDbFile(join(home, ".claude-code-telegrammer"));
+    const inNew = seedLegacyDbFile(newDir, "claude-code-telegrammer.db");
+
+    const res = migrateLegacyStateDir({ env: {}, home, newDir, logFn: silent });
+
+    expect(res.strandedDbFiles.sort()).toEqual([inOld, inNew].sort());
+  });
+
   test("both legacy filenames are recognised", () => {
     const dir = join(root, "legacydir");
     const a = seedLegacyDbFile(dir, "messages.db");

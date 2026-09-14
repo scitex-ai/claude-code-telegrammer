@@ -44,10 +44,14 @@ export function sanitizeAgentSegment(id: string): string {
  *      across container restarts by construction, which eliminates the history-
  *      gap incident where a drifting default path opened a fresh empty DB and
  *      lost the operator's message history. A one-time startup auto-migration
- *      (lib/migrate-state.ts) carries any pre-existing history at the OLD default
- *      location forward into this path. Per-agent segmentation still prevents the
- *      poller-pidfile / DB collision that the newest-wins takeover (lib/takeover.ts)
- *      would otherwise resolve by letting only ONE agent hold the channel.
+ *      (lib/migrate-state.ts) carries the FILES at the OLD default location
+ *      (downloaded attachments, access.json) forward into this path. It does NOT
+ *      carry message history: that moved to PostgreSQL, and a legacy database
+ *      file is announced where it sits, never copied
+ *      (docs/adr/0001-postgres-message-store.md). Per-agent segmentation still
+ *      prevents the poller-pidfile / DB collision that the newest-wins takeover
+ *      (lib/takeover.ts) would otherwise resolve by letting only ONE agent hold
+ *      the channel.
  */
 export function resolveStateDir(
   env: Record<string, string | undefined> = process.env,
