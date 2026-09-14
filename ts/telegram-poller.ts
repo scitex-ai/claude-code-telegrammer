@@ -59,6 +59,7 @@ import { initStore } from "./lib/store.js";
 import { migrateLegacyStateDir, ensureCctAlias } from "./lib/migrate-state.js";
 import { releaseAuthoritative } from "./lib/takeover.js";
 import { shouldSelfTerminateOnTeardown } from "./lib/poller-teardown.js";
+import { SIGTERM_EXIT } from "./lib/exit-codes.js";
 
 // ── Fail loud on unexpanded / renamed env ───────────────────────────────────
 //
@@ -134,6 +135,19 @@ await initStore();
 // below) and the log named none of them. The poller is the INBOUND rail — when
 // it stops, messages stop being recorded at all — so "why did it stop" is the
 // first question anyone will ask, and until now the log could not answer it.
+//
+// EXIT CODE. A signal handler replaces the signal's default disposition, so
+// this process would otherwise report whatever it passes to process.exit()
+// rather than the 128 + signum a signal death reports. The supervisor branches
+// on that number: SIGTERM_EXIT (143) is sac's deliberate stop and it STANDS DOWN
+// (lib/exit-codes.ts). This used to exit 0 for every trigger, which the
+// supervisor has no case for, so a deliberate stop with no successor took the
+// crash path: respawn the poller sac had just stopped, and page the operator.
+// Exit with the code the signal would have produced; non-signal triggers keep 0.
+const SIGNAL_EXIT: Record<string, number> = {
+  SIGTERM: SIGTERM_EXIT, // 128 + 15
+  SIGINT: 130, // 128 + 2
+};
 let shuttingDown = false;
 function shutdown(trigger: string): void {
   if (shuttingDown) return;
@@ -141,7 +155,7 @@ function shutdown(trigger: string): void {
   log("poller", `standalone poller shutting down (trigger=${trigger} pid=${process.pid})`);
   stopPolling();
   releaseAuthoritative({ stateDir: STATE_DIR, tokenHash: BOT_TOKEN_HASH });
-  setTimeout(() => process.exit(0), 2000);
+  setTimeout(() => process.exit(SIGNAL_EXIT[trigger] ?? 0), 2000);
 }
 
 process.on("SIGTERM", () => shutdown("SIGTERM"));
