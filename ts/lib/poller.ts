@@ -400,7 +400,7 @@ export async function startPolling(): Promise<void> {
             const fatalMsg =
               `FATAL: ${MAX_CONSECUTIVE_409} consecutive 409 Conflicts — another process is polling this bot token and has NOT yielded after backoff. ` +
               "This is likely a foreign poller (not one of ours — ours obey the pidfile-takeover protocol) or a stuck webhook. " +
-              `Another consumer holds THIS bot token (hash=${BOT_TOKEN_HASH}, state_dir=${STATE_DIR}) — commonly multiple agents sharing one bot token. Each agent needs its OWN bot token + CCT_STATE_DIR. ` +
+              `Another consumer holds THIS bot token (hash=${BOT_TOKEN_HASH}, state_dir=${STATE_DIR}) — commonly multiple agents sharing one bot token. Each agent needs its OWN bot token + CCT_AGENT_ID (its state dir derives from it). ` +
               "Stop the other consumer (or call deleteWebhook) and restart the bridge.";
             log("poller", fatalMsg);
             // Broadcast directly to Telegram — this runs in the standalone

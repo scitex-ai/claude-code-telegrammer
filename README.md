@@ -45,7 +45,7 @@ runs its own bot, its own message store, and fails loud on misconfiguration.
 <tr valign="top">
   <td align="center">1</td>
   <td><h4>Hardcoded paths</h4>The official plugin hardcodes <code>~/.claude/</code> as its state directory (<a href="https://github.com/anthropics/claude-code/issues/851">#851</a>), making it impossible to run multiple bots or customize where access.json lives.</td>
-  <td><h4>Configurable state directory</h4>All state (DB, lock, access config) lives under <code>CLAUDE_CODE_TELEGRAMMER_AGENT_STATE_DIR</code>. Run as many bots as you want, each with its own isolated state.</td>
+  <td><h4>Configurable state directory</h4>Local state (access config, lock, attachments) lives under <code>CLAUDE_CODE_TELEGRAMMER_AGENT_STATE_DIR</code>; messages live in PostgreSQL, one schema per agent. Run as many bots as you want, each with its own isolated state.</td>
 </tr>
 <tr valign="top">
   <td align="center">2</td>

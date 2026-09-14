@@ -11,6 +11,7 @@
 import { join } from "path";
 import { tmpdir } from "os";
 import { mkdirSync } from "fs";
+import { afterAll } from "bun:test";
 
 const TEST_DIR = join(tmpdir(), `cct-test-${process.pid}`);
 mkdirSync(TEST_DIR, { recursive: true });
@@ -58,21 +59,31 @@ const STALE_TEST_SCHEMA_MS = 2 * 60 * 60 * 1000;
  * Drops THIS run's namespace, then any older abandoned one. Never throws and
  * never fails the suite: leaving a scratch namespace behind is untidy, whereas
  * turning a green run red over cleanup would be a lie about the code.
+ *
+ * The sweep only considers namespaces the connected role OWNS. Several roles
+ * run this suite against the shared server, a role cannot drop another role's
+ * schema, and that refusal would end the whole loop at the first foreign
+ * namespace it met.
  */
 async function cleanupTestSchemas(): Promise<void> {
   try {
     const { getSql, closeSql, quoteSchema } = await import("../lib/pg.js");
     const sql = getSql();
-    await sql.unsafe(`DROP SCHEMA IF EXISTS ${quoteSchema(TEST_SCHEMA)} CASCADE`);
+    await sql.unsafe(
+      `DROP SCHEMA IF EXISTS ${quoteSchema(TEST_SCHEMA)} CASCADE`,
+    );
 
     const cutoff = Date.now() - STALE_TEST_SCHEMA_MS;
     const rows = (await sql.unsafe(
-      "SELECT nspname FROM pg_namespace WHERE nspname LIKE 'cct\\_test\\_%'",
+      "SELECT nspname FROM pg_namespace WHERE nspname LIKE 'cct\\_test\\_%' " +
+        "AND pg_get_userbyid(nspowner) = current_user",
     )) as Array<{ nspname: string }>;
     for (const { nspname } of rows) {
       const stamp = Number(nspname.split("_")[2]);
       if (Number.isFinite(stamp) && stamp < cutoff) {
-        await sql.unsafe(`DROP SCHEMA IF EXISTS ${quoteSchema(nspname)} CASCADE`);
+        await sql.unsafe(
+          `DROP SCHEMA IF EXISTS ${quoteSchema(nspname)} CASCADE`,
+        );
       }
     }
     await closeSql();
@@ -81,9 +92,16 @@ async function cleanupTestSchemas(): Promise<void> {
   }
 }
 
-let cleaning = false;
-process.on("beforeExit", () => {
-  if (cleaning) return;
-  cleaning = true;
-  void cleanupTestSchemas();
-});
+/**
+ * How long bun lets the cleanup run. A global afterAll gets bun's default 5 s
+ * hook budget, and overrunning it FAILS the run (measured, Bun 1.3.14). The
+ * first run against a store holding a backlog of abandoned namespaces drops
+ * them all here, one statement each.
+ */
+const CLEANUP_TIMEOUT_MS = 60_000;
+
+// afterAll, not process.on("beforeExit"): `bun test` emits neither beforeExit
+// nor exit (measured, Bun 1.3.14), so the cleanup registered there never ran
+// and every run left its namespace behind. A top-level afterAll in a preload
+// runs ONCE, after the last test file, and bun awaits it.
+afterAll(cleanupTestSchemas, CLEANUP_TIMEOUT_MS);
