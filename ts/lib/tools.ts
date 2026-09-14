@@ -435,7 +435,10 @@ export function registerTools(mcp: Server): void {
           const chatId = args.chat_id as string | undefined;
           const limit = (args.limit as number) ?? 20;
           if (chatId) assertAllowedChat(chatId);
-          const rows = searchMessages(query, chatId, limit);
+          // AWAITED: the store went async in #132. Un-awaited, `rows` was a
+          // Promise and JSON.stringify(<Promise>) is "{}" — which parses, so
+          // every search read as an authoritative "nothing found".
+          const rows = await searchMessages(query, chatId, limit);
           return {
             content: [{ type: "text", text: JSON.stringify(rows, null, 2) }],
           };
@@ -462,7 +465,9 @@ export function registerTools(mcp: Server): void {
           const chatId = args.chat_id as string;
           const maxMessages = (args.max_messages as number) ?? 10;
           assertAllowedChat(chatId);
-          const context = getConversationContext(chatId, maxMessages);
+          // AWAITED: the store went async in #132. Un-awaited, a Promise
+          // reached the MCP content schema and every call failed validation.
+          const context = await getConversationContext(chatId, maxMessages);
           return {
             content: [{ type: "text", text: context }],
           };
