@@ -18,7 +18,6 @@ import {
   saveOutbound,
   markRead,
   markAllRead,
-  searchMessages,
   getConversationContext,
 } from "./store.js";
 import { HOST_NAME, PROJECT, AGENT_ID, BOT_TOKEN_HASH } from "./config.js";
@@ -26,6 +25,7 @@ import { log } from "./log.js";
 import {
   handleGetHistory,
   handleGetUnread,
+  handleSearchMessages,
   handleDownloadAttachment,
 } from "./tools-messages.js";
 import { runHealth, serializeHealthReport } from "./health-adapters.js";
@@ -226,7 +226,11 @@ export function registerTools(mcp: Server): void {
         name: "search_messages",
         description:
           "Text search across stored messages using LIKE matching. " +
-          "Returns matching messages in reverse chronological order.",
+          "Returns {coverage, count, messages} — the same shape as " +
+          "get_history and get_unread — with matches in reverse " +
+          "chronological order. An EMPTY messages array means nothing " +
+          "matched ONLY when coverage.verdict says this store can vouch " +
+          "for the window; otherwise treat it as UNKNOWN, not as absence.",
         inputSchema: {
           type: "object" as const,
           properties: {
@@ -430,19 +434,11 @@ export function registerTools(mcp: Server): void {
             content: [{ type: "text", text: `document sent (id: ${msgId})` }],
           };
         }
-        case "search_messages": {
-          const query = args.query as string;
-          const chatId = args.chat_id as string | undefined;
-          const limit = (args.limit as number) ?? 20;
-          if (chatId) assertAllowedChat(chatId);
-          // AWAITED: the store went async in #132. Un-awaited, `rows` was a
-          // Promise and JSON.stringify(<Promise>) is "{}" — which parses, so
-          // every search read as an authoritative "nothing found".
-          const rows = await searchMessages(query, chatId, limit);
-          return {
-            content: [{ type: "text", text: JSON.stringify(rows, null, 2) }],
-          };
-        }
+        case "search_messages":
+          // Same declared {coverage, count, messages} shape as get_history
+          // and get_unread — see handleSearchMessages for why a bare array
+          // (and before #140, a bare {}) was not enough.
+          return await handleSearchMessages(args);
         case "health": {
           // Architecture fix (incident-cct-inbound-dies-silently-with-mcp-
           // server-20260711 follow-up, 2026-07): this server process is NO
