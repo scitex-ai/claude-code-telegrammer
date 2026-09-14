@@ -83,9 +83,9 @@ Key Features
 - **TUI Watchdog** -- polls a GNU Screen session, detects Claude Code's
   TUI state (permission prompts, idle), and sends keystrokes to keep the
   agent running.
-- **Configurable State Directory** -- all state (DB, lock, access config)
-  lives under ``CLAUDE_CODE_TELEGRAMMER_AGENT_STATE_DIR``, not
-  hardcoded paths.
+- **Configurable State Directory** -- local state (access config, lock,
+  attachments) lives under ``CLAUDE_CODE_TELEGRAMMER_AGENT_STATE_DIR``, not
+  hardcoded paths; messages live in PostgreSQL, one schema per agent.
 
 Quick Example
 -------------

@@ -19,7 +19,8 @@
  *
  * Env vars:
  *   CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN       - required
- *   CLAUDE_CODE_TELEGRAMMER_AGENT_STATE_DIR - default: ~/.claude-code-telegrammer
+ *   CLAUDE_CODE_TELEGRAMMER_AGENT_STATE_DIR - default:
+ *                                             ~/.scitex/claude-code-telegrammer/runtime/<agent_id>
  *                                             (per-agent override; the old
  *                                             …_STATE_DIR name is rejected loud)
  *   CLAUDE_CODE_TELEGRAMMER_ALLOWED_USERS - comma-separated user IDs (optional)
