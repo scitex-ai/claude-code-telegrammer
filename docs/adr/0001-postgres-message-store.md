@@ -178,6 +178,33 @@ The shape it needs to take:
    afterwards, because a tidy-up consumes the evidence it would be checked
    against.
 
+> **2026-09-14 — do not run steps 3 and 4 as written.** They assume the import
+> happens before a bridge stores anything in PostgreSQL. It did not: the
+> bridges restarted onto this code and have been writing ever since, and for
+> every agent that could be checked, no import has run. Measured read-only
+> that day:
+>
+> - For five of the six agents with legacy history, the PostgreSQL `messages`
+>   table holds fewer rows than the legacy store, so the history is not there
+>   (`pg_stat_all_tables.n_live_tup`, which matched exact counts to within one
+>   row on the tables that could be read). The sixth is undetermined.
+> - Every legacy store numbers its rows `1..N` with no gaps, and `id` here is a
+>   `BIGSERIAL` from 1 that nothing has moved. The ranges now overlap: one
+>   agent's legacy ids run 1–9,270 while its live rows already hold 1–~1,643.
+> - Step 4 would then skip every colliding legacy row without a word — a
+>   *different* message that shares an id, not "an older copy of itself" —
+>   and the legacy rows that do insert would keep `reply_to_row_id` and
+>   `attachments.message_row_id` values that now name unrelated live messages.
+>   The foreign key accepts that. Step 7's count exposes the skipped rows; it
+>   cannot expose the mis-threading.
+> - Legacy inbound rows whose `read_at` is NULL (108 in one store) would all
+>   appear in `get_unread`.
+>
+> The steps remain safe only for an agent with no rows in PostgreSQL yet.
+> Whether to import at all, and how to re-key ids if so, is an open operator
+> decision: card `sqlite-out-telegrammer-relay-state-20260828`. The legacy files
+> are untouched, so nothing is lost while it waits.
+
 Restarting the bridge is required for the code change to take effect. That is
 an operator action; nothing here restarts a running bot.
 
