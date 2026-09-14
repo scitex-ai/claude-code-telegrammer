@@ -1,6 +1,6 @@
 /**
  * Handler bodies for the message-query MCP tools: get_history,
- * get_unread, download_attachment.
+ * get_unread, search_messages, download_attachment.
  *
  * Extracted from tools.ts (incident cct-inbound-images-20260707) for two
  * reasons: (1) tools.ts sits near the repo's 512-line .ts cap and these
@@ -16,6 +16,7 @@ import { assertAllowedChat } from "./access.js";
 import {
   getHistory,
   getUnread,
+  searchMessages,
   attachmentsForRows,
   findAttachmentByFileId,
   markAttachmentDownloaded,
@@ -143,6 +144,27 @@ export async function handleGetUnread(
   const chatId = args.chat_id as string | undefined;
   if (chatId) assertAllowedChat(chatId);
   return messagesResult(await getUnread(chatId));
+}
+
+/**
+ * search_messages — the third message read, and now in the same shape.
+ *
+ * It was the one read left out when get_history and get_unread moved to
+ * `{coverage, count, messages}` on 2026-08-15. For nine days after #132 it
+ * returned a bare `{}` for every query (an un-awaited Promise, fixed in #140),
+ * and three separate agents read that `{}` as "the store is empty" — one told
+ * its user so. #140 turned it into a bare `[]`, which is honest about the rows
+ * and still silent about whether the store can vouch for the window. That is
+ * the ambiguity messagesResult exists to remove, so search goes through it too.
+ */
+export async function handleSearchMessages(
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  const query = args.query as string;
+  const chatId = args.chat_id as string | undefined;
+  const limit = (args.limit as number) ?? 20;
+  if (chatId) assertAllowedChat(chatId);
+  return messagesResult(await searchMessages(query, chatId, limit));
 }
 
 /**

@@ -101,37 +101,78 @@ describe("get_context returns TEXT, not a Promise", () => {
   });
 });
 
-describe("search_messages returns an ARRAY, and absence is distinguishable", () => {
-  test("a matching query returns the matching rows", async () => {
+/**
+ * search_messages answers in the SAME declared shape as get_history and
+ * get_unread: `{coverage, count, messages}` (lib/tools-messages.ts
+ * messagesResult — "Every message read answers in ONE shape").
+ *
+ * #140 fixed the missing await and left search on a bare ARRAY. That stopped
+ * the `{}` but kept the original ambiguity those two tools were moved off on
+ * 2026-08-15: `[]` cannot say whether nothing matched or the store recorded
+ * nothing for the window. `coverage` is the store's own statement about that,
+ * and it is what saved the one reader of three who happened to bring a
+ * control. The empty result has to describe itself.
+ */
+describe("search_messages answers in the declared {coverage, count, messages} shape", () => {
+  function parseEnvelope(text: unknown) {
+    expect(typeof text).toBe("string");
+    const parsed = JSON.parse(text as string);
+    // THE DISCRIMINATING ASSERTIONS. JSON.stringify(<Promise>) is "{}" and a
+    // bare array is "[]" — both parse. Neither is this shape.
+    expect(Array.isArray(parsed)).toBe(false);
+    expect(parsed).toHaveProperty("coverage");
+    expect(parsed).toHaveProperty("count");
+    expect(Array.isArray(parsed.messages)).toBe(true);
+    expect(parsed.count).toBe(parsed.messages.length);
+    return parsed;
+  }
+
+  test("a matching query returns the rows inside the envelope", async () => {
     const result = await client.callTool({
       name: "search_messages",
       arguments: { query: TOKEN, chat_id: CHAT },
     });
     expect(result.isError).toBeFalsy();
-    const text = textOf(result);
-    expect(typeof text).toBe("string");
-
-    // THE DISCRIMINATING ASSERTION. JSON.stringify(<Promise>) is "{}", which
-    // parses — so "it parsed" proves nothing. The rows are an array.
-    const parsed = JSON.parse(text as string);
-    expect(Array.isArray(parsed)).toBe(true);
-    expect(parsed.some((r: { text?: string }) => r.text === SEEDED_TEXT)).toBe(
-      true,
-    );
+    const env = parseEnvelope(textOf(result));
+    expect(env.count).toBeGreaterThanOrEqual(1);
+    expect(
+      env.messages.some((r: { text?: string }) => r.text === SEEDED_TEXT),
+    ).toBe(true);
   });
 
-  test("a query that matches nothing returns [] — never the bare {}", async () => {
+  test("no match is count:0 WITH coverage — an answer that describes itself", async () => {
     // The reporters' real complaint: {} for "no matches" and {} for "the query
-    // never ran" were the same bytes. An empty ARRAY is a different answer
-    // from an empty OBJECT, and a caller can tell them apart.
+    // never ran" were the same bytes. An empty result must now carry the
+    // store's own verdict on whether it can vouch for the window.
     const result = await client.callTool({
       name: "search_messages",
       arguments: { query: `absent-${TOKEN}-absent`, chat_id: CHAT },
     });
-    const text = textOf(result) as string;
-    expect(text.trim()).not.toBe("{}");
-    const parsed = JSON.parse(text);
-    expect(Array.isArray(parsed)).toBe(true);
-    expect(parsed).toHaveLength(0);
+    const env = parseEnvelope(textOf(result));
+    expect(env.count).toBe(0);
+    expect(env.messages).toHaveLength(0);
+    expect(typeof env.coverage.verdict).toBe("string");
+  });
+
+  test("search and get_history share one shape — same top-level keys", async () => {
+    // Guards the invariant, not just this tool: if either drifts, the reader
+    // who learned one shape from one tool misreads the other.
+    const search = JSON.parse(
+      textOf(
+        await client.callTool({
+          name: "search_messages",
+          arguments: { query: TOKEN, chat_id: CHAT },
+        }),
+      ) as string,
+    );
+    const history = JSON.parse(
+      textOf(
+        await client.callTool({
+          name: "get_history",
+          arguments: { chat_id: CHAT, limit: 5 },
+        }),
+      ) as string,
+    );
+    expect(Object.keys(search).sort()).toEqual(Object.keys(history).sort());
   });
 });
