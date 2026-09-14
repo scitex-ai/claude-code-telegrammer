@@ -23,12 +23,31 @@
  * 1s) delay instead of an immediate call, the necessary cost of the payload
  * having to cross a process boundary via the store instead of a function call.
  *
- * Only ever populated for !wakeEnabled() deployments (see
- * lib/handle-update.ts) — wake-enabled agents deliver via the already
- * mcp-independent /v1/turn POST and never write here, so this relay simply
- * finds nothing to do for them; started only when !wakeEnabled() in
- * ts/telegram-server.ts to avoid a pointless poll for the common
- * (wake-enabled fleet) case.
+ * WHO WRITES HERE — TWO CASES, AND WAKE-ENABLED AGENTS ARE ONE OF THEM.
+ *
+ *   1. !wakeEnabled() (interactive CLI): every inbound message is written, and
+ *      this relay is the normal delivery path.
+ *   2. wakeEnabled() (sac TUI + SDK agents): a row is written ONLY WHEN THE
+ *      WAKE POST FAILS. This relay is then the FALLBACK delivery path — it
+ *      reaches an attached session without going through sac's a2a sidecar,
+ *      and a row it cannot deliver yet stays pending until it can. A healthy
+ *      wake writes nothing, so there is still exactly one delivery path and no
+ *      double delivery.
+ *
+ * The relay is therefore started whenever Telegram is enabled
+ * (ts/telegram-server.ts: `if (TELEGRAM_ENABLED) startNotifyRelay(...)`),
+ * wake-enabled deployments included — since PR #77, 2026-07-14, which fixed
+ * operator messages being dropped outright whenever the sidecar was down.
+ *
+ * THIS PARAGRAPH USED TO SAY THE OPPOSITE: "only ever populated for
+ * !wakeEnabled() deployments ... wake-enabled agents ... never write here ...
+ * started only when !wakeEnabled()". That was true before #77 and false for
+ * the two months after it. It was not harmless: an agent read it on
+ * 2026-08-23, concluded that a failed wake wrote to a queue with no reader,
+ * and recommended REMOVING the fallback write — which would have reintroduced
+ * the incident #77 fixed. The call site in telegram-server.ts is the source of
+ * truth for whether this relay runs; if the two ever disagree again, believe
+ * the call site and fix this comment.
  *
  * NOTE ON THE ENGINE MOVE: this module used to open its own independent
  * database handle, each one having to remember its own lock-timeout setting
