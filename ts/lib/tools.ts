@@ -99,8 +99,12 @@ export function registerTools(mcp: Server): void {
         name: "get_history",
         description:
           "Get message history for a chat from the local DB. " +
-          "Returns {coverage, count, messages} — messages are inbound and " +
-          "outbound in chronological order, and `coverage` states whether " +
+          "Returns {coverage, count, total, messages}. messages is the " +
+          "LATEST page: the most recent `limit` messages, inbound and " +
+          "outbound, listed oldest-to-newest; `offset` pages further back. " +
+          "`count` is rows on this page and `total` is every stored message " +
+          "in the chat, so count < total means older history exists. " +
+          "`coverage` states whether " +
           "this store can VOUCH for that window: coverage.verdict is " +
           "'covered' (ingestion is live, so what you see is what arrived) or " +
           "'unverifiable' (the poller was not demonstrably alive, or a gap " +
@@ -119,7 +123,9 @@ export function registerTools(mcp: Server): void {
             },
             offset: {
               type: "number",
-              description: "Number of messages to skip. Default: 0.",
+              description:
+                "How many of the most recent messages to skip: 0 is the " +
+                "latest page, offset=limit the page before it. Default: 0.",
             },
           },
           required: ["chat_id"],
@@ -129,7 +135,8 @@ export function registerTools(mcp: Server): void {
         name: "get_unread",
         description:
           "Get unread inbound messages, optionally filtered by chat_id. " +
-          "Returns {coverage, count, messages}. An EMPTY messages array is " +
+          "Returns {coverage, count, total, messages}; nothing is paged, so " +
+          "total equals count. An EMPTY messages array is " +
           "only evidence that nothing was sent when coverage.verdict is " +
           "'covered'; when it is 'unverifiable' the store could not observe " +
           "that window at all, so treat the silence as UNKNOWN and act on " +
@@ -226,9 +233,10 @@ export function registerTools(mcp: Server): void {
         name: "search_messages",
         description:
           "Text search across stored messages using LIKE matching. " +
-          "Returns {coverage, count, messages} — the same shape as " +
+          "Returns {coverage, count, total, messages} — the same shape as " +
           "get_history and get_unread — with matches in reverse " +
-          "chronological order. An EMPTY messages array means nothing " +
+          "chronological order; `total` is every match, so count < total " +
+          "means `limit` cut the results. An EMPTY messages array means nothing " +
           "matched ONLY when coverage.verdict says this store can vouch " +
           "for the window; otherwise treat it as UNKNOWN, not as absence.",
         inputSchema: {
@@ -435,7 +443,7 @@ export function registerTools(mcp: Server): void {
           };
         }
         case "search_messages":
-          // Same declared {coverage, count, messages} shape as get_history
+          // Same declared {coverage, count, total, messages} shape as get_history
           // and get_unread — see handleSearchMessages for why a bare array
           // (and before #140, a bare {}) was not enough.
           return await handleSearchMessages(args);

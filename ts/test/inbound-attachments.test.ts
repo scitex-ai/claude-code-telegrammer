@@ -157,7 +157,7 @@ describe("inbound photo content line carries kind + file_id", () => {
 });
 
 /**
- * get_history / get_unread answer {coverage, count, messages} rather than a
+ * get_history / get_unread answer {coverage, count, total, messages} rather than a
  * bare array — a bare [] could not distinguish "nothing was sent" from "this
  * store never observed that window" (incident 2026-08-10). Tests read the
  * messages through here so the envelope is asserted in exactly one place.

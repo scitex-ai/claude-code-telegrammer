@@ -166,12 +166,14 @@ describe("message store", () => {
     expect((history[0].id as number) < (history[1].id as number)).toBe(true);
   });
 
-  test("getHistory respects limit and offset", async () => {
+  test("getHistory pages back from the NEWEST: offset 0 is the latest row", async () => {
     const page1 = await getHistory("300", 1, 0);
     expect(page1.length).toBe(1);
     const page2 = await getHistory("300", 1, 1);
     expect(page2.length).toBe(1);
-    expect(page1[0].id).not.toBe(page2[0].id);
+    // Pins WHICH row, not merely that the pages differ. "They differ" was just
+    // as true of the oldest-first order, which is how that order went unseen.
+    expect((page1[0].id as number) > (page2[0].id as number)).toBe(true);
   });
 
   test("offset persistence round-trips", async () => {

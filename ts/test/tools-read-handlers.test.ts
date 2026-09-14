@@ -1,5 +1,6 @@
 /**
- * search_messages and get_context, exercised THROUGH THE MCP TOOL HANDLER.
+ * search_messages, get_context, get_history and get_unread, exercised THROUGH
+ * THE MCP TOOL HANDLER.
  *
  * WHY THIS FILE EXISTS. PR #132 moved the store onto PostgreSQL, which made
  * searchMessages() and getConversationContext() async. store.test.ts was
@@ -37,12 +38,24 @@ const CHAT = `tools-read-${process.pid}`;
 const TOKEN = `needle${process.pid}x${Date.now()}`;
 const SEEDED_TEXT = `the ${TOKEN} is in this message`;
 
+// A second chat for the paging cases: five messages in a known order, so a
+// page is checked by CONTENT, not by how many rows came back.
+const HCHAT = `tools-history-${process.pid}`;
+const HTOKEN = `hist${process.pid}x${Date.now()}`;
+const HTEXTS = [1, 2, 3, 4, 5].map((i) => `m${i} ${HTOKEN}`);
+
 let client: Client;
 let server: Server;
 
 function textOf(result: { content?: unknown }): unknown {
   const content = result.content as Array<{ type: string; text: unknown }>;
   return content?.[0]?.text;
+}
+
+async function callJson(name: string, args: Record<string, unknown>) {
+  const result = await client.callTool({ name, arguments: args });
+  expect(result.isError).toBeFalsy();
+  return JSON.parse(textOf(result) as string);
 }
 
 beforeAll(async () => {
@@ -60,12 +73,28 @@ beforeAll(async () => {
     bot_token_hash: "test-hash",
     raw_json: "{}",
   });
+  // Sequential on purpose: row ids must ascend in the order of HTEXTS.
+  for (const [i, text] of HTEXTS.entries()) {
+    await saveInbound({
+      chat_id: HCHAT,
+      message_id: String(i + 1),
+      user_id: "42",
+      username: "tester",
+      text,
+      telegram_ts: `2026-09-14T00:00:0${i + 1}Z`,
+      host: "testhost",
+      project: "/test",
+      agent_id: "test",
+      bot_token_hash: "test-hash",
+      raw_json: "{}",
+    });
+  }
 
   // The handlers call assertAllowedChat(). loadAccess() caches a MISSING
   // access.json for 5s, so a file written after an earlier test's read would
   // be ignored for that window — a test that passes alone and fails in the
   // suite. Reset the cache after writing.
-  writeFileSync(ACCESS_FILE, JSON.stringify({ allowFrom: [CHAT] }));
+  writeFileSync(ACCESS_FILE, JSON.stringify({ allowFrom: [CHAT, HCHAT] }));
   _resetCache();
 
   server = new Server(
@@ -103,7 +132,7 @@ describe("get_context returns TEXT, not a Promise", () => {
 
 /**
  * search_messages answers in the SAME declared shape as get_history and
- * get_unread: `{coverage, count, messages}` (lib/tools-messages.ts
+ * get_unread: `{coverage, count, total, messages}` (lib/tools-messages.ts
  * messagesResult — "Every message read answers in ONE shape").
  *
  * #140 fixed the missing await and left search on a bare ARRAY. That stopped
@@ -113,7 +142,7 @@ describe("get_context returns TEXT, not a Promise", () => {
  * and it is what saved the one reader of three who happened to bring a
  * control. The empty result has to describe itself.
  */
-describe("search_messages answers in the declared {coverage, count, messages} shape", () => {
+describe("search_messages answers in the declared {coverage, count, total, messages} shape", () => {
   function parseEnvelope(text: unknown) {
     expect(typeof text).toBe("string");
     const parsed = JSON.parse(text as string);
@@ -124,6 +153,7 @@ describe("search_messages answers in the declared {coverage, count, messages} sh
     expect(parsed).toHaveProperty("count");
     expect(Array.isArray(parsed.messages)).toBe(true);
     expect(parsed.count).toBe(parsed.messages.length);
+    expect(parsed.total).toBeGreaterThanOrEqual(parsed.count);
     return parsed;
   }
 
@@ -173,6 +203,75 @@ describe("search_messages answers in the declared {coverage, count, messages} sh
         }),
       ) as string,
     );
+    const unread = await callJson("get_unread", { chat_id: CHAT });
     expect(Object.keys(search).sort()).toEqual(Object.keys(history).sort());
+    expect(Object.keys(unread).sort()).toEqual(Object.keys(history).sort());
+  });
+});
+
+/**
+ * get_history hands back the LATEST page, oldest-to-newest within it.
+ *
+ * It used to run `ORDER BY id ASC LIMIT n OFFSET k`, so limit=N on a long chat
+ * returned the N OLDEST messages — well-formed, in order, with a `count` that
+ * looked like an answer. scitex-hub asked for the recent 14 on 2026-09-05 and
+ * got messages from three days earlier, noticed only because it read the
+ * timestamps. Both main callers want the newest rows: the restart protocol
+ * ("what arrived while I was down") and the server instructions, which send an
+ * agent to get_history for the rest of a truncated message.
+ *
+ * The store tests that stood guard passed at EVERY ordering: "chronological
+ * within the result" and "page 1 differs from page 2" are just as true of the
+ * oldest page. These pin WHICH rows come back.
+ */
+describe("get_history returns the LATEST page, not the oldest", () => {
+  const texts = (env: { messages: Array<{ text?: string }> }) =>
+    env.messages.map((m) => m.text);
+
+  test("limit=N is the newest N, listed oldest-to-newest", async () => {
+    const env = await callJson("get_history", { chat_id: HCHAT, limit: 2 });
+    expect(texts(env)).toEqual([HTEXTS[3], HTEXTS[4]]);
+  });
+
+  test("offset pages BACK from the newest", async () => {
+    const page2 = await callJson("get_history", {
+      chat_id: HCHAT,
+      limit: 2,
+      offset: 2,
+    });
+    expect(texts(page2)).toEqual([HTEXTS[1], HTEXTS[2]]);
+    const page3 = await callJson("get_history", {
+      chat_id: HCHAT,
+      limit: 2,
+      offset: 4,
+    });
+    expect(texts(page3)).toEqual([HTEXTS[0]]);
+  });
+
+  test("total says whether older history exists — count alone cannot", async () => {
+    const page = await callJson("get_history", { chat_id: HCHAT, limit: 2 });
+    expect(page.count).toBe(2);
+    expect(page.total).toBe(5);
+    const all = await callJson("get_history", { chat_id: HCHAT, limit: 50 });
+    expect(all.count).toBe(5);
+    expect(all.total).toBe(5);
+  });
+});
+
+describe("`total` rides on every message read", () => {
+  test("search_messages: total counts every match, so a cut is visible", async () => {
+    const env = await callJson("search_messages", {
+      query: HTOKEN,
+      chat_id: HCHAT,
+      limit: 2,
+    });
+    expect(env.count).toBe(2);
+    expect(env.total).toBe(5);
+  });
+
+  test("get_unread: total equals count — it has no limit to cut with", async () => {
+    const env = await callJson("get_unread", { chat_id: HCHAT });
+    expect(env.count).toBe(5);
+    expect(env.total).toBe(5);
   });
 });
