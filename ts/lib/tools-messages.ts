@@ -1,6 +1,6 @@
 /**
  * Handler bodies for the message-query MCP tools: get_history,
- * get_unread, search_messages, download_attachment.
+ * get_unread, search_messages, mark_read, download_attachment.
  *
  * Extracted from tools.ts (incident cct-inbound-images-20260707) for two
  * reasons: (1) tools.ts sits near the repo's 512-line .ts cap and these
@@ -19,6 +19,9 @@ import {
   getUnread,
   searchMessages,
   countSearchMatches,
+  markAllRead,
+  markReadRows,
+  chatsForRows,
   attachmentsForRows,
   findAttachmentByFileId,
   markAttachmentDownloaded,
@@ -171,6 +174,63 @@ export async function handleGetUnread(
  * and still silent about whether the store can vouch for the window. That is
  * the ambiguity messagesResult exists to remove, so search goes through it too.
  */
+/**
+ * mark_read answers with what it ACTUALLY marked.
+ *
+ * It used to reply "marked N message(s) as read" with N = the ids it was GIVEN.
+ * The update only touches rows that exist, are inbound and are still unread, so
+ * any other id changed nothing and was reported as marked anyway. The likeliest
+ * wrong input is a Telegram message_id passed where the DB row id belongs, and
+ * both sit in every channel message. That path also never consulted the
+ * allowlist, so rows of any chat could be marked.
+ *
+ * Every row's chat is now checked BEFORE anything is written, so one disallowed
+ * row refuses the whole call with no partial write. The answer counts the rows
+ * the database reports it changed and names the ids it could not mark.
+ */
+export async function handleMarkRead(
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  const chatId = args.chat_id as string | undefined;
+  if (chatId) {
+    assertAllowedChat(chatId);
+    const marked = await markAllRead(chatId);
+    return textResult(`marked ${marked} unread message(s) in ${chatId} as read`);
+  }
+  const requested = args.message_ids;
+  if (!Array.isArray(requested) || requested.length === 0) {
+    return textResult("provide chat_id or message_ids to mark as read", true);
+  }
+  // Digits only: the ids travel to the database as one comma-joined string.
+  const notRowIds = requested.filter(
+    (v) =>
+      !(typeof v === "number" || (typeof v === "string" && /^\d+$/.test(v))) ||
+      !Number.isSafeInteger(Number(v)) ||
+      Number(v) <= 0,
+  );
+  if (notRowIds.length > 0) {
+    throw new Error(
+      "message_ids must be DB row ids (positive integers: the row_id in the " +
+        `<channel> meta, not Telegram's message_id); got: ${notRowIds.join(", ")}`,
+    );
+  }
+  const ids = [...new Set(requested.map(Number))];
+  const found = await chatsForRows(ids);
+  for (const chat of new Set(found.map((r) => r.chat_id))) {
+    assertAllowedChat(chat);
+  }
+  const marked = new Set(await markReadRows(found.map((r) => r.id)));
+  const foundIds = new Set(found.map((r) => r.id));
+  const notFound = ids.filter((id) => !foundIds.has(id));
+  const notMarkable = [...foundIds].filter((id) => !marked.has(id));
+  let text = `marked ${marked.size} of ${ids.length} message(s) as read`;
+  if (notFound.length > 0) text += `; not found: ${notFound.join(", ")}`;
+  if (notMarkable.length > 0) {
+    text += `; already read or not inbound: ${notMarkable.join(", ")}`;
+  }
+  return textResult(text);
+}
+
 export async function handleSearchMessages(
   args: Record<string, unknown>,
 ): Promise<ToolResult> {

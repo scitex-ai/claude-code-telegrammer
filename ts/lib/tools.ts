@@ -17,7 +17,6 @@ import {
 import {
   saveOutbound,
   markRead,
-  markAllRead,
   getConversationContext,
 } from "./store.js";
 import { HOST_NAME, PROJECT, AGENT_ID, BOT_TOKEN_HASH } from "./config.js";
@@ -26,6 +25,7 @@ import {
   handleGetHistory,
   handleGetUnread,
   handleSearchMessages,
+  handleMarkRead,
   handleDownloadAttachment,
 } from "./tools-messages.js";
 import { runHealth, serializeHealthReport } from "./health-adapters.js";
@@ -158,7 +158,10 @@ export function registerTools(mcp: Server): void {
         name: "mark_read",
         description:
           "Mark messages as read. Pass either chat_id (marks all unread in that chat) " +
-          "or message_ids (array of DB row IDs to mark individually).",
+          "or message_ids (array of DB row IDs to mark individually). The answer " +
+          "counts what was ACTUALLY marked and names ids that were not found or " +
+          "were already read / outbound; a row in a chat outside the allowlist " +
+          "refuses the whole call.",
         inputSchema: {
           type: "object" as const,
           properties: {
@@ -169,7 +172,9 @@ export function registerTools(mcp: Server): void {
             message_ids: {
               type: "array",
               items: { type: "number" },
-              description: "Array of DB row IDs to mark as read.",
+              description:
+                "DB row ids to mark as read: the row_id in the <channel> meta, " +
+                "NOT Telegram's message_id.",
             },
           },
         },
@@ -393,42 +398,8 @@ export function registerTools(mcp: Server): void {
         case "get_unread":
           return handleGetUnread(args);
         case "mark_read": {
-          const chatId = args.chat_id as string | undefined;
-          const messageIds = args.message_ids as number[] | undefined;
-          if (chatId) {
-            assertAllowedChat(chatId);
-            await markAllRead(chatId);
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: `marked all unread in ${chatId} as read`,
-                },
-              ],
-            };
-          }
-          if (messageIds && messageIds.length > 0) {
-            for (const id of messageIds) {
-              await markRead(id);
-            }
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: `marked ${messageIds.length} message(s) as read`,
-                },
-              ],
-            };
-          }
-          return {
-            content: [
-              {
-                type: "text",
-                text: "provide chat_id or message_ids to mark as read",
-              },
-            ],
-            isError: true,
-          };
+          // Counts what it actually marked, and checks every row's chat.
+          return await handleMarkRead(args);
         }
         case "download_attachment":
           return await handleDownloadAttachment(args);

@@ -133,7 +133,24 @@ export function statements(schema: string) {
 
     markAllRead: `
       UPDATE ${s}.messages SET read_at = ${NOW_UTC_TEXT}
-      WHERE chat_id = $1 AND read_at IS NULL AND direction = 'inbound'`,
+      WHERE chat_id = $1 AND read_at IS NULL AND direction = 'inbound'
+      RETURNING id`,
+
+    // mark_read by row id. RETURNING id is how the tool learns which rows the
+    // database actually changed: an id that does not exist, is outbound, or is
+    // already read is simply absent from the result. The id list travels as
+    // one comma-joined string, for the arity reason given at attachmentsForRow.
+    markReadMany: `
+      UPDATE ${s}.messages SET read_at = ${NOW_UTC_TEXT}
+      WHERE id = ANY(string_to_array($1, ',')::bigint[])
+        AND read_at IS NULL AND direction = 'inbound'
+      RETURNING id`,
+
+    // Which chat each existing row belongs to, so mark_read can check the
+    // allowlist BEFORE it writes anything.
+    chatsForRows: `
+      SELECT id, chat_id FROM ${s}.messages
+      WHERE id = ANY(string_to_array($1, ',')::bigint[])`,
 
     unreadAll: `
       SELECT * FROM ${s}.messages
