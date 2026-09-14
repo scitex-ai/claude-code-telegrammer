@@ -337,6 +337,41 @@ describe("`total` rides on every message read", () => {
 });
 
 /**
+ * search_messages and get_context pin WHICH rows come back, not only how many.
+ *
+ * The get_history bug (#145) was an `ORDER BY id ASC LIMIT` that returned the
+ * OLDEST rows, and it survived because its tests checked properties the oldest
+ * page shares with the newest one. These two tools were guarded the same way:
+ * a count, or a toContain on a chat of one or two rows. Here the chat holds
+ * five messages in a known order, so the oldest rows are distinguishable.
+ */
+describe("search_messages and get_context return the NEWEST rows", () => {
+  test("search_messages: limit=2 is the two newest matches, newest first", async () => {
+    const env = await callJson("search_messages", {
+      query: HTOKEN,
+      chat_id: HCHAT,
+      limit: 2,
+    });
+    expect(env.messages.map((m: { text?: string }) => m.text)).toEqual([
+      HTEXTS[4],
+      HTEXTS[3],
+    ]);
+  });
+
+  test("get_context: max_messages=2 is the two newest, oldest-to-newest", async () => {
+    const result = await client.callTool({
+      name: "get_context",
+      arguments: { chat_id: HCHAT, max_messages: 2 },
+    });
+    const text = textOf(result) as string;
+    expect(text).toContain(HTEXTS[3]);
+    expect(text).toContain(HTEXTS[4]);
+    for (const old of HTEXTS.slice(0, 3)) expect(text).not.toContain(old);
+    expect(text.indexOf(HTEXTS[3])).toBeLessThan(text.indexOf(HTEXTS[4]));
+  });
+});
+
+/**
  * mark_read says what it ACTUALLY marked.
  *
  * It answered "marked N message(s) as read" with N = the ids it was GIVEN. The

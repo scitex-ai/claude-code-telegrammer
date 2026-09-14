@@ -30,6 +30,8 @@ import {
   startupConflictVerdict,
   STARTUP_409_LIMIT,
 } from "../lib/startup-conflict.js";
+import { ERROR_BACKOFF_MS } from "../lib/poller.js";
+import { DEFAULT_STALL_SECONDS } from "../lib/poll-watchdog.js";
 
 describe("startupConflictVerdict", () => {
   test("no predecessor displaced: refuses almost immediately", () => {
@@ -86,8 +88,12 @@ describe("startupConflictVerdict", () => {
   test("the startup limit is seconds, not minutes", () => {
     // The card's wording: "a bounded retry for a genuine handoff is fine — one
     // or two attempts, seconds not minutes". Guard the intent, not the number:
-    // at a 3s backoff this must stay well under the 180s stall threshold.
+    // at the real backoff this must stay well under the real stall threshold.
+    // Both sides are IMPORTED: this used to multiply frozen copies (3000 and
+    // 180_000), so it could not see either constant move.
     expect(STARTUP_409_LIMIT).toBeLessThanOrEqual(3);
-    expect(STARTUP_409_LIMIT * 3000).toBeLessThan(180_000);
+    expect(STARTUP_409_LIMIT * ERROR_BACKOFF_MS).toBeLessThan(
+      DEFAULT_STALL_SECONDS * 1000,
+    );
   });
 });
