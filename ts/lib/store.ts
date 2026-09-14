@@ -139,7 +139,6 @@ export function _resetStoreForTests(): void {
   activeSchema = null;
 }
 
-
 /**
  * Bring one message row back to the shape callers have always seen.
  *
@@ -261,6 +260,11 @@ export async function getUnread(
   return (rows as Array<Record<string, unknown>>).map(normalizeMessageRow);
 }
 
+/**
+ * The LATEST page of a chat, listed oldest-to-newest. `offset` counts back from
+ * the newest message: 0 is the most recent `limit` rows, `limit` the page
+ * before that.
+ */
 export async function getHistory(
   chatId: string,
   limit: number = 20,
@@ -268,6 +272,16 @@ export async function getHistory(
 ): Promise<Array<Record<string, unknown>>> {
   const rows = await getSql().unsafe(ready().history, [chatId, limit, offset]);
   return (rows as Array<Record<string, unknown>>).map(normalizeMessageRow);
+}
+
+/** Every stored message in the chat: get_history's `total`. */
+export async function countHistory(chatId: string): Promise<number> {
+  return totalOf(await getSql().unsafe(ready().historyTotal, [chatId]));
+}
+
+// count(*) is a bigint, which the driver does not hand back as a JS number.
+function totalOf(rows: unknown): number {
+  return Number((rows as Array<{ total: unknown }>)[0].total);
 }
 
 /**
@@ -407,6 +421,20 @@ export async function searchMessages(
     ? await getSql().unsafe(s.searchChat, [chatId, pattern, limit])
     : await getSql().unsafe(s.searchAll, [pattern, limit]);
   return (rows as Array<Record<string, unknown>>).map(normalizeMessageRow);
+}
+
+/** Every message a search matches, ignoring its limit: search_messages' `total`. */
+export async function countSearchMatches(
+  query: string,
+  chatId?: string,
+): Promise<number> {
+  const s = ready();
+  const pattern = `%${query}%`;
+  return totalOf(
+    chatId
+      ? await getSql().unsafe(s.searchChatTotal, [chatId, pattern])
+      : await getSql().unsafe(s.searchAllTotal, [pattern]),
+  );
 }
 
 export async function getConversationContext(

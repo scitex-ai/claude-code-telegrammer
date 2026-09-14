@@ -15,8 +15,10 @@ import { existsSync } from "fs";
 import { assertAllowedChat } from "./access.js";
 import {
   getHistory,
+  countHistory,
   getUnread,
   searchMessages,
+  countSearchMatches,
   attachmentsForRows,
   findAttachmentByFileId,
   markAttachmentDownloaded,
@@ -109,7 +111,7 @@ export async function currentCoverage(): Promise<IngestionCoverage> {
 }
 
 /**
- * Every message read answers in ONE shape: `{coverage, count, messages}`.
+ * Every message read answers in ONE shape: `{coverage, count, total, messages}`.
  *
  * It used to answer with a bare array, which made `[]` mean both "the
  * operator said nothing" and "this store recorded nothing for that window" —
@@ -117,13 +119,19 @@ export async function currentCoverage(): Promise<IngestionCoverage> {
  * quiet inbox on 2026-08-10. The fleet restart protocol tells every agent to
  * check this tool and NOT to assume a quiet inbox means nothing was sent; the
  * tool now carries the evidence needed to honour that instruction.
+ *
+ * `total` is every row the query matches, ignoring limit and offset. `count`
+ * alone cannot tell "that is everything" from "that is one page": a page of 20
+ * reads the same whether the chat holds 20 messages or 2,000.
  */
 async function messagesResult(
   rows: Array<Record<string, unknown>>,
+  total: number,
 ): Promise<ToolResult> {
   return jsonResult({
     coverage: await currentCoverage(),
     count: rows.length,
+    total,
     messages: await withAttachments(rows),
   });
 }
@@ -135,7 +143,11 @@ export async function handleGetHistory(
   const limit = (args.limit as number) ?? 20;
   const offset = (args.offset as number) ?? 0;
   assertAllowedChat(chatId);
-  return messagesResult(await getHistory(chatId, limit, offset));
+  const [rows, total] = await Promise.all([
+    getHistory(chatId, limit, offset),
+    countHistory(chatId),
+  ]);
+  return messagesResult(rows, total);
 }
 
 export async function handleGetUnread(
@@ -143,7 +155,9 @@ export async function handleGetUnread(
 ): Promise<ToolResult> {
   const chatId = args.chat_id as string | undefined;
   if (chatId) assertAllowedChat(chatId);
-  return messagesResult(await getUnread(chatId));
+  const rows = await getUnread(chatId);
+  // No limit: everything get_unread matched is on this page.
+  return messagesResult(rows, rows.length);
 }
 
 /**
@@ -164,7 +178,11 @@ export async function handleSearchMessages(
   const chatId = args.chat_id as string | undefined;
   const limit = (args.limit as number) ?? 20;
   if (chatId) assertAllowedChat(chatId);
-  return messagesResult(await searchMessages(query, chatId, limit));
+  const [rows, total] = await Promise.all([
+    searchMessages(query, chatId, limit),
+    countSearchMatches(query, chatId),
+  ]);
+  return messagesResult(rows, total);
 }
 
 /**

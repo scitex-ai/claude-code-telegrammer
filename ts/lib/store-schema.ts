@@ -143,8 +143,21 @@ export function statements(schema: string) {
       SELECT * FROM ${s}.messages
       WHERE chat_id = $1 AND read_at IS NULL AND direction = 'inbound' ORDER BY id`,
 
+    // The LATEST page, listed oldest-to-newest: take `limit` rows back from the
+    // newest end (after skipping `offset` of them), then restore chronological
+    // order. It was `ORDER BY id ASC LIMIT … OFFSET …`, which handed back the
+    // OLDEST page of a long chat — scitex-hub asked for the recent 14 on
+    // 2026-09-05 and got messages from three days earlier.
     history: `
-      SELECT * FROM ${s}.messages WHERE chat_id = $1 ORDER BY id ASC LIMIT $2 OFFSET $3`,
+      SELECT * FROM (
+        SELECT * FROM ${s}.messages WHERE chat_id = $1
+        ORDER BY id DESC LIMIT $2 OFFSET $3
+      ) page ORDER BY id ASC`,
+
+    // `total` for the message reads: every row the query matches, ignoring
+    // limit and offset, so `count < total` says the page is not everything.
+    historyTotal: `
+      SELECT count(*) AS total FROM ${s}.messages WHERE chat_id = $1`,
 
     // Reply-target lookup (lib/reply-context.ts). Deliberately NOT filtered by
     // direction: the message an operator replies to is usually one the BOT
@@ -195,6 +208,12 @@ export function statements(schema: string) {
     searchChat: `
       SELECT * FROM ${s}.messages WHERE chat_id = $1 AND text LIKE $2
       ORDER BY id DESC LIMIT $3`,
+
+    searchAllTotal: `
+      SELECT count(*) AS total FROM ${s}.messages WHERE text LIKE $1`,
+
+    searchChatTotal: `
+      SELECT count(*) AS total FROM ${s}.messages WHERE chat_id = $1 AND text LIKE $2`,
 
     contextChat: `
       SELECT * FROM ${s}.messages WHERE chat_id = $1 ORDER BY id DESC LIMIT $2`,
