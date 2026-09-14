@@ -244,8 +244,32 @@ export async function markRead(id: number): Promise<void> {
   await getSql().unsafe(ready().markRead, [id]);
 }
 
-export async function markAllRead(chatId: string): Promise<void> {
-  await getSql().unsafe(ready().markAllRead, [chatId]);
+/** Mark every unread inbound row in the chat read; returns how many changed. */
+export async function markAllRead(chatId: string): Promise<number> {
+  const rows = await getSql().unsafe(ready().markAllRead, [chatId]);
+  return (rows as unknown[]).length;
+}
+
+/**
+ * Mark the given rows read, where they are inbound and still unread. Returns
+ * the ids the database actually changed — not the ids it was asked about.
+ */
+export async function markReadRows(ids: number[]): Promise<number[]> {
+  if (ids.length === 0) return [];
+  const rows = await getSql().unsafe(ready().markReadMany, [ids.join(",")]);
+  return (rows as Array<{ id: unknown }>).map((r) => Number(r.id));
+}
+
+/** The chat each EXISTING row belongs to; ids with no row are absent. */
+export async function chatsForRows(
+  ids: number[],
+): Promise<Array<{ id: number; chat_id: string }>> {
+  if (ids.length === 0) return [];
+  const rows = await getSql().unsafe(ready().chatsForRows, [ids.join(",")]);
+  return (rows as Array<{ id: unknown; chat_id: string }>).map((r) => ({
+    id: Number(r.id),
+    chat_id: r.chat_id,
+  }));
 }
 
 // ── Queries ────────────────────────────────────────────────────────────────

@@ -28,7 +28,7 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { registerTools } from "../lib/tools.js";
-import { initStore, saveInbound } from "../lib/store.js";
+import { initStore, saveInbound, saveOutbound, getUnread } from "../lib/store.js";
 import { ACCESS_FILE } from "../lib/config.js";
 import { _resetCache } from "../lib/access.js";
 
@@ -43,6 +43,12 @@ const SEEDED_TEXT = `the ${TOKEN} is in this message`;
 const HCHAT = `tools-history-${process.pid}`;
 const HTOKEN = `hist${process.pid}x${Date.now()}`;
 const HTEXTS = [1, 2, 3, 4, 5].map((i) => `m${i} ${HTOKEN}`);
+
+// mark_read cases. MCHAT and NCHAT are allowlisted; XCHAT deliberately is not.
+const MCHAT = `tools-mark-${process.pid}`;
+const NCHAT = `tools-mark-all-${process.pid}`;
+const XCHAT = `tools-mark-denied-${process.pid}`;
+const rows: Record<string, number> = {};
 
 let client: Client;
 let server: Server;
@@ -90,11 +96,36 @@ beforeAll(async () => {
     });
   }
 
+  const seed = async (chat: string, messageId: string): Promise<number> =>
+    (await saveInbound({
+      chat_id: chat,
+      message_id: messageId,
+      user_id: "42",
+      username: "tester",
+      text: `mark ${messageId}`,
+      telegram_ts: "2026-09-14T00:01:00Z",
+      host: "testhost",
+      project: "/test",
+      agent_id: "test",
+      bot_token_hash: "test-hash",
+      raw_json: "{}",
+    }))!;
+  rows.a = await seed(MCHAT, "a");
+  rows.b = await seed(MCHAT, "b");
+  rows.c = await seed(MCHAT, "c");
+  rows.outbound = await saveOutbound(MCHAT, "an outbound row");
+  rows.denied = await seed(XCHAT, "x");
+  await seed(NCHAT, "n1");
+  await seed(NCHAT, "n2");
+
   // The handlers call assertAllowedChat(). loadAccess() caches a MISSING
   // access.json for 5s, so a file written after an earlier test's read would
   // be ignored for that window — a test that passes alone and fails in the
   // suite. Reset the cache after writing.
-  writeFileSync(ACCESS_FILE, JSON.stringify({ allowFrom: [CHAT, HCHAT] }));
+  writeFileSync(
+    ACCESS_FILE,
+    JSON.stringify({ allowFrom: [CHAT, HCHAT, MCHAT, NCHAT] }),
+  );
   _resetCache();
 
   server = new Server(
@@ -273,5 +304,71 @@ describe("`total` rides on every message read", () => {
     const env = await callJson("get_unread", { chat_id: HCHAT });
     expect(env.count).toBe(5);
     expect(env.total).toBe(5);
+  });
+});
+
+/**
+ * mark_read says what it ACTUALLY marked.
+ *
+ * It answered "marked N message(s) as read" with N = the ids it was GIVEN. The
+ * update only touches rows that exist, are inbound and are still unread, so any
+ * other id changed nothing and was reported as marked anyway. The likeliest
+ * wrong input is a Telegram message_id passed where the DB row id belongs, and
+ * both sit in every channel message. The row-id path also never consulted the
+ * allowlist, so rows of ANY chat could be marked. No test went through this
+ * tool's dispatch, which is why neither was seen.
+ */
+describe("mark_read reports what it actually marked", () => {
+  const NO_SUCH_ROW = 9_000_000_000_000;
+  const unreadIds = async (chat: string) =>
+    (await getUnread(chat)).map((r) => Number(r.id));
+  const markRead = (args: Record<string, unknown>) =>
+    client.callTool({ name: "mark_read", arguments: args });
+
+  test("message_ids: counts the rows changed and names the rest", async () => {
+    const result = await markRead({
+      message_ids: [rows.a, rows.outbound, NO_SUCH_ROW],
+    });
+    expect(result.isError).toBeFalsy();
+    const text = textOf(result) as string;
+    expect(text).toContain("marked 1 of 3");
+    expect(text).toContain(`not found: ${NO_SUCH_ROW}`);
+    expect(text).toContain(`already read or not inbound: ${rows.outbound}`);
+    expect(await unreadIds(MCHAT)).not.toContain(rows.a);
+    expect(await unreadIds(MCHAT)).toContain(rows.b);
+  });
+
+  test("a row already read is not counted a second time", async () => {
+    expect(textOf(await markRead({ message_ids: [rows.b] }))).toContain(
+      "marked 1 of 1",
+    );
+    const again = textOf(await markRead({ message_ids: [rows.b] })) as string;
+    expect(again).toContain("marked 0 of 1");
+    expect(again).toContain(`already read or not inbound: ${rows.b}`);
+  });
+
+  test("a row in a chat outside the allowlist is refused, and NOTHING is marked", async () => {
+    const result = await markRead({ message_ids: [rows.c, rows.denied] });
+    expect(result.isError).toBe(true);
+    expect(textOf(result) as string).toContain("not allowlisted");
+    expect(await unreadIds(XCHAT)).toContain(rows.denied);
+    // No partial write: the allowed row in the same call stays unread too.
+    expect(await unreadIds(MCHAT)).toContain(rows.c);
+  });
+
+  test("chat_id: the answer carries the count", async () => {
+    expect(textOf(await markRead({ chat_id: NCHAT }))).toContain(
+      "marked 2 unread message(s)",
+    );
+    expect(textOf(await markRead({ chat_id: NCHAT }))).toContain(
+      "marked 0 unread message(s)",
+    );
+  });
+
+  test("an id that is not a row id is refused by name", async () => {
+    const result = await markRead({ message_ids: ["abc"] });
+    expect(result.isError).toBe(true);
+    expect(textOf(result) as string).toContain("abc");
+    expect(textOf(result) as string).toContain("row id");
   });
 });
