@@ -358,13 +358,21 @@ process.on("SIGINT", () => shutdown("SIGINT"));
 
 // ── State-dir migration (scitex-standard default) ──────────────────────────
 //
-// Before the store opens (which would CREATE a fresh empty DB at the new
-// default path), carry any pre-existing history at the OLD default location
-// forward into the scitex-standard path. This runs BEFORE acquireLock/initStore
-// so loadOffset() reads the migrated DB, not an empty one. Idempotent, copy-not-
-// move, and FAIL LOUD — a throw here aborts startup so a half-migration is never
-// masked by a fresh DB (see lib/migrate-state.ts). No-op when an explicit
-// AGENT_STATE_DIR is set, the new DB already exists, or there is nothing to move.
+// Before the store opens, carry the FILES at the OLD default state dir
+// (downloaded attachments, access.json) forward into the scitex-standard path.
+// It does NOT carry message history: messages live in PostgreSQL, and a legacy
+// database file is only ANNOUNCED, named in a loud log line and left in place,
+// wherever it sits (old dir or current). Importing its rows is a separate step
+// (docs/adr/0001-postgres-message-store.md). Idempotent, copy-not-move, and
+// FAIL LOUD: a copy that throws aborts startup, so a half-migration is never
+// silently masked. The copy is skipped when an explicit AGENT_STATE_DIR is set,
+// a previous run left its marker, or the old dir holds nothing to carry; the
+// announcement runs regardless (see lib/migrate-state.ts).
+//
+// This comment used to say the step carries "pre-existing history" forward so
+// loadOffset() reads "the migrated DB". Both stopped being true when the store
+// moved to PostgreSQL, and a reader of the old text would believe old history
+// migrates at startup, which is exactly what did not happen.
 migrateLegacyStateDir();
 ensureCctAlias();
 
