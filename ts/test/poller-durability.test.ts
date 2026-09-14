@@ -16,6 +16,11 @@
  * are deliberately not exercised — this is a pure test of the offset /
  * retry / loud-notification logic).
  *
+ * The handler here is a COPY of that contract, so it cannot see the REAL
+ * handleUpdate drifting from it. That is covered separately:
+ * handle-update-persist-error.test.ts drives the real handler into a real
+ * store failure and proves the offset holds.
+ *
  * Architecture fix (2026-07, incident-cct-inbound-dies-silently-with-mcp-
  * server-20260711): processBatch no longer takes an `mcp: Server` parameter
  * — the standalone poller process has no mcp object at all. Loud
