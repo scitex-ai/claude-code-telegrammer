@@ -65,9 +65,9 @@ Why Not the Official Plugin?
 Key Features
 ------------
 
-- **10 MCP Tools** -- ``reply``, ``react``, ``edit_message``,
+- **11 MCP Tools** -- ``reply``, ``react``, ``edit_message``,
   ``get_history``, ``get_unread``, ``mark_read``, ``download_attachment``,
-  ``send_document``, ``search_messages``, ``get_context``.
+  ``send_document``, ``search_messages``, ``get_context``, ``health``.
 - **PostgreSQL Message Store** -- all messages persisted to the fleet's PostgreSQL server, one schema per agent
   with full-text search, threading metadata, and attachment tracking.
 - **Allowlist Access Control** -- DM and group policies via env var and
@@ -114,7 +114,7 @@ Architecture
         v
     Custom Telegram MCP Server (ts/telegram-server.ts)
         Bun + @modelcontextprotocol/sdk
-        Poller | Message Store | 10 MCP Tools | Attachments
+        Poller | Message Store | 11 MCP Tools | Attachments
         Access Control | Config (env vars) | PID Lock
         |
         | MCP stdio

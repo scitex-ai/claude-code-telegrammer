@@ -43,3 +43,9 @@ build/
 # source.
 __pycache__/
 *.py[cod]
+
+# Hook scratch. The pre-tool-use hooks write per-invocation staging files into a
+# `.pending/` dir next to themselves. That is machine scratch, never source; a
+# batch of it under docs/to_claude/ was committed by accident, and this rule
+# keeps it from coming back.
+.pending/
