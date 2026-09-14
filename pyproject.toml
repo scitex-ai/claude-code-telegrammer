@@ -64,15 +64,37 @@ packages = ["src/claude_code_telegrammer"]
 # bun packages into every release built on a machine where `bun install` had
 # run. Listing the runtime files keeps that impossible by construction.
 #
+# `lib` (the SHELL library) reaches the wheel through this table and NOT through
+# a symlink any more. src/claude_code_telegrammer/lib used to be a symlink to
+# ../../lib, which works only when the wheel is built from THIS checkout: the
+# release pipeline runs `python -m build`, which builds the wheel FROM THE
+# SDIST, and the sdist stores the root lib/*.sh as real files while recording no
+# src/claude_code_telegrammer/lib entry at all. Measured 2026-09-02 — direct
+# build 68 entries WITH claude_code_telegrammer/lib/*.sh, release round trip 63
+# entries WITHOUT them, i.e. the artifact the tests read was not the artifact
+# PyPI received. tests/test_packaging.py now builds BOTH ways and compares the
+# two namelists, so that class of divergence cannot come back unseen.
+#
 # tests/test_packaging.py fails if a runtime .ts file exists that is not
 # reachable through this table, so adding a new one to ts/ cannot silently
-# produce another dead wheel.
+# produce another dead wheel — and a table that names a path which no longer
+# exists (a rename, a move, a delete) makes hatchling refuse to build, which
+# the suite now reports as a FAILURE rather than a skip.
+#
+# `ts/bunfig.toml` is deliberately NOT here: its only directive is
+# `[test] preload = ["./test/preload.ts"]`, ts/test/ is correctly unshipped,
+# and bun reads bunfig.toml from the CWD rather than from the entry script's
+# directory — so shipping it would only plant a config naming a file that is
+# not there. `ts/bun.lock` IS here, so `bun install` next to the packaged
+# server reproduces the exact dependency resolution CI tested, instead of
+# resolving the "^1.12.1" caret range fresh over the network.
 [tool.hatch.build.targets.wheel.force-include]
 "ts/telegram-server.ts" = "claude_code_telegrammer/ts/telegram-server.ts"
 "ts/telegram-poller.ts" = "claude_code_telegrammer/ts/telegram-poller.ts"
 "ts/lib" = "claude_code_telegrammer/ts/lib"
 "ts/package.json" = "claude_code_telegrammer/ts/package.json"
-"ts/bunfig.toml" = "claude_code_telegrammer/ts/bunfig.toml"
+"ts/bun.lock" = "claude_code_telegrammer/ts/bun.lock"
+"lib" = "claude_code_telegrammer/lib"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

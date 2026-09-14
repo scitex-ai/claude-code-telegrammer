@@ -70,20 +70,39 @@ print('Wrote access.json with', len(users), 'allowed users to $STATE_DIR')
     AGENT_NAME="${AGENT_NAME:-telegrammer}"
     MCP_DIR="$HOME/.scitex/agent-container/cache/mcp-configs"
     mkdir -p "$MCP_DIR"
-    # Find telegram-server.ts: check project root first, then relative to SCRIPT_DIR
-    TS_SERVER=""
-    for candidate in \
-      "$SCRIPT_DIR/../ts/telegram-server.ts" \
-      "$SCRIPT_DIR/ts/telegram-server.ts" \
-      "$(python3 -c 'import claude_code_telegrammer; import os; print(os.path.join(os.path.dirname(claude_code_telegrammer.__file__), "..", "..", "ts", "telegram-server.ts"))' 2>/dev/null)" \
-    ; do
-      if [[ -f "$candidate" ]]; then
-        TS_SERVER="$(cd "$(dirname "$candidate")" && pwd)/$(basename "$candidate")"
-        break
-      fi
-    done
+    # Find telegram-server.ts through the PACKAGE'S OWN RESOLVER, so this
+    # script and `claude-code-telegrammer mcp` cannot disagree about which file
+    # is the server: $CCT_SERVER_ENTRY first, then the copy shipped INSIDE the
+    # installed package, then a source checkout.
+    #
+    # It used to hand-roll `<pkg>/../../ts/telegram-server.ts`, which is only
+    # correct for a checkout laid out as <repo>/src/<pkg>/. On a wheel install
+    # that arithmetic names <venv>/lib/pythonX.Y/ts/telegram-server.ts — a
+    # directory nothing ever creates — so with no checkout beside $SCRIPT_DIR
+    # every candidate missed and the per-agent MCP config was silently never
+    # written, even though the wheel now ships the server as package data.
+    # $CCT_SERVER_ENTRY had no effect here either.
+    TS_SERVER="$(python3 -c 'from claude_code_telegrammer._server_entry import resolve_server_entry; print(resolve_server_entry())' 2>/dev/null || true)"
+    if [[ -n "$TS_SERVER" && ! -f "$TS_SERVER" ]]; then
+      TS_SERVER=""
+    fi
     if [[ -z "$TS_SERVER" ]]; then
-      log_warn "telegram-server.ts not found"
+      # The package may not be importable at all (hooks can run before the
+      # install); fall back to a checkout sitting beside this script.
+      for candidate in \
+        "$SCRIPT_DIR/ts/telegram-server.ts" \
+        "$SCRIPT_DIR/../ts/telegram-server.ts" \
+      ; do
+        if [[ -f "$candidate" ]]; then
+          TS_SERVER="$(cd "$(dirname "$candidate")" && pwd)/$(basename "$candidate")"
+          break
+        fi
+      done
+    fi
+    if [[ -z "$TS_SERVER" ]]; then
+      log_warn "telegram-server.ts not found; the resolver reported:"
+      python3 -c 'from claude_code_telegrammer._server_entry import resolve_server_entry; print(resolve_server_entry())' 2>&1 |
+        while IFS= read -r line; do log_warn "  $line"; done || true
       exit 1
     fi
 

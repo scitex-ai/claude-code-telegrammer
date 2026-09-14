@@ -25,10 +25,18 @@ Resolution order, first hit wins:
    located with :mod:`importlib.resources` against the installed package —
    never by ``__file__``-relative parent arithmetic.
 3. The source-tree location ``<repo>/ts/telegram-server.ts``, walking up from
-   this file, so an editable install or a plain checkout keeps working.
+   this file, so an editable install or a plain checkout keeps working. This
+   one is offered ONLY when the layout it assumes is really there
+   (``<repo>/src/<package>/``); from ``site-packages`` the same arithmetic
+   produces ``<venv>/lib/pythonX.Y/ts/telegram-server.ts``, the original bug's
+   red herring, and naming a path nothing will ever create is worse than
+   saying the mechanism does not apply.
 
 When nothing resolves, :class:`ServerEntryNotFound` names every path that was
-tried and what to do about each one.
+tried and what to do about each one. The remedies are specific to the failure:
+when an explicit ``$CCT_SERVER_ENTRY`` is the thing that could not be honoured,
+reinstalling or relocating cannot help — only fixing or unsetting the override
+can — so those two remedies are not offered.
 """
 
 from __future__ import annotations
@@ -49,10 +57,22 @@ class ServerEntryNotFound(RuntimeError):
 
     Carries the ordered list of attempted paths so the failure names what was
     tried instead of only what was missing.
+
+    ``override_only`` says the failure is a dishonourable ``$CCT_SERVER_ENTRY``
+    rather than an exhausted search. That distinction changes the ADVICE: an
+    override short-circuits the other two mechanisms, so telling an operator to
+    reinstall or to run from a checkout would send them round a loop that ends
+    at the identical error.
     """
 
-    def __init__(self, attempts: list[tuple[str, Path | None]]) -> None:
+    def __init__(
+        self,
+        attempts: list[tuple[str, Path | None]],
+        *,
+        override_only: bool = False,
+    ) -> None:
         self.attempts = list(attempts)
+        self.override_only = override_only
         super().__init__(self._render())
 
     def _render(self) -> str:
@@ -60,14 +80,26 @@ class ServerEntryNotFound(RuntimeError):
             "claude-code-telegrammer: the TypeScript server entry "
             f"({SERVER_ENTRY_NAME}) could not be resolved."
         )
-        remedies = (
-            f"    - point ${ENV_SERVER_ENTRY} at an existing ts/{SERVER_ENTRY_NAME}, or",
-            (
-                "    - reinstall claude-code-telegrammer from a wheel that"
-                " ships the ts/ directory as package data, or"
-            ),
-            f"    - run from a source checkout that contains ts/{SERVER_ENTRY_NAME}.",
-        )
+        if self.override_only:
+            remedies = (
+                f"    - point ${ENV_SERVER_ENTRY} at an existing"
+                f" ts/{SERVER_ENTRY_NAME}, or",
+                (
+                    f"    - unset ${ENV_SERVER_ENTRY} to fall back to the"
+                    " packaged copy or the source tree."
+                ),
+            )
+        else:
+            remedies = (
+                f"    - point ${ENV_SERVER_ENTRY} at an existing"
+                f" ts/{SERVER_ENTRY_NAME}, or",
+                (
+                    "    - reinstall claude-code-telegrammer from a wheel that"
+                    " ships the ts/ directory as package data, or"
+                ),
+                f"    - run from a source checkout that contains"
+                f" ts/{SERVER_ENTRY_NAME}.",
+            )
         lines = [headline, "  tried, in order:"]
         for source, path in self.attempts:
             where = str(path) if path is not None else "(not set)"
@@ -100,11 +132,19 @@ def _packaged_candidate() -> Path | None:
         return None
 
 
-def _source_tree_candidate() -> Path:
-    """``<repo>/ts/telegram-server.ts`` for an editable install or checkout."""
+def _source_tree_candidate() -> Path | None:
+    """``<repo>/ts/telegram-server.ts`` for an editable install or checkout.
+
+    Returns ``None`` unless this module really sits in ``<repo>/src/<package>/``.
+    Offered unconditionally it would emit ``<venv>/lib/pythonX.Y/ts/…`` on every
+    wheel install — a directory nothing creates, and the exact string that made
+    the original report undiagnosable.
+    """
     # <repo>/src/claude_code_telegrammer/_server_entry.py -> <repo>
-    repo_root = Path(__file__).resolve().parents[2]
-    return repo_root / "ts" / SERVER_ENTRY_NAME
+    parents = Path(__file__).resolve().parents
+    if len(parents) < 3 or parents[1].name != "src":
+        return None
+    return parents[2] / "ts" / SERVER_ENTRY_NAME
 
 
 def candidate_paths() -> list[tuple[str, Path | None]]:
@@ -116,7 +156,7 @@ def candidate_paths() -> list[tuple[str, Path | None]]:
     return [
         (f"${ENV_SERVER_ENTRY} override", _override_candidate()),
         ("packaged resource", _packaged_candidate()),
-        ("source tree", _source_tree_candidate()),
+        ("source checkout (editable install only)", _source_tree_candidate()),
     ]
 
 
@@ -134,7 +174,9 @@ def resolve_server_entry() -> Path:
             return override_path
         # An override that cannot be honoured is a hard stop: falling back
         # would run a DIFFERENT server than the operator named, silently.
-        raise ServerEntryNotFound([(override_source, override_path)])
+        raise ServerEntryNotFound(
+            [(override_source, override_path)], override_only=True
+        )
 
     for _source, path in attempts[1:]:
         if path is not None and path.is_file():
