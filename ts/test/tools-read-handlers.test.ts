@@ -23,12 +23,21 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { writeFileSync, rmSync } from "fs";
+import { writeFileSync, rmSync, mkdirSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { registerTools } from "../lib/tools.js";
-import { initStore, saveInbound, saveOutbound, getUnread } from "../lib/store.js";
+import {
+  initStore,
+  saveInbound,
+  saveOutbound,
+  getUnread,
+  insertAttachment,
+  markAttachmentDownloaded,
+} from "../lib/store.js";
 import { ACCESS_FILE } from "../lib/config.js";
 import { _resetCache } from "../lib/access.js";
 
@@ -49,6 +58,13 @@ const MCHAT = `tools-mark-${process.pid}`;
 const NCHAT = `tools-mark-all-${process.pid}`;
 const XCHAT = `tools-mark-denied-${process.pid}`;
 const rows: Record<string, number> = {};
+
+// download_attachment cases: cached files for one allowed and one denied row.
+const FILES = join(tmpdir(), `cct-tools-read-files-${process.pid}`);
+const ALLOWED_FILE = join(FILES, "allowed.jpg");
+const DENIED_FILE = join(FILES, "denied.jpg");
+const ALLOWED_FILE_ID = `fid-allowed-${process.pid}`;
+const DENIED_FILE_ID = `fid-denied-${process.pid}`;
 
 let client: Client;
 let server: Server;
@@ -118,6 +134,18 @@ beforeAll(async () => {
   await seed(NCHAT, "n1");
   await seed(NCHAT, "n2");
 
+  // Cached attachments, one in an allowlisted chat and one in XCHAT, each with
+  // a real file on disk so download_attachment short-circuits without network.
+  mkdirSync(FILES, { recursive: true });
+  for (const [row, fileId, path] of [
+    [rows.a, ALLOWED_FILE_ID, ALLOWED_FILE],
+    [rows.denied, DENIED_FILE_ID, DENIED_FILE],
+  ] as const) {
+    writeFileSync(path, "bytes");
+    await insertAttachment(row, { kind: "photo", file_id: fileId });
+    await markAttachmentDownloaded(row, fileId, path);
+  }
+
   // The handlers call assertAllowedChat(). loadAccess() caches a MISSING
   // access.json for 5s, so a file written after an earlier test's read would
   // be ignored for that window — a test that passes alone and fails in the
@@ -143,6 +171,7 @@ afterAll(async () => {
   await server?.close();
   // Restore the absent-access.json default later test files expect.
   rmSync(ACCESS_FILE, { force: true });
+  rmSync(FILES, { recursive: true, force: true });
   _resetCache();
 });
 
@@ -370,5 +399,37 @@ describe("mark_read reports what it actually marked", () => {
     expect(result.isError).toBe(true);
     expect(textOf(result) as string).toContain("abc");
     expect(textOf(result) as string).toContain("row id");
+  });
+});
+
+/**
+ * download_attachment checks the allowlist, like every other tool that reaches
+ * a chat's data. It checked nothing, and its first move after resolving the
+ * attachment was to hand back a cached local_path, so any stored attachment's
+ * file was one call away. Rows exist only for chats that were allowlisted when
+ * their messages arrived (handle-update rejects the rest before saving), so the
+ * exposure was a chat removed from the allowlist since. The positive control
+ * proves the check does not over-block an allowed chat.
+ */
+describe("download_attachment refuses a chat outside the allowlist", () => {
+  const download = (args: Record<string, unknown>) =>
+    client.callTool({ name: "download_attachment", arguments: args });
+
+  test("row_id of a de-listed chat's attachment is refused, even when cached", async () => {
+    const result = await download({ row_id: rows.denied });
+    expect(result.isError).toBe(true);
+    expect(textOf(result) as string).toContain("not allowlisted");
+  });
+
+  test("file_id of that attachment is refused too", async () => {
+    const result = await download({ file_id: DENIED_FILE_ID });
+    expect(result.isError).toBe(true);
+    expect(textOf(result) as string).toContain("not allowlisted");
+  });
+
+  test("an allowlisted chat's cached attachment still comes straight back", async () => {
+    const result = await download({ row_id: rows.a });
+    expect(result.isError).toBeFalsy();
+    expect(textOf(result)).toBe(`downloaded to: ${ALLOWED_FILE}`);
   });
 });
