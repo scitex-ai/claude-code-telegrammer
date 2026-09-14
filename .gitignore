@@ -36,3 +36,6 @@ build/
 # separate, deliberate call — not a side effect of this rule.
 /GITIGNORE/
 /GITIGNORED/
+
+# Hook scratch — per-invocation staging written by pre-tool-use hooks; machine scratch, never meant to be committed
+.pending/
