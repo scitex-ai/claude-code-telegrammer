@@ -44,11 +44,11 @@ afterAll(async () => {
   }
 });
 
-/** Run a poller in a child process with `env`, returning its exit + stderr. */
+/** Spawn a poller with `env`, returning its exit code, stderr and state dir. */
 async function runPoller(
   env: Record<string, string>,
   fetchStub: string,
-): Promise<{ exitCode: number; stderr: string }> {
+): Promise<{ exitCode: number; stderr: string; stateDir: string }> {
   const dir = mkdtempSync(join(tmpdir(), "cct-refusal-"));
   const driver = join(dir, "driver.ts");
   writeFileSync(
@@ -79,7 +79,10 @@ async function runPoller(
   const proc = Bun.spawn(["bun", "run", driver], {
     env: {
       ...process.env,
-      CCT_STATE_DIR: dir,
+      // The canonical spelling on purpose: preload.ts sets it, and getenv()
+      // throws when a CCT_ alias disagrees. The pre-rename CCT_STATE_DIR does
+      // not resolve a state dir, so the child would use the suite's shared one.
+      CLAUDE_CODE_TELEGRAMMER_AGENT_STATE_DIR: dir,
       CCT_STORE_SCHEMA: schema,
       ...env,
     },
@@ -88,7 +91,7 @@ async function runPoller(
   });
   const stderr = await new Response(proc.stderr).text();
   const exitCode = await proc.exited;
-  return { exitCode, stderr };
+  return { exitCode, stderr, stateDir: dir };
 }
 
 // Setup calls succeed; every getUpdates conflicts, so there is no race to win.
@@ -113,7 +116,7 @@ const FORBID_ALL = `async (url: unknown) => {
 
 describe("a startup 409 with no displaced predecessor is a refusal", () => {
   test("exits non-zero naming the token, state dir and pidfile", async () => {
-    const { exitCode, stderr } = await runPoller(
+    const { exitCode, stderr, stateDir } = await runPoller(
       {
         CCT_BOT_TOKEN: "222222:BBBB",
         CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN: "222222:BBBB",
@@ -128,7 +131,7 @@ describe("a startup 409 with no displaced predecessor is a refusal", () => {
     expect(stderr).toContain("409");
     // "Naming the holder" is the card's requirement — a bare failure is not it.
     expect(stderr).toContain("token=");
-    expect(stderr).toContain("state_dir=");
+    expect(stderr).toContain(`state_dir=${stateDir}`);
     expect(stderr).toContain("pidfile=");
     expect(exitCode).toBe(1);
   }, 60_000);

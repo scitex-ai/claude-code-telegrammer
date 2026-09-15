@@ -18,7 +18,7 @@ const LIB = join(import.meta.dir, "..", "lib");
 async function runPoller(
   env: Record<string, string>,
   fetchStub: string,
-): Promise<{ exitCode: number; stderr: string }> {
+): Promise<{ exitCode: number; stderr: string; stateDir: string }> {
   const dir = mkdtempSync(join(tmpdir(), "cct-bridge-id-"));
   const driver = join(dir, "driver.ts");
   writeFileSync(
@@ -31,13 +31,20 @@ async function runPoller(
       `process.exit(process.exitCode ?? 0);\n`,
   );
   const proc = Bun.spawn(["bun", "run", driver], {
-    env: { ...process.env, CCT_STATE_DIR: dir, ...env },
+    env: {
+      ...process.env,
+      // The canonical spelling on purpose: preload.ts sets it, and getenv()
+      // throws when a CCT_ alias disagrees. The pre-rename CCT_STATE_DIR does
+      // not resolve a state dir, so the child would use the suite's shared one.
+      CLAUDE_CODE_TELEGRAMMER_AGENT_STATE_DIR: dir,
+      ...env,
+    },
     stdout: "pipe",
     stderr: "pipe",
   });
   const stderr = await new Response(proc.stderr).text();
   const exitCode = await proc.exited;
-  return { exitCode, stderr };
+  return { exitCode, stderr, stateDir: dir };
 }
 
 const TOKEN = "444444:DDDD";
@@ -110,10 +117,12 @@ describe("a turn bridge serving another agent stops the poller", () => {
 
 describe("UNKNOWN is not a refusal — an older bridge must keep working", () => {
   test("an unreachable /health proceeds to polling rather than stopping", async () => {
-    const { stderr } = await runPoller(baseEnv, HEALTH_DEAD);
+    const { stderr, stateDir } = await runPoller(baseEnv, HEALTH_DEAD);
     // The identity refusal must NOT appear...
     expect(stderr).not.toContain("REFUSING TO START: the turn bridge");
     // ...and the poller must have gone on to actually poll.
     expect(stderr).toContain("REACHED_GETUPDATES");
+    // It ran in the state dir it was handed, not the suite's shared one.
+    expect(stderr).toContain(`state_dir=${stateDir}`);
   }, 60_000);
 });
