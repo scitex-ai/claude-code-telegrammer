@@ -28,6 +28,8 @@
  *   CLAUDE_CODE_TELEGRAMMER_PROJECT       - default: process.cwd()
  *   CLAUDE_CODE_TELEGRAMMER_AGENT_ID      - default: 'telegram'
  *   CLAUDE_CODE_TELEGRAMMER_READ_RECEIPTS - ⚡/👀 receipts, default: on
+ *   CLAUDE_CODE_TELEGRAMMER_EXTERNAL_POLLER - set to 1/true when an external
+ *                                               lifecycle manager owns polling
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -62,6 +64,7 @@ import {
 } from "./lib/startup-validate.js";
 import { existsSync } from "fs";
 import { join } from "path";
+import { externalPollerEnabled } from "./lib/poller-mode.js";
 
 // ── Health probe ("doctor") — no server, no poller ──────────────────────────
 //
@@ -217,6 +220,9 @@ if (renamed.length > 0) {
 //     used because tgApi throws a generic Error that loses the error_code.
 // getMe runs BEFORE acquireLock() so a known-bad token never takes the lock.
 const TELEGRAM_ENABLED = TOKEN.length > 0;
+const EXTERNAL_POLLER = externalPollerEnabled(
+  process.env.CLAUDE_CODE_TELEGRAMMER_EXTERNAL_POLLER,
+);
 if (!TELEGRAM_ENABLED) {
   process.stderr.write(buildDisabledWarning(AGENT_ID) + "\n");
 } else {
@@ -391,7 +397,7 @@ await initStore();
 // dead — describeAccessGating() emits a WARN naming CCT_ALLOWED_USERS + the fix.
 // Skipped when telegram is DISABLED (no bot → no DMs → the fail-closed warning
 // would be misleading noise; buildDisabledWarning already covers that state).
-if (TELEGRAM_ENABLED) {
+if (TELEGRAM_ENABLED && !EXTERNAL_POLLER) {
   const gating = describeAccessGating({
     accessFileExists: existsSync(ACCESS_FILE),
     envAllowedCount: ENV_ALLOWED.length,
@@ -429,10 +435,15 @@ if (TELEGRAM_ENABLED) {
     tokenHash: BOT_TOKEN_HASH,
     pollerScriptPath: join(import.meta.dir, "telegram-poller.ts"),
   });
-} else {
+} else if (!TELEGRAM_ENABLED) {
   log(
     "server",
     "telegram disabled (CCT_BOT_TOKEN empty) — MCP connected, poller not started",
+  );
+} else {
+  log(
+    "server",
+    "external poller mode enabled; MCP server will not spawn or supervise a poller",
   );
 }
 
