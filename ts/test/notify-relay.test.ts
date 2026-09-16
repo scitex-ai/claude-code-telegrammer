@@ -138,6 +138,39 @@ describe("relayPendingNotificationsOnce: injected deps (no real store)", () => {
     ).toBe(true);
   });
 
+  test("Codex wake mode clears only after semantic turn admission", async () => {
+    const rows = [{
+      id: 1665,
+      pending_notification: JSON.stringify({
+        content: "operator request",
+        meta: { row_id: "1665", message_id: "19824" },
+      }),
+    }];
+    const cleared: number[] = [];
+    const { mcp, calls } = fakeMcp();
+    const failed = await relayPendingNotificationsOnce({
+      mcp,
+      deliveryMode: "wake",
+      getPending: () => rows,
+      clearPending: (id) => cleared.push(id),
+      wake: async () => ({ ok: false, category: "server_error", reason: "HTTP 502" }),
+    });
+    expect(failed).toBe(0);
+    expect(cleared).toEqual([]);
+    expect(calls).toEqual([]);
+
+    const admitted = await relayPendingNotificationsOnce({
+      mcp,
+      deliveryMode: "wake",
+      getPending: () => rows,
+      clearPending: (id) => cleared.push(id),
+      wake: async () => ({ ok: true, status: 200 }),
+    });
+    expect(admitted).toBe(1);
+    expect(cleared).toEqual([1665]);
+    expect(calls).toEqual([]);
+  });
+
   test("an mcp.notification rejection leaves the row pending for retry — never thrown", async () => {
     const rows = [
       {

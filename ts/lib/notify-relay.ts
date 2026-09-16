@@ -57,6 +57,8 @@
  */
 
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { recordWakeFailure, recordWakeSuccess } from "./wake-health.js";
+import { wakeTurn, type WakeResult } from "./wake.js";
 import { getSql } from "./pg.js";
 import { storeSchema } from "./store.js";
 import { statements } from "./store-schema.js";
@@ -188,6 +190,11 @@ async function clearPendingRow(id: number): Promise<void> {
 
 export interface NotifyRelayDeps {
   mcp: Server;
+  /** Codex cannot semantically admit Claude channel notifications.  In that
+   * harness retry the durable payload through /v1/turn and clear it only on
+   * the bridge's positive admission response. */
+  deliveryMode?: "mcp" | "wake";
+  wake?: (content: string, meta: Record<string, string>) => Promise<WakeResult>;
   /** Injectable for tests; defaults to a real readPendingRows() call. */
   getPending?: () => PendingRow[] | Promise<PendingRow[]>;
   /** Injectable for tests; defaults to a real clearPendingRow() call. */
@@ -228,10 +235,25 @@ export async function relayPendingNotificationsOnce(
       const payload = JSON.parse(
         row.pending_notification,
       ) as PendingNotificationPayload;
-      await deps.mcp.notification({
-        method: "notifications/claude/channel",
-        params: payload,
-      });
+      if (deps.deliveryMode === "wake") {
+        const result = await (deps.wake ?? wakeTurn)(payload.content, payload.meta);
+        const messageKey = payload.meta.row_id ?? String(row.id);
+        if (!result.ok) {
+          await recordWakeFailure(result.category, result.reason, Date.now(), messageKey);
+          logFn("notify-relay", "Codex wake retry not admitted; leaving message pending", {
+            row_id: row.id,
+            check: result.check,
+            reason: result.reason,
+          });
+          continue;
+        }
+        await recordWakeSuccess(messageKey);
+      } else {
+        await deps.mcp.notification({
+          method: "notifications/claude/channel",
+          params: payload,
+        });
+      }
       await clearPending(row.id);
       delivered += 1;
     } catch (err) {

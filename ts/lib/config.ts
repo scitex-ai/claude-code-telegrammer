@@ -87,6 +87,11 @@ export const LOCK_FILE = join(STATE_DIR, "claude-code-telegrammer-mcp.lock");
 // generic platform label "telegram" stays banned — it hid WHICH integration
 // delivered the message.
 export const CHANNEL_SOURCE = "cct";
+// Harness identity is supplied by SAC.  Codex does not implement Claude's
+// notifications/claude/channel semantic-admission contract, so delivery
+// fallback must retry the agent's /v1/turn endpoint instead of treating an
+// MCP notification write as visibility.
+export const AGENT_HARNESS = (getenv("HARNESS") ?? "").trim().toLowerCase();
 export const INBOX_DIR = join(STATE_DIR, "inbox");
 export const ATTACHMENT_DIR =
   getenv("ATTACHMENT_DIR") ?? join(STATE_DIR, "attachments");
