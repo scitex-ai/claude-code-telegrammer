@@ -35,7 +35,7 @@
  * cct-loudfail-invariant-has-an-unhandled-third-branch-20260819;
  * scitex-agent-container is removing the underlying port collision first.
  *
- * Wire shape (operator's revised spec 2026-06-07):
+ * Base wire shape (operator's revised spec 2026-06-07):
  *
  *     "⚠️ <agent_id> unavailable: <reason_phrase> — <retry_phrase>"
  *
@@ -57,6 +57,17 @@
  *   server_error        "agent busy"            "retry shortly"
  *   client_error        "HTTP <status>"         "retry shortly"
  *   unknown             "<reason from result>"  "retry shortly"
+ *
+ * When the caller has positive evidence that the failed turn is durably
+ * queued, the operator copy reports queue ownership instead of instructing
+ * the operator to retry manually.  Busy (timeout/5xx) and unavailable
+ * (refused/auth/etc.) remain distinct:
+ *
+ *     "⏳ <agent_id> busy: message durably retained — queued for automatic retry"
+ *     "⚠️ <agent_id> unavailable: <reason> — message durably retained; queued for automatic retry"
+ *
+ * The durable form is evidence-gated: a failed/unknown persistence probe
+ * never receives it.
  *
  * The outbound message-poster is injectable (setLoudFailSender) so
  * tests exercise the wiring without real network calls — same pattern
@@ -86,6 +97,12 @@ import type { WakeFailCategory, WakeResult } from "./wake.js";
 export interface FailPhrases {
   reason: string;
   retry: string;
+}
+
+/** Delivery evidence known by the caller when the operator status is built. */
+export interface LoudFailDelivery {
+  /** The inbound payload is persisted and owned by the automatic retry loop. */
+  durableRetryQueued: boolean;
 }
 
 /**
@@ -170,13 +187,23 @@ export function retrySuggestion(category: WakeFailCategory): string {
  * function never throws). Exported so tests can pin the wire-format
  * directly without going through the network seam.
  *
+ * Without durable queue evidence:
  *     "⚠️ <agentId> unavailable: <reason> — <retry>"
+ * With durable queue evidence, busy and unavailable use the distinct forms
+ * documented at the top of this module.
  */
 export function buildLoudFailMessage(
   result: Extract<WakeResult, { ok: false }>,
   agentId: string = AGENT_ID,
+  delivery?: LoudFailDelivery,
 ): string {
   const { reason, retry } = resolveFailPhrases(result);
+  if (delivery?.durableRetryQueued) {
+    if (result.category === "timeout" || result.category === "server_error") {
+      return `⏳ ${agentId} busy: message durably retained — queued for automatic retry`;
+    }
+    return `⚠️ ${agentId} unavailable: ${reason} — message durably retained; queued for automatic retry`;
+  }
   return `⚠️ ${agentId} unavailable: ${reason} — ${retry}`;
 }
 
@@ -229,6 +256,7 @@ export async function sendLoudFailReply(
   replyToMessageId: number,
   result: Extract<WakeResult, { ok: false }>,
   agentId: string = AGENT_ID,
+  delivery?: LoudFailDelivery,
 ): Promise<void> {
   if (!isLoudFailEnabled()) return;
 
@@ -238,7 +266,7 @@ export async function sendLoudFailReply(
   // double-fire.
   sentLoudFailReplies.add(key);
 
-  const text = buildLoudFailMessage(result, agentId);
+  const text = buildLoudFailMessage(result, agentId, delivery);
   try {
     await loudFailSender(chatId, text, replyToMessageId);
     log("loudfail", "sent loud-fail reply", {
