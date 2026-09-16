@@ -123,6 +123,20 @@ export function statements(schema: string) {
         ('outbound', $1, $2, $3, $4, $5, $6, $7, $8, $9, ${NOW_UTC_TEXT}, ${NOW_UTC_TEXT})
       RETURNING id`,
 
+    inboundReplyTarget: `
+      SELECT id, chat_id, message_id, read_at, replied_at
+      FROM ${s}.messages
+      WHERE chat_id = $1 AND message_id = $2 AND direction = 'inbound'
+      ORDER BY id`,
+
+    markExplicitlyReplied: `
+      UPDATE ${s}.messages
+      SET read_at = COALESCE(read_at, ${NOW_UTC_TEXT}),
+          replied_at = COALESCE(replied_at, ${NOW_UTC_TEXT})
+      WHERE id = $1 AND chat_id = $2 AND message_id = $3
+        AND direction = 'inbound'
+      RETURNING id`,
+
     setRepliedAt: `
       UPDATE ${s}.messages SET replied_at = ${NOW_UTC_TEXT}
       WHERE id = $1 AND direction = 'inbound'`,

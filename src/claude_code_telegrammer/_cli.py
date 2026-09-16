@@ -55,7 +55,10 @@ _USAGE = (
     "                    starting the server or the poller. The MCP-INDEPENDENT\n"
     "                    outbound path: use it when the cct MCP tools are\n"
     "                    unavailable and an agent would otherwise be unable to\n"
-    "                    reach the operator at all. Exits NON-ZERO on failure.\n"
+    "                    reach the operator at all. Persists every accepted\n"
+    "                    outbound message; --reply-to also links and marks the\n"
+    "                    exact inbound row read/replied. Exits NON-ZERO on any\n"
+    "                    delivery, persistence, or correlation failure.\n"
     "  --version         print the package version and exit\n"
 )
 

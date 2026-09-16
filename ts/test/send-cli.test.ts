@@ -12,7 +12,13 @@
  */
 
 import { describe, test, expect } from "bun:test";
-import { parseSendArgs, emptyTokenError } from "../lib/send-cli.js";
+import {
+  parseSendArgs,
+  emptyTokenError,
+  executeDurableSend,
+  TelegramAcceptedPersistenceError,
+  type DurableSendDeps,
+} from "../lib/send-cli.js";
 
 describe("parseSendArgs", () => {
   test("parses the minimal invocation", () => {
@@ -125,5 +131,143 @@ describe("emptyTokenError", () => {
     expect(msg).toContain("SAC_SECRETS_ENVRC");
     // Never leaks a token value (there is none, but assert the contract).
     expect(msg).not.toContain("123456:AA");
+  });
+});
+
+function fakeDeps(events: string[]): DurableSendDeps {
+  return {
+    async initStore() {
+      events.push("store:init");
+    },
+    async resolveInboundReplyTarget(chatId, messageId) {
+      events.push(`store:resolve:${chatId}:${messageId}`);
+      return {
+        rowId: 71,
+        chatId,
+        messageId,
+        readAt: null,
+        repliedAt: null,
+      };
+    },
+    async sendMessage(chatId, text, replyTo) {
+      events.push(`telegram:${chatId}:${text}:${replyTo ?? "none"}`);
+      return 9001;
+    },
+    async saveExplicitReply(target, _text, messageId) {
+      events.push(`store:reply:${target.rowId}:${messageId}`);
+      return 72;
+    },
+    async saveOutbound(_chatId, _text, messageId) {
+      events.push(`store:outbound:${messageId}`);
+      return 73;
+    },
+  };
+}
+
+const context = {
+  host: "test-host",
+  project: "/test",
+  agent_id: "test-agent",
+  bot_token_hash: "hash",
+};
+
+describe("executeDurableSend", () => {
+  test("resolves the inbound before Telegram and commits linked semantics after", async () => {
+    const events: string[] = [];
+    const result = await executeDurableSend(
+      { chatId: "42", text: "answer", replyTo: 123 },
+      context,
+      fakeDeps(events),
+    );
+    expect({ events, result }).toEqual({
+      events: [
+        "store:init",
+        "store:resolve:42:123",
+        "telegram:42:answer:123",
+        "store:reply:71:9001",
+      ],
+      result: {
+        messageId: 9001,
+        rowId: 72,
+        replyToRowId: 71,
+        semanticState: "read_and_replied",
+      },
+    });
+  });
+
+  test("missing correlation fails before Telegram is called", async () => {
+    const events: string[] = [];
+    const deps = fakeDeps(events);
+    deps.resolveInboundReplyTarget = async () => {
+      events.push("store:resolve:missing");
+      throw new Error("no inbound row matches");
+    };
+    await expect(
+      executeDurableSend(
+        { chatId: "42", text: "answer", replyTo: 123 },
+        context,
+        deps,
+      ),
+    ).rejects.toThrow("no inbound row matches");
+    expect(events).toEqual(["store:init", "store:resolve:missing"]);
+  });
+
+  test("Telegram failure leaves persistence untouched", async () => {
+    const events: string[] = [];
+    const deps = fakeDeps(events);
+    deps.sendMessage = async () => {
+      events.push("telegram:failed");
+      throw new Error("network down");
+    };
+    await expect(
+      executeDurableSend(
+        { chatId: "42", text: "answer", replyTo: 123 },
+        context,
+        deps,
+      ),
+    ).rejects.toThrow("network down");
+    expect(events).toEqual([
+      "store:init",
+      "store:resolve:42:123",
+      "telegram:failed",
+    ]);
+  });
+
+  test("post-delivery persistence failure reports accepted message id", async () => {
+    const events: string[] = [];
+    const deps = fakeDeps(events);
+    deps.saveExplicitReply = async () => {
+      throw new Error("database unavailable");
+    };
+    const promise = executeDurableSend(
+      { chatId: "42", text: "answer", replyTo: 123 },
+      context,
+      deps,
+    );
+    await expect(promise).rejects.toBeInstanceOf(
+      TelegramAcceptedPersistenceError,
+    );
+    await expect(promise).rejects.toThrow("Telegram accepted message 9001");
+  });
+
+  test("unthreaded sends also persist an outbound receipt", async () => {
+    const events: string[] = [];
+    const result = await executeDurableSend(
+      { chatId: "42", text: "update" },
+      context,
+      fakeDeps(events),
+    );
+    expect({ events, result }).toEqual({
+      events: [
+        "store:init",
+        "telegram:42:update:none",
+        "store:outbound:9001",
+      ],
+      result: {
+        messageId: 9001,
+        rowId: 73,
+        semanticState: "outbound_recorded",
+      },
+    });
   });
 });
