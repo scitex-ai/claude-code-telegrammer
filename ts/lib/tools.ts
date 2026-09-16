@@ -16,7 +16,9 @@ import {
 } from "./telegram-api.js";
 import {
   saveOutbound,
-  markRead,
+  saveExplicitReply,
+  resolveInboundReplyTarget,
+  resolveInboundReplyTargetByRowId,
   getConversationContext,
 } from "./store.js";
 import { HOST_NAME, PROJECT, AGENT_ID, BOT_TOKEN_HASH } from "./config.js";
@@ -30,6 +32,17 @@ import {
 } from "./tools-messages.js";
 import { runHealth, serializeHealthReport } from "./health-adapters.js";
 import { errorDetail, toolErrorResult } from "./protocol-status.js";
+
+type ReplySender = typeof sendMessage;
+let replySender: ReplySender = sendMessage;
+
+export function setReplySender(sender: ReplySender): void {
+  replySender = sender;
+}
+
+export function resetReplySender(): void {
+  replySender = sendMessage;
+}
 
 export function registerTools(mcp: Server): void {
   mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -341,17 +354,55 @@ export function registerTools(mcp: Server): void {
           const rowId = args.row_id != null ? Number(args.row_id) : undefined;
           const shouldMarkRead = args.mark_read !== false;
           assertAllowedChat(chatId);
-          const msgId = await sendMessage(chatId, text, replyTo);
+          let target;
           try {
-            await saveOutbound(chatId, text, String(msgId), rowId, {
+            const byMessage =
+              replyTo === undefined
+                ? undefined
+                : await resolveInboundReplyTarget(chatId, String(replyTo));
+            const byRow =
+              rowId === undefined
+                ? undefined
+                : await resolveInboundReplyTargetByRowId(chatId, rowId);
+            if (byMessage && byRow && byMessage.rowId !== byRow.rowId) {
+              throw new Error(
+                `reply_to message ${replyTo} resolves to row ${byMessage.rowId}, ` +
+                  `but row_id names ${byRow.rowId}`,
+              );
+            }
+            target = byMessage ?? byRow;
+          } catch (err) {
+            return toolErrorResult(
+              "reply",
+              err,
+              `Reply target correlation failed before Telegram delivery: ${errorDetail(err)}`,
+              "Use chat_id, reply_to, and row_id from the same inbound channel message.",
+            );
+          }
+          const msgId = await replySender(chatId, text, replyTo);
+          try {
+            const context = {
               host: HOST_NAME,
               project: PROJECT,
               agent_id: AGENT_ID,
               bot_token_hash: BOT_TOKEN_HASH,
-            });
-            // Mark the inbound as read if requested
-            if (shouldMarkRead && rowId) {
-              await markRead(rowId);
+            };
+            if (target) {
+              await saveExplicitReply(
+                target,
+                text,
+                String(msgId),
+                context,
+                shouldMarkRead,
+              );
+            } else {
+              await saveOutbound(
+                chatId,
+                text,
+                String(msgId),
+                undefined,
+                context,
+              );
             }
           } catch (err) {
             const errMsg = errorDetail(err);

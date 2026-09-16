@@ -129,9 +129,15 @@ export function statements(schema: string) {
       WHERE chat_id = $1 AND message_id = $2 AND direction = 'inbound'
       ORDER BY id`,
 
+    inboundReplyTargetByRowId: `
+      SELECT id, chat_id, message_id, read_at, replied_at
+      FROM ${s}.messages
+      WHERE id = $1 AND direction = 'inbound'`,
+
     markExplicitlyReplied: `
       UPDATE ${s}.messages
-      SET read_at = COALESCE(read_at, ${NOW_UTC_TEXT}),
+      SET read_at = CASE WHEN $4::boolean
+            THEN COALESCE(read_at, ${NOW_UTC_TEXT}) ELSE read_at END,
           replied_at = COALESCE(replied_at, ${NOW_UTC_TEXT})
       WHERE id = $1 AND chat_id = $2 AND message_id = $3
         AND direction = 'inbound'
