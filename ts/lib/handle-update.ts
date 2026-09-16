@@ -460,10 +460,15 @@ export async function handleUpdate(update: any): Promise<UpdateStatus> {
   if (wakeEnabled()) {
     void wakeTurn(deliveredText, meta).then(async (result) => {
       if (result.ok) {
-        await recordWakeSuccess();
+        await recordWakeSuccess(String(rowId));
         void markDone(chatId, String(msg.message_id));
       } else {
-        await recordWakeFailure(result.category, result.reason);
+        await recordWakeFailure(
+          result.category,
+          result.reason,
+          Date.now(),
+          String(rowId),
+        );
 
         // FALLBACK (incident-cct-operator-messages-not-arriving-20260714).
         //

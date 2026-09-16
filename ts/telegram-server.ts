@@ -43,6 +43,7 @@ import {
   AGENT_ID,
   HOST_NAME,
   PROJECT,
+  AGENT_HARNESS,
   findUnexpandedEnv,
   findRenamedEnv,
 } from "./lib/config.js";
@@ -504,5 +505,8 @@ if (shouldStartInternalPoller(TELEGRAM_ENABLED, EXTERNAL_POLLER)) {
 // are only ever written when the wake FAILED, so a healthy wake-enabled agent
 // still has exactly one delivery path and the relay finds nothing to do.
 if (TELEGRAM_ENABLED) {
-  startNotifyRelay({ mcp });
+  startNotifyRelay({
+    mcp,
+    deliveryMode: AGENT_HARNESS === "codex" ? "wake" : "mcp",
+  });
 }
