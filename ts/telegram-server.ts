@@ -64,7 +64,10 @@ import {
 } from "./lib/startup-validate.js";
 import { existsSync } from "fs";
 import { join } from "path";
-import { externalPollerEnabled } from "./lib/poller-mode.js";
+import {
+  externalPollerEnabled,
+  shouldStartInternalPoller,
+} from "./lib/poller-mode.js";
 
 // ── Health probe ("doctor") — no server, no poller ──────────────────────────
 //
@@ -425,7 +428,7 @@ log("server", "MCP server connected via stdio");
 // lib/poller-supervisor.ts. When telegram is DISABLED (no token) we DON'T
 // spawn a poller — the MCP stays connected but idle-disabled, matching the
 // loud WARN emitted above (honest status, no crash).
-if (TELEGRAM_ENABLED) {
+if (shouldStartInternalPoller(TELEGRAM_ENABLED, EXTERNAL_POLLER)) {
   // Supervised, not fire-and-forget: the first check is immediate (same boot
   // behaviour as the old one-shot call) and it then RE-checks on an interval,
   // because a poller we merely ADOPT has no exit handle and nothing else on
