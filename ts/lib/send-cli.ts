@@ -134,5 +134,105 @@ export const SEND_USAGE =
   "\n" +
   "Use this when the cct MCP tools are unavailable (server down, or tools\n" +
   "not resolvable) and an agent would otherwise be unable to reach the\n" +
-  "operator at all. Prints {\"ok\":true,\"message_id\":N} on success; exits\n" +
-  "non-zero with a reason on failure.\n";
+  "operator at all. Every accepted message is durably recorded before a\n" +
+  "success is printed. --reply-to requires exactly one matching inbound row\n" +
+  "and atomically links it and marks it read/replied. Exits non-zero on any\n" +
+  "delivery, persistence, or correlation failure.\n";
+
+export interface DurableSendContext {
+  host: string;
+  project: string;
+  agent_id: string;
+  bot_token_hash: string;
+}
+
+export interface ReplyTarget {
+  rowId: number;
+  chatId: string;
+  messageId: string;
+  readAt: string | null;
+  repliedAt: string | null;
+}
+
+export interface DurableSendDeps {
+  initStore(): Promise<void>;
+  sendMessage(chatId: string, text: string, replyTo?: number): Promise<number>;
+  resolveInboundReplyTarget(
+    chatId: string,
+    messageId: string,
+  ): Promise<ReplyTarget>;
+  saveExplicitReply(
+    target: ReplyTarget,
+    text: string,
+    outboundMessageId: string,
+    ctx: DurableSendContext,
+  ): Promise<number>;
+  saveOutbound(
+    chatId: string,
+    text: string,
+    messageId: string,
+    replyToRowId: undefined,
+    ctx: DurableSendContext,
+  ): Promise<number>;
+}
+
+export interface DurableSendResult {
+  messageId: number;
+  rowId: number;
+  replyToRowId?: number;
+  semanticState: "outbound_recorded" | "read_and_replied";
+}
+
+export class TelegramAcceptedPersistenceError extends Error {
+  constructor(
+    public readonly messageId: number,
+    cause: unknown,
+  ) {
+    super(
+      `Telegram accepted message ${messageId}, but its durable receipt could not be committed: ${cause instanceof Error ? cause.message : String(cause)}`,
+      { cause },
+    );
+    this.name = "TelegramAcceptedPersistenceError";
+  }
+}
+
+/** Execute one CLI send with durable receipt semantics and strict correlation. */
+export async function executeDurableSend(
+  args: SendArgs,
+  ctx: DurableSendContext,
+  deps: DurableSendDeps,
+): Promise<DurableSendResult> {
+  await deps.initStore();
+  const target =
+    args.replyTo === undefined
+      ? undefined
+      : await deps.resolveInboundReplyTarget(args.chatId, String(args.replyTo));
+
+  const messageId = await deps.sendMessage(args.chatId, args.text, args.replyTo);
+  try {
+    if (target) {
+      const rowId = await deps.saveExplicitReply(
+        target,
+        args.text,
+        String(messageId),
+        ctx,
+      );
+      return {
+        messageId,
+        rowId,
+        replyToRowId: target.rowId,
+        semanticState: "read_and_replied",
+      };
+    }
+    const rowId = await deps.saveOutbound(
+      args.chatId,
+      args.text,
+      String(messageId),
+      undefined,
+      ctx,
+    );
+    return { messageId, rowId, semanticState: "outbound_recorded" };
+  } catch (err) {
+    throw new TelegramAcceptedPersistenceError(messageId, err);
+  }
+}

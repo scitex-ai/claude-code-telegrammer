@@ -238,6 +238,88 @@ export async function saveOutbound(
   return Number((rows[0] as { id: string | number }).id);
 }
 
+export interface InboundReplyTarget {
+  rowId: number;
+  chatId: string;
+  messageId: string;
+  readAt: string | null;
+  repliedAt: string | null;
+}
+
+/** Resolve one Telegram reply target without guessing across chats/directions. */
+export async function resolveInboundReplyTarget(
+  chatId: string,
+  messageId: string,
+): Promise<InboundReplyTarget> {
+  const rows = (await getSql().unsafe(ready().inboundReplyTarget, [
+    chatId,
+    messageId,
+  ])) as Array<Record<string, unknown>>;
+  if (rows.length !== 1) {
+    throw new Error(
+      rows.length === 0
+        ? `no inbound row matches chat_id=${JSON.stringify(chatId)} and message_id=${JSON.stringify(messageId)}`
+        : `ambiguous inbound reply target: ${rows.length} rows match chat_id=${JSON.stringify(chatId)} and message_id=${JSON.stringify(messageId)}`,
+    );
+  }
+  const row = rows[0];
+  return {
+    rowId: Number(row.id),
+    chatId: String(row.chat_id),
+    messageId: String(row.message_id),
+    readAt: row.read_at == null ? null : String(row.read_at),
+    repliedAt: row.replied_at == null ? null : String(row.replied_at),
+  };
+}
+
+/**
+ * Atomically persist an explicit reply and its semantic acknowledgement.
+ *
+ * Telegram delivery is necessarily outside this database transaction. Callers
+ * must invoke this only after Telegram returns a message id, and must surface a
+ * persistence failure as "delivered but unreconciled" rather than resend.
+ */
+export async function saveExplicitReply(
+  target: InboundReplyTarget,
+  text: string,
+  outboundMessageId: string,
+  ctx: {
+    host: string;
+    project: string;
+    agent_id: string;
+    bot_token_hash: string;
+  },
+): Promise<number> {
+  const s = ready();
+  return await getSql().begin(async (tx) => {
+    const marked = await tx.unsafe(s.markExplicitlyReplied, [
+      target.rowId,
+      target.chatId,
+      target.messageId,
+    ]);
+    if (marked.length !== 1) {
+      throw new Error(
+        `inbound reply target disappeared or changed before receipt commit (row_id=${target.rowId})`,
+      );
+    }
+    const inserted = await tx.unsafe(s.insertOutbound, [
+      target.chatId,
+      outboundMessageId,
+      text,
+      target.messageId,
+      target.rowId,
+      ctx.host,
+      ctx.project,
+      ctx.agent_id,
+      ctx.bot_token_hash,
+    ]);
+    if (inserted.length !== 1) {
+      throw new Error("outbound reply receipt insert returned no row");
+    }
+    return Number((inserted[0] as { id: string | number }).id);
+  });
+}
+
 // ── Read status ────────────────────────────────────────────────────────────
 
 export async function markRead(id: number): Promise<void> {

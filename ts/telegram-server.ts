@@ -47,7 +47,12 @@ import {
 import { log } from "./lib/log.js";
 import { acquireLock, releaseLock } from "./lib/lock.js";
 import { registerTools } from "./lib/tools.js";
-import { initStore } from "./lib/store.js";
+import {
+  initStore,
+  resolveInboundReplyTarget,
+  saveExplicitReply,
+  saveOutbound,
+} from "./lib/store.js";
 import { migrateLegacyStateDir, ensureCctAlias } from "./lib/migrate-state.js";
 import { loadAccess } from "./lib/access.js";
 import { startPollerSupervision } from "./lib/poller-supervisor.js";
@@ -56,7 +61,13 @@ import { wakeEnabled } from "./lib/wake.js";
 import { resolveConfigProbe, wantsGetMe } from "./lib/config-probe.js";
 import { runHealth, serializeHealthReport } from "./lib/health-adapters.js";
 import { tgApi, getMeRaw, sendMessage } from "./lib/telegram-api.js";
-import { parseSendArgs, SEND_USAGE, emptyTokenError } from "./lib/send-cli.js";
+import {
+  parseSendArgs,
+  SEND_USAGE,
+  emptyTokenError,
+  executeDurableSend,
+  TelegramAcceptedPersistenceError,
+} from "./lib/send-cli.js";
 import {
   validateBotToken,
   describeAccessGating,
@@ -166,13 +177,30 @@ if (process.argv.slice(2)[0] === "send") {
     process.exit(3);
   }
   try {
-    const messageId = await sendMessage(
-      parsed.args.chatId,
-      parsed.args.text,
-      parsed.args.replyTo,
+    const result = await executeDurableSend(
+      parsed.args,
+      {
+        host: HOST_NAME,
+        project: PROJECT,
+        agent_id: AGENT_ID,
+        bot_token_hash: BOT_TOKEN_HASH,
+      },
+      {
+        initStore,
+        sendMessage,
+        resolveInboundReplyTarget,
+        saveExplicitReply,
+        saveOutbound,
+      },
     );
     process.stdout.write(
-      JSON.stringify({ ok: true, message_id: messageId }) + "\n",
+      JSON.stringify({
+        ok: true,
+        message_id: result.messageId,
+        row_id: result.rowId,
+        reply_to_row_id: result.replyToRowId,
+        semantic_state: result.semanticState,
+      }) + "\n",
     );
     process.exit(0);
   } catch (err) {
@@ -180,9 +208,11 @@ if (process.argv.slice(2)[0] === "send") {
     // recreate the exact bug this mode exists to fix: an agent believing it
     // reached the operator when it did not.
     const reason = err instanceof Error ? err.message : String(err);
-    process.stderr.write(
-      `claude-code-telegrammer send: FAILED to deliver: ${reason}\n`,
-    );
+    const prefix =
+      err instanceof TelegramAcceptedPersistenceError
+        ? "DELIVERED BUT NOT DURABLY RECORDED"
+        : "FAILED before confirmed delivery";
+    process.stderr.write(`claude-code-telegrammer send: ${prefix}: ${reason}\n`);
     process.exit(1);
   }
 }

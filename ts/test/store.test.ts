@@ -13,6 +13,8 @@ import {
   initStore,
   saveInbound,
   saveOutbound,
+  saveExplicitReply,
+  resolveInboundReplyTarget,
   getUnread,
   markRead,
   markAllRead,
@@ -125,6 +127,93 @@ describe("message store", () => {
     const history = await getHistory("200");
     const inbound = history.find((r) => r.id === inboundId);
     expect(inbound?.replied_at).not.toBeNull();
+  });
+
+  test("explicit reply resolves by chat/message and atomically records semantic state", async () => {
+    const inboundId = await saveInbound({
+      chat_id: "201",
+      message_id: "telegram-20",
+      user_id: "42",
+      username: "testuser",
+      text: "Explicit question",
+      telegram_ts: "2026-01-01T00:00:01Z",
+      host: "testhost",
+      project: "/test",
+      agent_id: "test",
+      bot_token_hash: "abcd1234",
+      raw_json: "{}",
+    });
+    const target = await resolveInboundReplyTarget("201", "telegram-20");
+    const outboundId = await saveExplicitReply(
+      target,
+      "Explicit answer",
+      "telegram-21",
+      {
+        host: "testhost",
+        project: "/test",
+        agent_id: "test",
+        bot_token_hash: "abcd1234",
+      },
+    );
+    const history = await getHistory("201");
+    const inbound = history.find((row) => row.id === inboundId);
+    const outbound = history.find((row) => row.id === outboundId);
+    expect({
+      targetRowId: target.rowId,
+      inboundRead: inbound?.read_at != null,
+      inboundReplied: inbound?.replied_at != null,
+      outboundReplyToMessage: outbound?.reply_to_message_id,
+      outboundReplyToRow: outbound?.reply_to_row_id,
+    }).toEqual({
+      targetRowId: inboundId,
+      inboundRead: true,
+      inboundReplied: true,
+      outboundReplyToMessage: "telegram-20",
+      outboundReplyToRow: inboundId,
+    });
+  });
+
+  test("explicit reply target refuses a missing chat/message pair", async () => {
+    await expect(
+      resolveInboundReplyTarget("missing-chat", "missing-message"),
+    ).rejects.toThrow("no inbound row matches");
+  });
+
+  test("explicit reply receipt rolls back semantic state when its insert fails", async () => {
+    const inboundId = await saveInbound({
+      chat_id: "202",
+      message_id: "telegram-30",
+      user_id: "42",
+      username: "testuser",
+      text: "Must remain unread",
+      telegram_ts: "2026-01-01T00:00:01Z",
+      host: "testhost",
+      project: "/test",
+      agent_id: "test",
+      bot_token_hash: "abcd1234",
+      raw_json: "{}",
+    });
+    await saveOutbound("202", "existing", "duplicate-outbound", undefined, {
+      host: "testhost",
+      project: "/test",
+      agent_id: "test",
+      bot_token_hash: "abcd1234",
+    });
+    const target = await resolveInboundReplyTarget("202", "telegram-30");
+    await expect(
+      saveExplicitReply(target, "will conflict", "duplicate-outbound", {
+        host: "testhost",
+        project: "/test",
+        agent_id: "test",
+        bot_token_hash: "abcd1234",
+      }),
+    ).rejects.toThrow();
+    const inbound = (await getHistory("202")).find(
+      (row) => row.id === inboundId,
+    );
+    expect({ readAt: inbound?.read_at, repliedAt: inbound?.replied_at }).toEqual(
+      { readAt: null, repliedAt: null },
+    );
   });
 
   test("markAllRead marks all messages in a chat as read", async () => {
