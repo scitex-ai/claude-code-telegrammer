@@ -41,6 +41,8 @@ import {
   ACCESS_FILE,
   ENV_ALLOWED,
   AGENT_ID,
+  HOST_NAME,
+  PROJECT,
   findUnexpandedEnv,
   findRenamedEnv,
 } from "./lib/config.js";
