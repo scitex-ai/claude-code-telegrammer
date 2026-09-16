@@ -44,6 +44,7 @@ import {
   HOST_NAME,
   PROJECT,
   AGENT_HARNESS,
+  isCodexHarness,
   findUnexpandedEnv,
   findRenamedEnv,
 } from "./lib/config.js";
@@ -507,6 +508,6 @@ if (shouldStartInternalPoller(TELEGRAM_ENABLED, EXTERNAL_POLLER)) {
 if (TELEGRAM_ENABLED) {
   startNotifyRelay({
     mcp,
-    deliveryMode: AGENT_HARNESS === "codex" ? "wake" : "mcp",
+    deliveryMode: isCodexHarness(AGENT_HARNESS) ? "wake" : "mcp",
   });
 }
