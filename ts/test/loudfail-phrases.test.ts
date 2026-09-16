@@ -188,8 +188,10 @@ describe("buildLoudFailMessage: full wire format (non-quota cases)", () => {
       reason: "HTTP 502",
       category: "server_error",
     };
-    expect(buildLoudFailMessage(result, "proj-foo")).toBe(
-      "⚠️ proj-foo unavailable: agent busy — retry shortly",
+    expect(
+      buildLoudFailMessage(result, "proj-foo", { durableRetryQueued: true }),
+    ).toBe(
+      "⏳ proj-foo busy: message durably retained — queued for automatic retry",
     );
   });
 
@@ -199,8 +201,10 @@ describe("buildLoudFailMessage: full wire format (non-quota cases)", () => {
       reason: "network timeout",
       category: "timeout",
     };
-    expect(buildLoudFailMessage(result, "proj-foo")).toBe(
-      "⚠️ proj-foo unavailable: agent busy — retry shortly",
+    expect(
+      buildLoudFailMessage(result, "proj-foo", { durableRetryQueued: true }),
+    ).toBe(
+      "⏳ proj-foo busy: message durably retained — queued for automatic retry",
     );
   });
 
@@ -211,8 +215,23 @@ describe("buildLoudFailMessage: full wire format (non-quota cases)", () => {
       reason: "HTTP 503",
       category: "server_error",
     };
-    expect(buildLoudFailMessage(result)).toBe(
-      "⚠️ telegram unavailable: agent busy — retry shortly",
+    expect(
+      buildLoudFailMessage(result, undefined, { durableRetryQueued: true }),
+    ).toBe(
+      "⏳ telegram busy: message durably retained — queued for automatic retry",
+    );
+  });
+
+  test("durably queued unreachable agent remains unavailable, not busy", () => {
+    const result: WakeResult = {
+      ok: false,
+      reason: "connect ECONNREFUSED 127.0.0.1:9876",
+      category: "connection_refused",
+    };
+    expect(
+      buildLoudFailMessage(result, "proj-foo", { durableRetryQueued: true }),
+    ).toBe(
+      "⚠️ proj-foo unavailable: connection refused — message durably retained; queued for automatic retry",
     );
   });
 });

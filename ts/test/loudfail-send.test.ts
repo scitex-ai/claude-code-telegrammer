@@ -64,11 +64,13 @@ describe("sendLoudFailReply: wiring", () => {
       reason: "HTTP 502",
       category: "server_error",
     };
-    await sendLoudFailReply("100", 5, result, "proj-foo");
+    await sendLoudFailReply("100", 5, result, "proj-foo", {
+      durableRetryQueued: true,
+    });
     expect(sent.length).toBe(1);
     expect(sent[0]).toEqual({
       chatId: "100",
-      text: "⚠️ proj-foo unavailable: agent busy — retry shortly",
+      text: "⏳ proj-foo busy: message durably retained — queued for automatic retry",
       replyToMessageId: 5,
     });
   });
@@ -179,7 +181,7 @@ describe("integration with a real Telegram update.message fixture", () => {
     },
   };
 
-  test("server_error (502) → 'agent busy — retry shortly' on right thread", async () => {
+  test("server_error (502) → durable busy status on right thread", async () => {
     const chatId = String(update.message.chat.id);
     const messageId = Number(update.message.message_id);
     const result: WakeResult = {
@@ -188,12 +190,14 @@ describe("integration with a real Telegram update.message fixture", () => {
       reason: "HTTP 502",
       category: "server_error",
     };
-    await sendLoudFailReply(chatId, messageId, result, "proj-foo");
+    await sendLoudFailReply(chatId, messageId, result, "proj-foo", {
+      durableRetryQueued: true,
+    });
     expect(sent.length).toBe(1);
     expect(sent[0].chatId).toBe("8675309");
     expect(sent[0].replyToMessageId).toBe(42);
     expect(sent[0].text).toBe(
-      "⚠️ proj-foo unavailable: agent busy — retry shortly",
+      "⏳ proj-foo busy: message durably retained — queued for automatic retry",
     );
   });
 

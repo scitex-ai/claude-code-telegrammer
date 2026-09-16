@@ -456,7 +456,10 @@ export async function handleUpdate(update: any): Promise<UpdateStatus> {
   // The pre-#41 operator saw ⚡ → ❌ and never 👀. Post-#41 they see
   // ⚡ → 👀 → ❌; the FINAL state ❌ + the loud-fail reply text answer
   // both "is the bridge alive?" (yes, 👀 fired) and "why didn't the
-  // agent reply?" (the categorised reason).
+  // agent reply?" (the categorised reason). When the durable fallback below
+  // is positively observed still pending, the reply instead says the agent
+  // is busy and that CCT retained/queued the message for automatic retry; it
+  // never asks the operator to resend a row the relay already owns.
   if (wakeEnabled()) {
     void wakeTurn(deliveredText, meta).then(async (result) => {
       if (result.ok) {
@@ -532,7 +535,15 @@ export async function handleUpdate(update: any): Promise<UpdateStatus> {
                   check: probe.check,
                 };
             void markFailed(chatId, String(msg.message_id));
-            void sendLoudFailReply(chatId, Number(msg.message_id), alarmResult);
+            void sendLoudFailReply(
+              chatId,
+              Number(msg.message_id),
+              alarmResult,
+              undefined,
+              probe.ok && probe.pending
+                ? { durableRetryQueued: true }
+                : undefined,
+            );
           });
         }, 15000);
       }
