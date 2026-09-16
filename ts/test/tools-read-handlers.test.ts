@@ -29,12 +29,17 @@ import { tmpdir } from "os";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { registerTools } from "../lib/tools.js";
+import {
+  registerTools,
+  setReplySender,
+  resetReplySender,
+} from "../lib/tools.js";
 import {
   initStore,
   saveInbound,
   saveOutbound,
   getUnread,
+  getHistory,
   insertAttachment,
   markAttachmentDownloaded,
 } from "../lib/store.js";
@@ -57,6 +62,7 @@ const HTEXTS = [1, 2, 3, 4, 5].map((i) => `m${i} ${HTOKEN}`);
 const MCHAT = `tools-mark-${process.pid}`;
 const NCHAT = `tools-mark-all-${process.pid}`;
 const XCHAT = `tools-mark-denied-${process.pid}`;
+const RCHAT = `tools-reply-${process.pid}`;
 const rows: Record<string, number> = {};
 
 // download_attachment cases: cached files for one allowed and one denied row.
@@ -152,7 +158,7 @@ beforeAll(async () => {
   // suite. Reset the cache after writing.
   writeFileSync(
     ACCESS_FILE,
-    JSON.stringify({ allowFrom: [CHAT, HCHAT, MCHAT, NCHAT] }),
+    JSON.stringify({ allowFrom: [CHAT, HCHAT, MCHAT, NCHAT, RCHAT] }),
   );
   _resetCache();
 
@@ -173,6 +179,128 @@ afterAll(async () => {
   rmSync(ACCESS_FILE, { force: true });
   rmSync(FILES, { recursive: true, force: true });
   _resetCache();
+  resetReplySender();
+});
+
+describe("reply persists both durable linkage identities", () => {
+  test("reply_to plus row_id atomically links and acknowledges the exact inbound", async () => {
+    const inboundId = await saveInbound({
+      chat_id: RCHAT,
+      message_id: "71001",
+      user_id: "42",
+      username: "operator",
+      text: "question for MCP reply",
+      telegram_ts: "2026-01-01T00:00:00Z",
+      host: "testhost",
+      project: "/test",
+      agent_id: "test",
+      bot_token_hash: "hash",
+      raw_json: "{}",
+    });
+    setReplySender(async () => 71002);
+    const result = await client.callTool({
+      name: "reply",
+      arguments: {
+        chat_id: RCHAT,
+        text: "answer from MCP",
+        reply_to: "71001",
+        row_id: inboundId,
+      },
+    });
+    const history = await getHistory(RCHAT);
+    const inbound = history.find((row) => row.id === inboundId);
+    const outbound = history.find((row) => row.message_id === "71002");
+    expect({
+      isError: result.isError ?? false,
+      inboundRead: inbound?.read_at != null,
+      inboundReplied: inbound?.replied_at != null,
+      outboundReplyToMessage: outbound?.reply_to_message_id,
+      outboundReplyToRow: outbound?.reply_to_row_id,
+    }).toEqual({
+      isError: false,
+      inboundRead: true,
+      inboundReplied: true,
+      outboundReplyToMessage: "71001",
+      outboundReplyToRow: inboundId,
+    });
+  });
+
+  test("mismatched reply_to and row_id fail before Telegram", async () => {
+    let sends = 0;
+    setReplySender(async () => {
+      sends += 1;
+      return 71003;
+    });
+    const otherId = await saveInbound({
+      chat_id: RCHAT,
+      message_id: "71004",
+      user_id: "42",
+      username: "operator",
+      text: "different question",
+      telegram_ts: "2026-01-01T00:00:01Z",
+      host: "testhost",
+      project: "/test",
+      agent_id: "test",
+      bot_token_hash: "hash",
+      raw_json: "{}",
+    });
+    const result = await client.callTool({
+      name: "reply",
+      arguments: {
+        chat_id: RCHAT,
+        text: "must not send",
+        reply_to: "71001",
+        row_id: otherId,
+      },
+    });
+    expect({ isError: result.isError, sends }).toEqual({
+      isError: true,
+      sends: 0,
+    });
+  });
+
+  test("mark_read=false preserves unread state while recording reply semantics", async () => {
+    const inboundId = await saveInbound({
+      chat_id: RCHAT,
+      message_id: "71005",
+      user_id: "42",
+      username: "operator",
+      text: "keep this unread after replying",
+      telegram_ts: "2026-01-01T00:00:02Z",
+      host: "testhost",
+      project: "/test",
+      agent_id: "test",
+      bot_token_hash: "hash",
+      raw_json: "{}",
+    });
+    setReplySender(async () => 71006);
+    const result = await client.callTool({
+      name: "reply",
+      arguments: {
+        chat_id: RCHAT,
+        text: "reply without read acknowledgement",
+        reply_to: "71005",
+        row_id: inboundId,
+        mark_read: false,
+      },
+    });
+    const history = await getHistory(RCHAT);
+    const inbound = history.find((row) => row.id === inboundId);
+    const outbound = history.find((row) => row.message_id === "71006");
+    expect({
+      isError: result.isError ?? false,
+      inboundRead: inbound?.read_at,
+      inboundReplied: inbound?.replied_at != null,
+      outboundReplyToMessage: outbound?.reply_to_message_id,
+      outboundReplyToRow: outbound?.reply_to_row_id,
+    }).toEqual({
+      isError: false,
+      inboundRead: null,
+      inboundReplied: true,
+      outboundReplyToMessage: "71005",
+      outboundReplyToRow: inboundId,
+    });
+  });
 });
 
 describe("get_context returns TEXT, not a Promise", () => {

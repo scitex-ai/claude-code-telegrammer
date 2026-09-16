@@ -272,6 +272,29 @@ export async function resolveInboundReplyTarget(
   };
 }
 
+/** Resolve one inbound row id and bind it to its canonical Telegram identity. */
+export async function resolveInboundReplyTargetByRowId(
+  chatId: string,
+  rowId: number,
+): Promise<InboundReplyTarget> {
+  const rows = (await getSql().unsafe(ready().inboundReplyTargetByRowId, [
+    rowId,
+  ])) as Array<Record<string, unknown>>;
+  if (rows.length !== 1 || String(rows[0].chat_id) !== chatId) {
+    throw new Error(
+      `no inbound row matches chat_id=${JSON.stringify(chatId)} and row_id=${rowId}`,
+    );
+  }
+  const row = rows[0];
+  return {
+    rowId: Number(row.id),
+    chatId: String(row.chat_id),
+    messageId: String(row.message_id),
+    readAt: row.read_at == null ? null : String(row.read_at),
+    repliedAt: row.replied_at == null ? null : String(row.replied_at),
+  };
+}
+
 /**
  * Atomically persist an explicit reply and its semantic acknowledgement.
  *
@@ -289,6 +312,7 @@ export async function saveExplicitReply(
     agent_id: string;
     bot_token_hash: string;
   },
+  markRead = true,
 ): Promise<number> {
   const s = ready();
   return await getSql().begin(async (tx) => {
@@ -296,6 +320,7 @@ export async function saveExplicitReply(
       target.rowId,
       target.chatId,
       target.messageId,
+      markRead,
     ]);
     if (marked.length !== 1) {
       throw new Error(
