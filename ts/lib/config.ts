@@ -92,6 +92,10 @@ export const CHANNEL_SOURCE = "cct";
 // fallback must retry the agent's /v1/turn endpoint instead of treating an
 // MCP notification write as visibility.
 export const AGENT_HARNESS = (getenv("HARNESS") ?? "").trim().toLowerCase();
+
+export function isCodexHarness(value: string = AGENT_HARNESS): boolean {
+  return value === "codex" || value === "codex-tui";
+}
 export const INBOX_DIR = join(STATE_DIR, "inbox");
 export const ATTACHMENT_DIR =
   getenv("ATTACHMENT_DIR") ?? join(STATE_DIR, "attachments");
