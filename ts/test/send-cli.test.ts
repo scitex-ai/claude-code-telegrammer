@@ -12,6 +12,7 @@
  */
 
 import { describe, test, expect } from "bun:test";
+import { join } from "path";
 import {
   parseSendArgs,
   emptyTokenError,
@@ -268,6 +269,43 @@ describe("executeDurableSend", () => {
         rowId: 73,
         semanticState: "outbound_recorded",
       },
+    });
+  });
+});
+
+describe("built send CLI", () => {
+  test("enters durable reply pre-resolution and fails before Telegram for an absent target", async () => {
+    const server = join(import.meta.dir, "..", "telegram-server.ts");
+    const child = Bun.spawn(
+      [
+        process.execPath,
+        "run",
+        server,
+        "send",
+        "--chat-id",
+        "cli-runtime-test-chat",
+        "--text",
+        "must not reach Telegram",
+        "--reply-to",
+        "999999999",
+      ],
+      { env: process.env, stdout: "pipe", stderr: "pipe" },
+    );
+    const [exitCode, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+    expect({
+      exitCode,
+      stdout,
+      reachedCorrelationGuard: stderr.includes("no inbound row matches"),
+      hadRuntimeReferenceError: stderr.includes("is not defined"),
+    }).toEqual({
+      exitCode: 1,
+      stdout: "",
+      reachedCorrelationGuard: true,
+      hadRuntimeReferenceError: false,
     });
   });
 });
