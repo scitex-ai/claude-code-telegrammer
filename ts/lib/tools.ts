@@ -29,6 +29,7 @@ import {
   handleDownloadAttachment,
 } from "./tools-messages.js";
 import { runHealth, serializeHealthReport } from "./health-adapters.js";
+import { assertLabeledPrReferences } from "./outbound-style.js";
 
 export function registerTools(mcp: Server): void {
   mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -287,6 +288,7 @@ export function registerTools(mcp: Server): void {
         case "reply": {
           const chatId = args.chat_id as string;
           const text = args.text as string;
+          assertLabeledPrReferences(text);
           // Hard length cap (operator 2026-06-04, raised to 512 on
           // 2026-06-06 per operator request): the operator reads on a
           // phone and cannot scan walls of text. REJECT over-limit messages
@@ -355,12 +357,14 @@ export function registerTools(mcp: Server): void {
         }
         case "edit_message": {
           const chatId = args.chat_id as string;
+          const text = args.text as string;
+          assertLabeledPrReferences(text);
           assertAllowedChat(chatId);
           // editMessageText() applies the agent signature (idempotent).
           const result = await editMessageText(
             chatId,
             Number(args.message_id),
-            args.text as string,
+            text,
           );
           const id =
             typeof result === "object" ? result.message_id : args.message_id;
@@ -416,6 +420,7 @@ export function registerTools(mcp: Server): void {
           const chatId = args.chat_id as string;
           const filePath = args.file_path as string;
           const caption = args.caption as string | undefined;
+          if (caption) assertLabeledPrReferences(caption);
           assertAllowedChat(chatId);
           const msgId = await sendDocument(chatId, filePath, caption);
           return {
