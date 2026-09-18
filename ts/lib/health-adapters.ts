@@ -70,6 +70,7 @@ import {
   type DbProbe,
   type WakeReachabilityProbe,
 } from "./health.js";
+import { errnoCause } from "./protocol-status.js";
 
 /**
  * Replace every occurrence of the raw bot token with the literal placeholder
@@ -208,11 +209,13 @@ export function probeStateDir(dir: string = STATE_DIR): StateDirProbe {
       unlinkSync(probeFile);
       return { path: dir, exists: true, writable: true };
     } catch (err) {
+      const cause = errnoCause(err);
       return {
         path: dir,
         exists: true,
         writable: false,
         detail: err instanceof Error ? err.message : String(err),
+        ...(cause ? { cause } : {}),
       };
     }
   }
@@ -227,11 +230,13 @@ export function probeStateDir(dir: string = STATE_DIR): StateDirProbe {
     accessSync(ancestor, constants.W_OK);
     return { path: dir, exists: false, writable: true };
   } catch (err) {
+    const cause = errnoCause(err);
     return {
       path: dir,
       exists: false,
       writable: false,
       detail: err instanceof Error ? err.message : String(err),
+      ...(cause ? { cause } : {}),
     };
   }
 }
@@ -253,10 +258,14 @@ export async function probeDb(
   schema: string = resolveSchema(),
 ): Promise<DbProbe> {
   const s = statements(schema);
-  const fail = (err: unknown): DbProbe => ({
-    exists: true,
-    error: err instanceof Error ? err.message : String(err),
-  });
+  const fail = (err: unknown): DbProbe => {
+    const cause = errnoCause(err);
+    return {
+      exists: true,
+      error: err instanceof Error ? err.message : String(err),
+      ...(cause ? { cause } : {}),
+    };
+  };
 
   let sql: ReturnType<typeof getSql>;
   try {

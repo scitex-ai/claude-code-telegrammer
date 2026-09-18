@@ -23,12 +23,31 @@
  * 1s) delay instead of an immediate call, the necessary cost of the payload
  * having to cross a process boundary via the store instead of a function call.
  *
- * Only ever populated for !wakeEnabled() deployments (see
- * lib/handle-update.ts) — wake-enabled agents deliver via the already
- * mcp-independent /v1/turn POST and never write here, so this relay simply
- * finds nothing to do for them; started only when !wakeEnabled() in
- * ts/telegram-server.ts to avoid a pointless poll for the common
- * (wake-enabled fleet) case.
+ * WHO WRITES HERE — TWO CASES, AND WAKE-ENABLED AGENTS ARE ONE OF THEM.
+ *
+ *   1. !wakeEnabled() (interactive CLI): every inbound message is written, and
+ *      this relay is the normal delivery path.
+ *   2. wakeEnabled() (sac TUI + SDK agents): a row is written ONLY WHEN THE
+ *      WAKE POST FAILS. This relay is then the FALLBACK delivery path — it
+ *      reaches an attached session without going through sac's a2a sidecar,
+ *      and a row it cannot deliver yet stays pending until it can. A healthy
+ *      wake writes nothing, so there is still exactly one delivery path and no
+ *      double delivery.
+ *
+ * The relay is therefore started whenever Telegram is enabled
+ * (ts/telegram-server.ts: `if (TELEGRAM_ENABLED) startNotifyRelay(...)`),
+ * wake-enabled deployments included — since PR #77, 2026-07-14, which fixed
+ * operator messages being dropped outright whenever the sidecar was down.
+ *
+ * THIS PARAGRAPH USED TO SAY THE OPPOSITE: "only ever populated for
+ * !wakeEnabled() deployments ... wake-enabled agents ... never write here ...
+ * started only when !wakeEnabled()". That was true before #77 and false for
+ * the two months after it. It was not harmless: an agent read it on
+ * 2026-08-23, concluded that a failed wake wrote to a queue with no reader,
+ * and recommended REMOVING the fallback write — which would have reintroduced
+ * the incident #77 fixed. The call site in telegram-server.ts is the source of
+ * truth for whether this relay runs; if the two ever disagree again, believe
+ * the call site and fix this comment.
  *
  * NOTE ON THE ENGINE MOVE: this module used to open its own independent
  * database handle, each one having to remember its own lock-timeout setting
@@ -38,15 +57,30 @@
  */
 
 import type { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { recordWakeFailure, recordWakeSuccess } from "./wake-health.js";
+import { wakeTurn, type WakeResult } from "./wake.js";
 import { getSql } from "./pg.js";
 import { storeSchema } from "./store.js";
 import { statements } from "./store-schema.js";
 import { log } from "./log.js";
+import {
+  errorDetail,
+  failingCheck,
+  type ProtocolCheck,
+} from "./protocol-status.js";
 
 export interface PendingNotificationPayload {
   content: string;
   meta: Record<string, string>;
 }
+
+export type PendingNotificationWrite =
+  | { ok: true }
+  | { ok: false; check: ProtocolCheck };
+
+export type PendingNotificationProbe =
+  | { ok: true; pending: boolean }
+  | { ok: false; check: ProtocolCheck };
 
 /**
  * WRITER side — called from lib/handle-update.ts (standalone poller
@@ -61,17 +95,27 @@ export interface PendingNotificationPayload {
 export async function savePendingNotification(
   rowId: number,
   payload: PendingNotificationPayload,
-): Promise<void> {
+): Promise<PendingNotificationWrite> {
   try {
     await getSql().unsafe(statements(storeSchema()).setPendingNotification, [
       JSON.stringify(payload),
       rowId,
     ]);
+    return { ok: true };
   } catch (err) {
     log("notify-relay", "failed to persist pending notification", {
       row_id: rowId,
       error: String(err),
     });
+    return {
+      ok: false,
+      check: failingCheck(
+        "wake_fallback_persisted",
+        `wake fallback for message row ${rowId} was not persisted: ${errorDetail(err)}`,
+        "Restore writable message-store capacity, then redeliver this inbound message; it has no durable fallback notification.",
+        err,
+      ),
+    };
   }
 }
 
@@ -79,8 +123,8 @@ export async function savePendingNotification(
  * Check whether a notification saved via savePendingNotification() is still
  * pending (i.e. the notify-relay reader has not yet delivered and NULLed
  * the column). Returns true when the row exists AND its
- * pending_notification is not null. Returns false on any thrown error so a
- * broken probe never creates a false alarm.
+ * pending_notification is not null. On a thrown error the compatibility
+ * boolean returns true: unknown must not be collapsed into "delivered".
  *
  * @param rowId - The messages row to check.
  * @param schema - The namespace to read. Defaults to the initialized store's.
@@ -91,15 +135,33 @@ export async function isNotificationPending(
   rowId: number,
   schema?: string,
 ): Promise<boolean> {
+  const result = await probePendingNotification(rowId, schema);
+  // Compatibility wrapper, deliberately conservative: inability to inspect
+  // the durable fallback must never be read as "relay delivered it".
+  return result.ok ? result.pending : true;
+}
+
+export async function probePendingNotification(
+  rowId: number,
+  schema?: string,
+): Promise<PendingNotificationProbe> {
   try {
     const rows = await getSql().unsafe(
       statements(schema ?? storeSchema()).readPendingNotification,
       [rowId],
     );
     const row = rows[0] as { pending_notification: string | null } | undefined;
-    return !!row && row.pending_notification !== null;
-  } catch {
-    return false;
+    return { ok: true, pending: !!row && row.pending_notification !== null };
+  } catch (err) {
+    return {
+      ok: false,
+      check: failingCheck(
+        "wake_fallback_receipt_observed",
+        `could not verify the durable wake fallback for message row ${rowId}: ${errorDetail(err)}`,
+        "Restore message-store access, then inspect and redeliver this message; do not assume the fallback relay completed.",
+        err,
+      ),
+    };
   }
 }
 
@@ -128,6 +190,11 @@ async function clearPendingRow(id: number): Promise<void> {
 
 export interface NotifyRelayDeps {
   mcp: Server;
+  /** Codex cannot semantically admit Claude channel notifications.  In that
+   * harness retry the durable payload through /v1/turn and clear it only on
+   * the bridge's positive admission response. */
+  deliveryMode?: "mcp" | "wake";
+  wake?: (content: string, meta: Record<string, string>) => Promise<WakeResult>;
   /** Injectable for tests; defaults to a real readPendingRows() call. */
   getPending?: () => PendingRow[] | Promise<PendingRow[]>;
   /** Injectable for tests; defaults to a real clearPendingRow() call. */
@@ -168,10 +235,25 @@ export async function relayPendingNotificationsOnce(
       const payload = JSON.parse(
         row.pending_notification,
       ) as PendingNotificationPayload;
-      await deps.mcp.notification({
-        method: "notifications/claude/channel",
-        params: payload,
-      });
+      if (deps.deliveryMode === "wake") {
+        const result = await (deps.wake ?? wakeTurn)(payload.content, payload.meta);
+        const messageKey = payload.meta.row_id ?? String(row.id);
+        if (!result.ok) {
+          await recordWakeFailure(result.category, result.reason, Date.now(), messageKey);
+          logFn("notify-relay", "Codex wake retry not admitted; leaving message pending", {
+            row_id: row.id,
+            check: result.check,
+            reason: result.reason,
+          });
+          continue;
+        }
+        await recordWakeSuccess(messageKey);
+      } else {
+        await deps.mcp.notification({
+          method: "notifications/claude/channel",
+          params: payload,
+        });
+      }
       await clearPending(row.id);
       delivered += 1;
     } catch (err) {

@@ -67,8 +67,9 @@ fi
 #   env var assignments that aren't in the global settings.json.
 # - Sensitive env vars (PATH, LD_*, DYLD_*, etc.) are auto-approved if
 #   their values are project-local; checked against local allowlist if not.
-# - A companion PostToolUse hook (pipe-stage-learn.sh) auto-captures
-#   user approvals into the local allowlist.
+# - approved-patterns.json is maintained by hand. Upstream pairs this hook
+#   with a PostToolUse learner (pipe-stage-learn.sh) that fills it in; that
+#   learner is not vendored here, so this copy writes no hand-off for it.
 
 HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
 APPROVED_FILE="$HOOK_DIR/approved-patterns.json"
@@ -349,17 +350,10 @@ if [ "$all_match" = true ]; then
     exit 0
 fi
 
-# Write pending approval info for the PostToolUse hook to pick up
-PENDING_DIR="$HOOK_DIR/.pending"
-mkdir -p "$PENDING_DIR" 2>/dev/null || true
-TOOL_USE_ID=$(echo "$INPUT" | jq -r '.tool_use_id // empty')
-if [ -n "$TOOL_USE_ID" ] && [ -n "$unmatched_stage" ]; then
-    jq -n \
-        --arg stage "$unmatched_stage" \
-        --arg cwd "$CWD" \
-        '{ stage: $stage, cwd: $cwd }' \
-        >"$PENDING_DIR/$TOOL_USE_ID.json" 2>/dev/null || true
-fi
+# No pending hand-off is written for an unmatched stage. The learner that
+# would consume it is not vendored here, so such files would only accumulate
+# beside the hook, holding the screened command text. Keep screened commands
+# out of the filesystem.
 
 # Fall through to normal permission system
 exit 0

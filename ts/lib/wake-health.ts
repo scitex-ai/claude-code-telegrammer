@@ -51,6 +51,10 @@ export interface WakeFailureState {
   lastCategory: WakeFailCategory | null;
   lastReason: string | null;
   lastAtMs: number | null;
+  unresolved?: Record<
+    string,
+    { category: WakeFailCategory; reason: string; atMs: number; attempts: number }
+  >;
 }
 
 const META_KEY = "wake_failure_state";
@@ -61,11 +65,14 @@ let count = 0;
 let lastCategory: WakeFailCategory | null = null;
 let lastReason: string | null = null;
 let lastAtMs: number | null = null;
+let unresolved: NonNullable<WakeFailureState["unresolved"]> = {};
 
 async function realPersistAttempt(): Promise<void> {
+  const state: WakeFailureState = { count, lastCategory, lastReason, lastAtMs };
+  if (Object.keys(unresolved).length > 0) state.unresolved = unresolved;
   await getSql().unsafe(statements(storeSchema()).metaUpsert, [
     META_KEY,
-    JSON.stringify({ count, lastCategory, lastReason, lastAtMs }),
+    JSON.stringify(state),
   ]);
 }
 
@@ -148,8 +155,22 @@ export async function recordWakeFailure(
   category: WakeFailCategory,
   reason: string,
   now: number = Date.now(),
+  messageKey?: string,
 ): Promise<void> {
-  count += 1;
+  if (messageKey) {
+    const persisted = await readPersisted();
+    unresolved = { ...(persisted?.unresolved ?? {}), ...unresolved };
+    const previous = unresolved[messageKey];
+    unresolved[messageKey] = {
+      category,
+      reason,
+      atMs: now,
+      attempts: (previous?.attempts ?? 0) + 1,
+    };
+    count = Object.keys(unresolved).length;
+  } else {
+    count += 1;
+  }
   lastCategory = category;
   lastReason = reason;
   lastAtMs = now;
@@ -157,11 +178,24 @@ export async function recordWakeFailure(
 }
 
 /** Call on every wakeTurn success. Clears the backlog — the path is proven live again. */
-export async function recordWakeSuccess(): Promise<void> {
-  count = 0;
-  lastCategory = null;
-  lastReason = null;
-  lastAtMs = null;
+export async function recordWakeSuccess(messageKey?: string): Promise<void> {
+  if (messageKey) {
+    const persisted = await readPersisted();
+    unresolved = { ...(persisted?.unresolved ?? {}), ...unresolved };
+    delete unresolved[messageKey];
+    count = Object.keys(unresolved).length;
+    if (count === 0) {
+      lastCategory = null;
+      lastReason = null;
+      lastAtMs = null;
+    }
+  } else {
+    unresolved = {};
+    count = 0;
+    lastCategory = null;
+    lastReason = null;
+    lastAtMs = null;
+  }
   await persist();
 }
 
@@ -177,7 +211,7 @@ export async function recordWakeSuccess(): Promise<void> {
 export async function getWakeFailureState(): Promise<WakeFailureState> {
   const persisted = await readPersisted();
   if (persisted !== null) return persisted;
-  return { count, lastCategory, lastReason, lastAtMs };
+  return { count, lastCategory, lastReason, lastAtMs, unresolved };
 }
 
 /** Test-only: reset all state, in-process AND persisted. */
@@ -186,5 +220,6 @@ export async function _resetWakeFailureState(): Promise<void> {
   lastCategory = null;
   lastReason = null;
   lastAtMs = null;
+  unresolved = {};
   await persist();
 }

@@ -123,6 +123,26 @@ export function statements(schema: string) {
         ('outbound', $1, $2, $3, $4, $5, $6, $7, $8, $9, ${NOW_UTC_TEXT}, ${NOW_UTC_TEXT})
       RETURNING id`,
 
+    inboundReplyTarget: `
+      SELECT id, chat_id, message_id, read_at, replied_at
+      FROM ${s}.messages
+      WHERE chat_id = $1 AND message_id = $2 AND direction = 'inbound'
+      ORDER BY id`,
+
+    inboundReplyTargetByRowId: `
+      SELECT id, chat_id, message_id, read_at, replied_at
+      FROM ${s}.messages
+      WHERE id = $1 AND direction = 'inbound'`,
+
+    markExplicitlyReplied: `
+      UPDATE ${s}.messages
+      SET read_at = CASE WHEN $4::boolean
+            THEN COALESCE(read_at, ${NOW_UTC_TEXT}) ELSE read_at END,
+          replied_at = COALESCE(replied_at, ${NOW_UTC_TEXT})
+      WHERE id = $1 AND chat_id = $2 AND message_id = $3
+        AND direction = 'inbound'
+      RETURNING id`,
+
     setRepliedAt: `
       UPDATE ${s}.messages SET replied_at = ${NOW_UTC_TEXT}
       WHERE id = $1 AND direction = 'inbound'`,
@@ -133,7 +153,24 @@ export function statements(schema: string) {
 
     markAllRead: `
       UPDATE ${s}.messages SET read_at = ${NOW_UTC_TEXT}
-      WHERE chat_id = $1 AND read_at IS NULL AND direction = 'inbound'`,
+      WHERE chat_id = $1 AND read_at IS NULL AND direction = 'inbound'
+      RETURNING id`,
+
+    // mark_read by row id. RETURNING id is how the tool learns which rows the
+    // database actually changed: an id that does not exist, is outbound, or is
+    // already read is simply absent from the result. The id list travels as
+    // one comma-joined string, for the arity reason given at attachmentsForRow.
+    markReadMany: `
+      UPDATE ${s}.messages SET read_at = ${NOW_UTC_TEXT}
+      WHERE id = ANY(string_to_array($1, ',')::bigint[])
+        AND read_at IS NULL AND direction = 'inbound'
+      RETURNING id`,
+
+    // Which chat each existing row belongs to, so mark_read can check the
+    // allowlist BEFORE it writes anything.
+    chatsForRows: `
+      SELECT id, chat_id FROM ${s}.messages
+      WHERE id = ANY(string_to_array($1, ',')::bigint[])`,
 
     unreadAll: `
       SELECT * FROM ${s}.messages
@@ -143,8 +180,21 @@ export function statements(schema: string) {
       SELECT * FROM ${s}.messages
       WHERE chat_id = $1 AND read_at IS NULL AND direction = 'inbound' ORDER BY id`,
 
+    // The LATEST page, listed oldest-to-newest: take `limit` rows back from the
+    // newest end (after skipping `offset` of them), then restore chronological
+    // order. It was `ORDER BY id ASC LIMIT … OFFSET …`, which handed back the
+    // OLDEST page of a long chat — scitex-hub asked for the recent 14 on
+    // 2026-09-05 and got messages from three days earlier.
     history: `
-      SELECT * FROM ${s}.messages WHERE chat_id = $1 ORDER BY id ASC LIMIT $2 OFFSET $3`,
+      SELECT * FROM (
+        SELECT * FROM ${s}.messages WHERE chat_id = $1
+        ORDER BY id DESC LIMIT $2 OFFSET $3
+      ) page ORDER BY id ASC`,
+
+    // `total` for the message reads: every row the query matches, ignoring
+    // limit and offset, so `count < total` says the page is not everything.
+    historyTotal: `
+      SELECT count(*) AS total FROM ${s}.messages WHERE chat_id = $1`,
 
     // Reply-target lookup (lib/reply-context.ts). Deliberately NOT filtered by
     // direction: the message an operator replies to is usually one the BOT
@@ -195,6 +245,12 @@ export function statements(schema: string) {
     searchChat: `
       SELECT * FROM ${s}.messages WHERE chat_id = $1 AND text LIKE $2
       ORDER BY id DESC LIMIT $3`,
+
+    searchAllTotal: `
+      SELECT count(*) AS total FROM ${s}.messages WHERE text LIKE $1`,
+
+    searchChatTotal: `
+      SELECT count(*) AS total FROM ${s}.messages WHERE chat_id = $1 AND text LIKE $2`,
 
     contextChat: `
       SELECT * FROM ${s}.messages WHERE chat_id = $1 ORDER BY id DESC LIMIT $2`,

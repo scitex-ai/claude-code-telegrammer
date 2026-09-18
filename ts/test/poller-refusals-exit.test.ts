@@ -25,12 +25,24 @@
  * exit code.
  */
 
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterAll } from "bun:test";
 import { mkdtempSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import { getSql, quoteSchema } from "../lib/pg.js";
 
 const LIB = join(import.meta.dir, "..", "lib");
+
+/** Namespaces handed to the children below. Nothing else drops them. */
+const childSchemas: string[] = [];
+
+afterAll(async () => {
+  for (const schema of childSchemas) {
+    await getSql().unsafe(
+      `DROP SCHEMA IF EXISTS ${quoteSchema(schema)} CASCADE`,
+    );
+  }
+});
 
 /** Run a poller in a child process with `env`, returning its exit + stderr. */
 async function runPoller(
@@ -57,15 +69,18 @@ async function runPoller(
       `process.exit(process.exitCode ?? 0);\n`,
   );
 
+  // Its own namespace: this child seeds a getUpdates offset, and the shared
+  // suite namespace has tests asserting on that exact key. The cct_test_
+  // prefix keeps lib/hermetic-guard.ts satisfied. afterAll above drops it; the
+  // epoch in third position is what the preload's stale-namespace sweep reads
+  // if this process dies before then.
+  const schema = `cct_test_${Date.now()}_refusal_${process.pid}`;
+  childSchemas.push(schema);
   const proc = Bun.spawn(["bun", "run", driver], {
-    // Its own namespace: this child seeds a getUpdates offset, and the shared
-    // suite namespace has tests asserting on that exact key. The cct_test_
-    // prefix keeps lib/hermetic-guard.ts satisfied, and the epoch in third
-    // position is what the preload's stale-namespace sweep reads.
     env: {
       ...process.env,
       CCT_STATE_DIR: dir,
-      CCT_STORE_SCHEMA: `cct_test_${Date.now()}_refusal_${process.pid}`,
+      CCT_STORE_SCHEMA: schema,
       ...env,
     },
     stdout: "pipe",

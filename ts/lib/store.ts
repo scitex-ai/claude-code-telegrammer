@@ -139,7 +139,6 @@ export function _resetStoreForTests(): void {
   activeSchema = null;
 }
 
-
 /**
  * Bring one message row back to the shape callers have always seen.
  *
@@ -239,14 +238,145 @@ export async function saveOutbound(
   return Number((rows[0] as { id: string | number }).id);
 }
 
+export interface InboundReplyTarget {
+  rowId: number;
+  chatId: string;
+  messageId: string;
+  readAt: string | null;
+  repliedAt: string | null;
+}
+
+/** Resolve one Telegram reply target without guessing across chats/directions. */
+export async function resolveInboundReplyTarget(
+  chatId: string,
+  messageId: string,
+): Promise<InboundReplyTarget> {
+  const rows = (await getSql().unsafe(ready().inboundReplyTarget, [
+    chatId,
+    messageId,
+  ])) as Array<Record<string, unknown>>;
+  if (rows.length !== 1) {
+    throw new Error(
+      rows.length === 0
+        ? `no inbound row matches chat_id=${JSON.stringify(chatId)} and message_id=${JSON.stringify(messageId)}`
+        : `ambiguous inbound reply target: ${rows.length} rows match chat_id=${JSON.stringify(chatId)} and message_id=${JSON.stringify(messageId)}`,
+    );
+  }
+  const row = rows[0];
+  return {
+    rowId: Number(row.id),
+    chatId: String(row.chat_id),
+    messageId: String(row.message_id),
+    readAt: row.read_at == null ? null : String(row.read_at),
+    repliedAt: row.replied_at == null ? null : String(row.replied_at),
+  };
+}
+
+/** Resolve one inbound row id and bind it to its canonical Telegram identity. */
+export async function resolveInboundReplyTargetByRowId(
+  chatId: string,
+  rowId: number,
+): Promise<InboundReplyTarget> {
+  const rows = (await getSql().unsafe(ready().inboundReplyTargetByRowId, [
+    rowId,
+  ])) as Array<Record<string, unknown>>;
+  if (rows.length !== 1 || String(rows[0].chat_id) !== chatId) {
+    throw new Error(
+      `no inbound row matches chat_id=${JSON.stringify(chatId)} and row_id=${rowId}`,
+    );
+  }
+  const row = rows[0];
+  return {
+    rowId: Number(row.id),
+    chatId: String(row.chat_id),
+    messageId: String(row.message_id),
+    readAt: row.read_at == null ? null : String(row.read_at),
+    repliedAt: row.replied_at == null ? null : String(row.replied_at),
+  };
+}
+
+/**
+ * Atomically persist an explicit reply and its semantic acknowledgement.
+ *
+ * Telegram delivery is necessarily outside this database transaction. Callers
+ * must invoke this only after Telegram returns a message id, and must surface a
+ * persistence failure as "delivered but unreconciled" rather than resend.
+ */
+export async function saveExplicitReply(
+  target: InboundReplyTarget,
+  text: string,
+  outboundMessageId: string,
+  ctx: {
+    host: string;
+    project: string;
+    agent_id: string;
+    bot_token_hash: string;
+  },
+  markRead = true,
+): Promise<number> {
+  const s = ready();
+  return await getSql().begin(async (tx) => {
+    const marked = await tx.unsafe(s.markExplicitlyReplied, [
+      target.rowId,
+      target.chatId,
+      target.messageId,
+      markRead,
+    ]);
+    if (marked.length !== 1) {
+      throw new Error(
+        `inbound reply target disappeared or changed before receipt commit (row_id=${target.rowId})`,
+      );
+    }
+    const inserted = await tx.unsafe(s.insertOutbound, [
+      target.chatId,
+      outboundMessageId,
+      text,
+      target.messageId,
+      target.rowId,
+      ctx.host,
+      ctx.project,
+      ctx.agent_id,
+      ctx.bot_token_hash,
+    ]);
+    if (inserted.length !== 1) {
+      throw new Error("outbound reply receipt insert returned no row");
+    }
+    return Number((inserted[0] as { id: string | number }).id);
+  });
+}
+
 // ── Read status ────────────────────────────────────────────────────────────
 
 export async function markRead(id: number): Promise<void> {
   await getSql().unsafe(ready().markRead, [id]);
 }
 
-export async function markAllRead(chatId: string): Promise<void> {
-  await getSql().unsafe(ready().markAllRead, [chatId]);
+/** Mark every unread inbound row in the chat read; returns how many changed. */
+export async function markAllRead(chatId: string): Promise<number> {
+  const rows = await getSql().unsafe(ready().markAllRead, [chatId]);
+  return (rows as unknown[]).length;
+}
+
+/**
+ * Mark the given rows read, where they are inbound and still unread. Returns
+ * the ids the database actually changed — not the ids it was asked about.
+ */
+export async function markReadRows(ids: number[]): Promise<number[]> {
+  if (ids.length === 0) return [];
+  const rows = await getSql().unsafe(ready().markReadMany, [ids.join(",")]);
+  return (rows as Array<{ id: unknown }>).map((r) => Number(r.id));
+}
+
+/** The chat each EXISTING row belongs to; ids with no row are absent. */
+export async function chatsForRows(
+  ids: number[],
+): Promise<Array<{ id: number; chat_id: string }>> {
+  if (ids.length === 0) return [];
+  const rows = await getSql().unsafe(ready().chatsForRows, [ids.join(",")]);
+  return (rows as Array<{ id: unknown; chat_id: string }>).map((r) => ({
+    id: Number(r.id),
+    chat_id: r.chat_id,
+  }));
 }
 
 // ── Queries ────────────────────────────────────────────────────────────────
@@ -261,6 +391,11 @@ export async function getUnread(
   return (rows as Array<Record<string, unknown>>).map(normalizeMessageRow);
 }
 
+/**
+ * The LATEST page of a chat, listed oldest-to-newest. `offset` counts back from
+ * the newest message: 0 is the most recent `limit` rows, `limit` the page
+ * before that.
+ */
 export async function getHistory(
   chatId: string,
   limit: number = 20,
@@ -268,6 +403,16 @@ export async function getHistory(
 ): Promise<Array<Record<string, unknown>>> {
   const rows = await getSql().unsafe(ready().history, [chatId, limit, offset]);
   return (rows as Array<Record<string, unknown>>).map(normalizeMessageRow);
+}
+
+/** Every stored message in the chat: get_history's `total`. */
+export async function countHistory(chatId: string): Promise<number> {
+  return totalOf(await getSql().unsafe(ready().historyTotal, [chatId]));
+}
+
+// count(*) is a bigint, which the driver does not hand back as a JS number.
+function totalOf(rows: unknown): number {
+  return Number((rows as Array<{ total: unknown }>)[0].total);
 }
 
 /**
@@ -407,6 +552,20 @@ export async function searchMessages(
     ? await getSql().unsafe(s.searchChat, [chatId, pattern, limit])
     : await getSql().unsafe(s.searchAll, [pattern, limit]);
   return (rows as Array<Record<string, unknown>>).map(normalizeMessageRow);
+}
+
+/** Every message a search matches, ignoring its limit: search_messages' `total`. */
+export async function countSearchMatches(
+  query: string,
+  chatId?: string,
+): Promise<number> {
+  const s = ready();
+  const pattern = `%${query}%`;
+  return totalOf(
+    chatId
+      ? await getSql().unsafe(s.searchChatTotal, [chatId, pattern])
+      : await getSql().unsafe(s.searchAllTotal, [pattern]),
+  );
 }
 
 export async function getConversationContext(

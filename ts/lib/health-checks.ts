@@ -384,6 +384,7 @@ export function checkStateDirWritable(probe: StateDirProbe): CheckOutcome {
         `state dir ${probe.path} is ${probe.exists ? "NOT writable" : "missing and NOT creatable"}` +
         (probe.detail ? `: ${probe.detail}` : ""),
       hint,
+      ...(probe.cause ? { cause: probe.cause } : {}),
     },
     warn: false,
   };
@@ -423,6 +424,7 @@ export function checkDbSchemaCurrent(probe: DbProbe): CheckOutcome {
         hint:
           "check that the store server named by SCITEX_STORE_DSN is reachable " +
           "and that this agent's role can read its own schema.",
+        ...(probe.cause ? { cause: probe.cause } : {}),
       },
       warn: false,
     };

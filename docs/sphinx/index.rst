@@ -65,9 +65,9 @@ Why Not the Official Plugin?
 Key Features
 ------------
 
-- **10 MCP Tools** -- ``reply``, ``react``, ``edit_message``,
+- **11 MCP Tools** -- ``reply``, ``react``, ``edit_message``,
   ``get_history``, ``get_unread``, ``mark_read``, ``download_attachment``,
-  ``send_document``, ``search_messages``, ``get_context``.
+  ``send_document``, ``search_messages``, ``get_context``, ``health``.
 - **PostgreSQL Message Store** -- all messages persisted to the fleet's PostgreSQL server, one schema per agent
   with full-text search, threading metadata, and attachment tracking.
 - **Allowlist Access Control** -- DM and group policies via env var and
@@ -83,9 +83,9 @@ Key Features
 - **TUI Watchdog** -- polls a GNU Screen session, detects Claude Code's
   TUI state (permission prompts, idle), and sends keystrokes to keep the
   agent running.
-- **Configurable State Directory** -- all state (DB, lock, access config)
-  lives under ``CLAUDE_CODE_TELEGRAMMER_AGENT_STATE_DIR``, not
-  hardcoded paths.
+- **Configurable State Directory** -- local state (access config, lock,
+  attachments) lives under ``CLAUDE_CODE_TELEGRAMMER_AGENT_STATE_DIR``, not
+  hardcoded paths; messages live in PostgreSQL, one schema per agent.
 
 Quick Example
 -------------
@@ -114,7 +114,7 @@ Architecture
         v
     Custom Telegram MCP Server (ts/telegram-server.ts)
         Bun + @modelcontextprotocol/sdk
-        Poller | Message Store | 10 MCP Tools | Attachments
+        Poller | Message Store | 11 MCP Tools | Attachments
         Access Control | Config (env vars) | PID Lock
         |
         | MCP stdio

@@ -1,6 +1,6 @@
 /**
  * Handler bodies for the message-query MCP tools: get_history,
- * get_unread, download_attachment.
+ * get_unread, search_messages, mark_read, download_attachment.
  *
  * Extracted from tools.ts (incident cct-inbound-images-20260707) for two
  * reasons: (1) tools.ts sits near the repo's 512-line .ts cap and these
@@ -15,7 +15,13 @@ import { existsSync } from "fs";
 import { assertAllowedChat } from "./access.js";
 import {
   getHistory,
+  countHistory,
   getUnread,
+  searchMessages,
+  countSearchMatches,
+  markAllRead,
+  markReadRows,
+  chatsForRows,
   attachmentsForRows,
   findAttachmentByFileId,
   markAttachmentDownloaded,
@@ -108,7 +114,7 @@ export async function currentCoverage(): Promise<IngestionCoverage> {
 }
 
 /**
- * Every message read answers in ONE shape: `{coverage, count, messages}`.
+ * Every message read answers in ONE shape: `{coverage, count, total, messages}`.
  *
  * It used to answer with a bare array, which made `[]` mean both "the
  * operator said nothing" and "this store recorded nothing for that window" —
@@ -116,13 +122,19 @@ export async function currentCoverage(): Promise<IngestionCoverage> {
  * quiet inbox on 2026-08-10. The fleet restart protocol tells every agent to
  * check this tool and NOT to assume a quiet inbox means nothing was sent; the
  * tool now carries the evidence needed to honour that instruction.
+ *
+ * `total` is every row the query matches, ignoring limit and offset. `count`
+ * alone cannot tell "that is everything" from "that is one page": a page of 20
+ * reads the same whether the chat holds 20 messages or 2,000.
  */
 async function messagesResult(
   rows: Array<Record<string, unknown>>,
+  total: number,
 ): Promise<ToolResult> {
   return jsonResult({
     coverage: await currentCoverage(),
     count: rows.length,
+    total,
     messages: await withAttachments(rows),
   });
 }
@@ -134,7 +146,11 @@ export async function handleGetHistory(
   const limit = (args.limit as number) ?? 20;
   const offset = (args.offset as number) ?? 0;
   assertAllowedChat(chatId);
-  return messagesResult(await getHistory(chatId, limit, offset));
+  const [rows, total] = await Promise.all([
+    getHistory(chatId, limit, offset),
+    countHistory(chatId),
+  ]);
+  return messagesResult(rows, total);
 }
 
 export async function handleGetUnread(
@@ -142,7 +158,91 @@ export async function handleGetUnread(
 ): Promise<ToolResult> {
   const chatId = args.chat_id as string | undefined;
   if (chatId) assertAllowedChat(chatId);
-  return messagesResult(await getUnread(chatId));
+  const rows = await getUnread(chatId);
+  // No limit: everything get_unread matched is on this page.
+  return messagesResult(rows, rows.length);
+}
+
+/**
+ * search_messages — the third message read, and now in the same shape.
+ *
+ * It was the one read left out when get_history and get_unread moved to
+ * `{coverage, count, messages}` on 2026-08-15. For nine days after #132 it
+ * returned a bare `{}` for every query (an un-awaited Promise, fixed in #140),
+ * and three separate agents read that `{}` as "the store is empty" — one told
+ * its user so. #140 turned it into a bare `[]`, which is honest about the rows
+ * and still silent about whether the store can vouch for the window. That is
+ * the ambiguity messagesResult exists to remove, so search goes through it too.
+ */
+/**
+ * mark_read answers with what it ACTUALLY marked.
+ *
+ * It used to reply "marked N message(s) as read" with N = the ids it was GIVEN.
+ * The update only touches rows that exist, are inbound and are still unread, so
+ * any other id changed nothing and was reported as marked anyway. The likeliest
+ * wrong input is a Telegram message_id passed where the DB row id belongs, and
+ * both sit in every channel message. That path also never consulted the
+ * allowlist, so rows of any chat could be marked.
+ *
+ * Every row's chat is now checked BEFORE anything is written, so one disallowed
+ * row refuses the whole call with no partial write. The answer counts the rows
+ * the database reports it changed and names the ids it could not mark.
+ */
+export async function handleMarkRead(
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  const chatId = args.chat_id as string | undefined;
+  if (chatId) {
+    assertAllowedChat(chatId);
+    const marked = await markAllRead(chatId);
+    return textResult(`marked ${marked} unread message(s) in ${chatId} as read`);
+  }
+  const requested = args.message_ids;
+  if (!Array.isArray(requested) || requested.length === 0) {
+    return textResult("provide chat_id or message_ids to mark as read", true);
+  }
+  // Digits only: the ids travel to the database as one comma-joined string.
+  const notRowIds = requested.filter(
+    (v) =>
+      !(typeof v === "number" || (typeof v === "string" && /^\d+$/.test(v))) ||
+      !Number.isSafeInteger(Number(v)) ||
+      Number(v) <= 0,
+  );
+  if (notRowIds.length > 0) {
+    throw new Error(
+      "message_ids must be DB row ids (positive integers: the row_id in the " +
+        `<channel> meta, not Telegram's message_id); got: ${notRowIds.join(", ")}`,
+    );
+  }
+  const ids = [...new Set(requested.map(Number))];
+  const found = await chatsForRows(ids);
+  for (const chat of new Set(found.map((r) => r.chat_id))) {
+    assertAllowedChat(chat);
+  }
+  const marked = new Set(await markReadRows(found.map((r) => r.id)));
+  const foundIds = new Set(found.map((r) => r.id));
+  const notFound = ids.filter((id) => !foundIds.has(id));
+  const notMarkable = [...foundIds].filter((id) => !marked.has(id));
+  let text = `marked ${marked.size} of ${ids.length} message(s) as read`;
+  if (notFound.length > 0) text += `; not found: ${notFound.join(", ")}`;
+  if (notMarkable.length > 0) {
+    text += `; already read or not inbound: ${notMarkable.join(", ")}`;
+  }
+  return textResult(text);
+}
+
+export async function handleSearchMessages(
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  const query = args.query as string;
+  const chatId = args.chat_id as string | undefined;
+  const limit = (args.limit as number) ?? 20;
+  if (chatId) assertAllowedChat(chatId);
+  const [rows, total] = await Promise.all([
+    searchMessages(query, chatId, limit),
+    countSearchMatches(query, chatId),
+  ]);
+  return messagesResult(rows, total);
 }
 
 /**
@@ -159,12 +259,20 @@ export async function handleGetUnread(
  * immediately — no network. Otherwise download and record the path so
  * the next call short-circuits.
  *
+ * ALLOWLIST. A stored attachment's chat — and any chat_id passed — is checked
+ * BEFORE that short-circuit. This tool used to check nothing, so the cached
+ * return handed back any stored chat's file. (Rows exist only for chats that
+ * were allowlisted when the message arrived, so the reach was a chat removed
+ * from the allowlist since.) An unknown file_id with no chat_id still cannot be
+ * attributed to any chat, and is downloaded as before.
+ *
  * `download` is injectable for tests (defaults to the real downloadNow).
  */
 export async function handleDownloadAttachment(
   args: Record<string, unknown>,
   download: (fileId: string, chatId: string) => Promise<string> = downloadNow,
 ): Promise<ToolResult> {
+  if (args.chat_id) assertAllowedChat(args.chat_id as string);
   const fileIdArg = args.file_id as string | undefined;
   const rowIdArg = args.row_id != null ? Number(args.row_id) : undefined;
   if (!fileIdArg && rowIdArg == null) {
@@ -187,6 +295,8 @@ export async function handleDownloadAttachment(
   } else if (fileIdArg) {
     att = await findAttachmentByFileId(fileIdArg);
   }
+
+  if (att) assertAllowedChat(att.chat_id);
 
   if (att?.local_path && existsSync(att.local_path)) {
     return textResult(`downloaded to: ${att.local_path}`);

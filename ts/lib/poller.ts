@@ -40,8 +40,9 @@ import {
  * Telegram's 30s long-poll cap.
  */
 const MAX_CONSECUTIVE_409 = 30;
-/** Backoff between getUpdates errors (409s or other). */
-const ERROR_BACKOFF_MS = 3000;
+/** Backoff between getUpdates errors (409s or other). Exported so tests bound
+ * it against the stall threshold with the real value, not a copy. */
+export const ERROR_BACKOFF_MS = 3000;
 
 let updateOffset = 0;
 let polling = true;
@@ -203,7 +204,7 @@ export async function startPolling(): Promise<void> {
   // Refusing a stranger is fine and still advances — otherwise a stranger's
   // message is redelivered forever. But when NOTHING can be accepted, polling
   // can only destroy, so we do not poll.
- 
+
   try {
     const me = await tgApi("getMe");
     // Identity triple on the startup line: two agents sharing ONE bot
@@ -399,7 +400,7 @@ export async function startPolling(): Promise<void> {
             const fatalMsg =
               `FATAL: ${MAX_CONSECUTIVE_409} consecutive 409 Conflicts — another process is polling this bot token and has NOT yielded after backoff. ` +
               "This is likely a foreign poller (not one of ours — ours obey the pidfile-takeover protocol) or a stuck webhook. " +
-              `Another consumer holds THIS bot token (hash=${BOT_TOKEN_HASH}, state_dir=${STATE_DIR}) — commonly multiple agents sharing one bot token. Each agent needs its OWN bot token + CCT_STATE_DIR. ` +
+              `Another consumer holds THIS bot token (hash=${BOT_TOKEN_HASH}, state_dir=${STATE_DIR}) — commonly multiple agents sharing one bot token. Each agent needs its OWN bot token + CCT_AGENT_ID (its state dir derives from it). ` +
               "Stop the other consumer (or call deleteWebhook) and restart the bridge.";
             log("poller", fatalMsg);
             // Broadcast directly to Telegram — this runs in the standalone

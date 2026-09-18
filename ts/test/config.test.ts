@@ -28,9 +28,15 @@ import {
   RECEIPT_READ_EMOJI,
   findUnexpandedEnv,
   findRenamedEnv,
+  isCodexHarness,
 } from "../lib/config.js";
 
 describe("config", () => {
+  test("recognizes SAC's canonical Codex TUI harness identity", () => {
+    expect(isCodexHarness("codex-tui")).toBe(true);
+    expect(isCodexHarness("codex")).toBe(true);
+    expect(isCodexHarness("hermes-tui")).toBe(false);
+  });
   test("STATE_DIR reads from env var", () => {
     // preload.ts sets CLAUDE_CODE_TELEGRAMMER_AGENT_STATE_DIR to a tmp dir
     expect(STATE_DIR).toContain("cct-test-");

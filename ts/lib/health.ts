@@ -39,6 +39,7 @@
 
 import type { TokenCheck, AccessGatingInput } from "./startup-validate.js";
 import type { WakeFailureState } from "./wake-health.js";
+import type { NativeStatusCode } from "./protocol-status.js";
 import {
   checkEnvUnexpanded,
   checkEnvRenamed,
@@ -78,6 +79,8 @@ export interface HealthCheckEntry {
   ok: boolean;
   detail: string;
   hint: string | null;
+  /** Native failure preserved verbatim when the probe observed one. */
+  cause?: NativeStatusCode;
   /**
    * Did this check actually RUN? Absent means yes (every pre-existing check).
    *
@@ -141,11 +144,12 @@ export interface StateDirProbe {
   writable: boolean;
   /** fs error detail on failure. */
   detail?: string;
+  cause?: NativeStatusCode;
 }
 
 export type DbProbe =
   | { exists: false }
-  | { exists: true; error: string }
+  | { exists: true; error: string; cause?: NativeStatusCode }
   | {
       exists: true;
       error?: undefined;

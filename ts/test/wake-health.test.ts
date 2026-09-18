@@ -93,6 +93,16 @@ describe("wake failure tracker", () => {
     expect(s.lastCategory).toBe("timeout");
   });
 
+  test("success for another message does not clear an unresolved message", async () => {
+    await recordWakeFailure("server_error", "HTTP 502", 1000, "row-1665");
+    await recordWakeFailure("timeout", "later message", 2000, "row-1666");
+    await recordWakeSuccess("row-1666");
+    const s = await getWakeFailureState();
+    expect(s.count).toBe(1);
+    expect(s.unresolved?.["row-1665"]?.attempts).toBe(1);
+    expect(s.unresolved?.["row-1666"]).toBeUndefined();
+  });
+
   test("defaults `now` to Date.now() when not injected", async () => {
     const before = Date.now();
     await recordWakeFailure("unknown", "x");

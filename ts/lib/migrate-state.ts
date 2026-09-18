@@ -18,12 +18,20 @@
  * The FILES did not move, and they are what this module still carries.
  *
  * A LEGACY DATABASE FILE IS THEREFORE ANNOUNCED, NOT COPIED. If one is sitting
- * in the old directory, this module says so, loudly, once, naming the file and
- * pointing at the import procedure — and leaves it exactly where it is. That
- * is deliberate: silently proceeding past an old store full of the operator's
- * history, leaving him to discover the gap himself, is the incident this whole
- * module was written for. Announcing it is the honest alternative, and the
- * untouched file remains fully re-readable.
+ * in the old directory or in the current state dir, this module says so,
+ * loudly, on every start, naming the file and pointing at the import procedure
+ * — and leaves it exactly where it is. That is deliberate: silently proceeding
+ * past an old store full of the operator's history, leaving him to discover the
+ * gap himself, is the incident this whole module was written for. Announcing
+ * it is the honest alternative, and the untouched file remains fully
+ * re-readable.
+ *
+ * BOTH DIRS, because the old one is almost never where the file is. Only the
+ * earliest releases wrote the database there; every release from the state-dir
+ * switch until PostgreSQL wrote it into the CURRENT state dir. This module used
+ * to scan only the old dir. Measured 2026-09-14 on one host: all six populated
+ * stores sat in runtime/<agent>/ and no old default dir existed — so not one of
+ * them had ever been announced.
  *
  * DESIGN (data safety is paramount — this moves the operator's real state):
  *   - COPY, never move. The legacy dir is left intact as a backup.
@@ -104,7 +112,8 @@ export interface MigrateResult {
   newDir: string;
   oldDir: string | null;
   /**
-   * Legacy database files found in the old dir and deliberately left there.
+   * Legacy database files found in the old dir or the current state dir, and
+   * deliberately left there.
    * Empty for every agent that never ran a file-backed release.
    */
   strandedDbFiles: string[];
@@ -194,12 +203,17 @@ export function migrateLegacyStateDir(
     return { migrated: reason === "migrated", reason, newDir, oldDir, strandedDbFiles };
   };
 
+  // Scanned on EVERY path, in both dirs — see "BOTH DIRS" in the module header.
+  const stranded = [
+    ...new Set(
+      [oldDir, newDir].flatMap((dir) => (dir ? findStrandedDbFiles(dir) : [])),
+    ),
+  ];
+
   // Explicit AGENT_STATE_DIR → that dir IS the state dir; nothing to migrate.
   if (oldDir === null || getenv("AGENT_STATE_DIR", undefined, env)) {
-    return summarize("explicit-state-dir", []);
+    return summarize("explicit-state-dir", stranded);
   }
-
-  const stranded = existsSync(oldDir) ? findStrandedDbFiles(oldDir) : [];
 
   // A previous migration completed → no-op.
   if (existsSync(join(newDir, MARKER_NEW))) {

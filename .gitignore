@@ -43,3 +43,16 @@ build/
 # source.
 __pycache__/
 *.py[cod]
+
+# Hook scratch. The pre-tool-use hooks write per-invocation staging files into a
+# `.pending/` dir next to themselves. That is machine scratch, never source; a
+# batch of it under docs/to_claude/ was committed by accident, and this rule
+# keeps it from coming back.
+.pending/
+
+# Hook logs. Hook scripts log to `LOG_PATH="$THIS_DIR/.$(basename "$0").log"`,
+# i.e. a hidden `.<script>.sh.log` beside themselves; 12 of them under
+# docs/to_claude/hooks/ were committed. Unanchored on purpose: the naming
+# belongs to the scripts, not to that directory, and the same scripts also live
+# in .claude/hooks/ and docs/to_claude/bin/. A hidden *.sh.log is never source.
+.*.sh.log

@@ -92,6 +92,21 @@ except Exception:
     fi
 }
 
+# ── Telegrammer state dir ─────────────────────────────────────────────
+# Print the directory the MCP server reads access.json from, as resolved by
+# ts/lib/config.ts::resolveStateDir itself: an explicit CCT_AGENT_STATE_DIR /
+# CLAUDE_CODE_TELEGRAMMER_AGENT_STATE_DIR, else
+# ~/.scitex/claude-code-telegrammer/runtime/<agent id>. The path is ASKED of
+# the server's resolver, never re-derived in shell, so these helpers cannot
+# write access.json somewhere the server does not look. Importing config.ts
+# starts nothing: no server, no poller, no network.
+# Usage: telegrammer_state_dir [<ts dir containing lib/config.ts>]
+telegrammer_state_dir() {
+    local ts_dir="${1:-$TELEGRAMMER_DIR/ts}"
+    TELEGRAMMER_CONFIG_TS="$ts_dir/lib/config.ts" bun -e \
+        'const { resolveStateDir } = await import(process.env.TELEGRAMMER_CONFIG_TS); console.log(resolveStateDir());'
+}
+
 # ── Ensure directories ────────────────────────────────────────────────
 ensure_dirs() {
     mkdir -p "$TELEGRAMMER_CAPTURE_DIR"

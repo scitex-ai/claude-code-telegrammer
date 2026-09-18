@@ -19,7 +19,8 @@
  *
  * Env vars:
  *   CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN       - required
- *   CLAUDE_CODE_TELEGRAMMER_AGENT_STATE_DIR - default: ~/.claude-code-telegrammer
+ *   CLAUDE_CODE_TELEGRAMMER_AGENT_STATE_DIR - default:
+ *                                             ~/.scitex/claude-code-telegrammer/runtime/<agent_id>
  *                                             (per-agent override; the old
  *                                             …_STATE_DIR name is rejected loud)
  *   CLAUDE_CODE_TELEGRAMMER_ALLOWED_USERS - comma-separated user IDs (optional)
@@ -27,6 +28,8 @@
  *   CLAUDE_CODE_TELEGRAMMER_PROJECT       - default: process.cwd()
  *   CLAUDE_CODE_TELEGRAMMER_AGENT_ID      - default: 'telegram'
  *   CLAUDE_CODE_TELEGRAMMER_READ_RECEIPTS - ⚡/👀 receipts, default: on
+ *   CLAUDE_CODE_TELEGRAMMER_EXTERNAL_POLLER - set to 1/true when an external
+ *                                               lifecycle manager owns polling
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -38,13 +41,22 @@ import {
   ACCESS_FILE,
   ENV_ALLOWED,
   AGENT_ID,
+  HOST_NAME,
+  PROJECT,
+  AGENT_HARNESS,
+  isCodexHarness,
   findUnexpandedEnv,
   findRenamedEnv,
 } from "./lib/config.js";
 import { log } from "./lib/log.js";
 import { acquireLock, releaseLock } from "./lib/lock.js";
 import { registerTools } from "./lib/tools.js";
-import { initStore } from "./lib/store.js";
+import {
+  initStore,
+  resolveInboundReplyTarget,
+  saveExplicitReply,
+  saveOutbound,
+} from "./lib/store.js";
 import { migrateLegacyStateDir, ensureCctAlias } from "./lib/migrate-state.js";
 import { loadAccess } from "./lib/access.js";
 import { startPollerSupervision } from "./lib/poller-supervisor.js";
@@ -53,7 +65,13 @@ import { wakeEnabled } from "./lib/wake.js";
 import { resolveConfigProbe, wantsGetMe } from "./lib/config-probe.js";
 import { runHealth, serializeHealthReport } from "./lib/health-adapters.js";
 import { tgApi, getMeRaw, sendMessage } from "./lib/telegram-api.js";
-import { parseSendArgs, SEND_USAGE, emptyTokenError } from "./lib/send-cli.js";
+import {
+  parseSendArgs,
+  SEND_USAGE,
+  emptyTokenError,
+  executeDurableSend,
+  TelegramAcceptedPersistenceError,
+} from "./lib/send-cli.js";
 import {
   validateBotToken,
   describeAccessGating,
@@ -61,6 +79,10 @@ import {
 } from "./lib/startup-validate.js";
 import { existsSync } from "fs";
 import { join } from "path";
+import {
+  externalPollerEnabled,
+  shouldStartInternalPoller,
+} from "./lib/poller-mode.js";
 
 // ── Health probe ("doctor") — no server, no poller ──────────────────────────
 //
@@ -159,13 +181,30 @@ if (process.argv.slice(2)[0] === "send") {
     process.exit(3);
   }
   try {
-    const messageId = await sendMessage(
-      parsed.args.chatId,
-      parsed.args.text,
-      parsed.args.replyTo,
+    const result = await executeDurableSend(
+      parsed.args,
+      {
+        host: HOST_NAME,
+        project: PROJECT,
+        agent_id: AGENT_ID,
+        bot_token_hash: BOT_TOKEN_HASH,
+      },
+      {
+        initStore,
+        sendMessage,
+        resolveInboundReplyTarget,
+        saveExplicitReply,
+        saveOutbound,
+      },
     );
     process.stdout.write(
-      JSON.stringify({ ok: true, message_id: messageId }) + "\n",
+      JSON.stringify({
+        ok: true,
+        message_id: result.messageId,
+        row_id: result.rowId,
+        reply_to_row_id: result.replyToRowId,
+        semantic_state: result.semanticState,
+      }) + "\n",
     );
     process.exit(0);
   } catch (err) {
@@ -173,9 +212,11 @@ if (process.argv.slice(2)[0] === "send") {
     // recreate the exact bug this mode exists to fix: an agent believing it
     // reached the operator when it did not.
     const reason = err instanceof Error ? err.message : String(err);
-    process.stderr.write(
-      `claude-code-telegrammer send: FAILED to deliver: ${reason}\n`,
-    );
+    const prefix =
+      err instanceof TelegramAcceptedPersistenceError
+        ? "DELIVERED BUT NOT DURABLY RECORDED"
+        : "FAILED before confirmed delivery";
+    process.stderr.write(`claude-code-telegrammer send: ${prefix}: ${reason}\n`);
     process.exit(1);
   }
 }
@@ -216,6 +257,9 @@ if (renamed.length > 0) {
 //     used because tgApi throws a generic Error that loses the error_code.
 // getMe runs BEFORE acquireLock() so a known-bad token never takes the lock.
 const TELEGRAM_ENABLED = TOKEN.length > 0;
+const EXTERNAL_POLLER = externalPollerEnabled(
+  process.env.CLAUDE_CODE_TELEGRAMMER_EXTERNAL_POLLER,
+);
 if (!TELEGRAM_ENABLED) {
   process.stderr.write(buildDisabledWarning(AGENT_ID) + "\n");
 } else {
@@ -358,13 +402,21 @@ process.on("SIGINT", () => shutdown("SIGINT"));
 
 // ── State-dir migration (scitex-standard default) ──────────────────────────
 //
-// Before the store opens (which would CREATE a fresh empty DB at the new
-// default path), carry any pre-existing history at the OLD default location
-// forward into the scitex-standard path. This runs BEFORE acquireLock/initStore
-// so loadOffset() reads the migrated DB, not an empty one. Idempotent, copy-not-
-// move, and FAIL LOUD — a throw here aborts startup so a half-migration is never
-// masked by a fresh DB (see lib/migrate-state.ts). No-op when an explicit
-// AGENT_STATE_DIR is set, the new DB already exists, or there is nothing to move.
+// Before the store opens, carry the FILES at the OLD default state dir
+// (downloaded attachments, access.json) forward into the scitex-standard path.
+// It does NOT carry message history: messages live in PostgreSQL, and a legacy
+// database file is only ANNOUNCED, named in a loud log line and left in place,
+// wherever it sits (old dir or current). Importing its rows is a separate step
+// (docs/adr/0001-postgres-message-store.md). Idempotent, copy-not-move, and
+// FAIL LOUD: a copy that throws aborts startup, so a half-migration is never
+// silently masked. The copy is skipped when an explicit AGENT_STATE_DIR is set,
+// a previous run left its marker, or the old dir holds nothing to carry; the
+// announcement runs regardless (see lib/migrate-state.ts).
+//
+// This comment used to say the step carries "pre-existing history" forward so
+// loadOffset() reads "the migrated DB". Both stopped being true when the store
+// moved to PostgreSQL, and a reader of the old text would believe old history
+// migrates at startup, which is exactly what did not happen.
 migrateLegacyStateDir();
 ensureCctAlias();
 
@@ -382,7 +434,7 @@ await initStore();
 // dead — describeAccessGating() emits a WARN naming CCT_ALLOWED_USERS + the fix.
 // Skipped when telegram is DISABLED (no bot → no DMs → the fail-closed warning
 // would be misleading noise; buildDisabledWarning already covers that state).
-if (TELEGRAM_ENABLED) {
+if (TELEGRAM_ENABLED && !EXTERNAL_POLLER) {
   const gating = describeAccessGating({
     accessFileExists: existsSync(ACCESS_FILE),
     envAllowedCount: ENV_ALLOWED.length,
@@ -410,7 +462,7 @@ log("server", "MCP server connected via stdio");
 // lib/poller-supervisor.ts. When telegram is DISABLED (no token) we DON'T
 // spawn a poller — the MCP stays connected but idle-disabled, matching the
 // loud WARN emitted above (honest status, no crash).
-if (TELEGRAM_ENABLED) {
+if (shouldStartInternalPoller(TELEGRAM_ENABLED, EXTERNAL_POLLER)) {
   // Supervised, not fire-and-forget: the first check is immediate (same boot
   // behaviour as the old one-shot call) and it then RE-checks on an interval,
   // because a poller we merely ADOPT has no exit handle and nothing else on
@@ -420,10 +472,15 @@ if (TELEGRAM_ENABLED) {
     tokenHash: BOT_TOKEN_HASH,
     pollerScriptPath: join(import.meta.dir, "telegram-poller.ts"),
   });
-} else {
+} else if (!TELEGRAM_ENABLED) {
   log(
     "server",
     "telegram disabled (CCT_BOT_TOKEN empty) — MCP connected, poller not started",
+  );
+} else {
+  log(
+    "server",
+    "external poller mode enabled; MCP server will not spawn or supervise a poller",
   );
 }
 
@@ -449,5 +506,8 @@ if (TELEGRAM_ENABLED) {
 // are only ever written when the wake FAILED, so a healthy wake-enabled agent
 // still has exactly one delivery path and the relay finds nothing to do.
 if (TELEGRAM_ENABLED) {
-  startNotifyRelay({ mcp });
+  startNotifyRelay({
+    mcp,
+    deliveryMode: isCodexHarness(AGENT_HARNESS) ? "wake" : "mcp",
+  });
 }

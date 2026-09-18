@@ -34,15 +34,30 @@ case "$cmd" in
       fi
     fi
 
-    # 2. Write access.json
-    AUTO_CONNECT=$(yaml_get "$AGENT_CONFIG_PATH" "spec.telegram.auto_connect" "true")
-    STATE_DIR="${CLAUDE_CODE_TELEGRAMMER_STATE_DIR:-$HOME/.scitex/agent-container/telegram}"
-
-    # Resolve bot_id from token for state dir
-    if [[ -n "${CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN:-}" ]]; then
-      BOT_ID="${CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN%%:*}"
-      STATE_DIR="$HOME/.scitex/agent-container/telegram/$BOT_ID"
+    # 2. Find telegram-server.ts: check project root first, then relative to SCRIPT_DIR
+    TS_SERVER=""
+    for candidate in \
+      "$SCRIPT_DIR/../ts/telegram-server.ts" \
+      "$SCRIPT_DIR/ts/telegram-server.ts" \
+      "$(python3 -c 'import claude_code_telegrammer; import os; print(os.path.join(os.path.dirname(claude_code_telegrammer.__file__), "..", "..", "ts", "telegram-server.ts"))' 2>/dev/null)" \
+    ; do
+      if [[ -f "$candidate" ]]; then
+        TS_SERVER="$(cd "$(dirname "$candidate")" && pwd)/$(basename "$candidate")"
+        break
+      fi
+    done
+    if [[ -z "$TS_SERVER" ]]; then
+      log_warn "telegram-server.ts not found"
+      exit 1
     fi
+
+    # 3. Write access.json into the state dir that server READS it from.
+    # This used to be ${CLAUDE_CODE_TELEGRAMMER_STATE_DIR:-~/.scitex/agent-container/telegram}
+    # (per bot id when a token was set): a name startup refuses, defaulting to
+    # a directory the server does not read. The server's own resolver answers
+    # now (lib/common.sh::telegrammer_state_dir -> ts/lib/config.ts).
+    AUTO_CONNECT=$(yaml_get "$AGENT_CONFIG_PATH" "spec.telegram.auto_connect" "true")
+    STATE_DIR="$(telegrammer_state_dir "$(dirname "$TS_SERVER")")"
     mkdir -p "$STATE_DIR"
 
     # Parse allowed_users via Python (yaml_get returns flat values, not JSON)
@@ -61,49 +76,46 @@ print('Wrote access.json with', len(users), 'allowed users to $STATE_DIR')
 "
     fi
 
-    # 3. Write .env for the MCP server
+    # 4. Write .env for the MCP server
     echo "CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN=${CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN:-}" > "$STATE_DIR/.env"
     chmod 600 "$STATE_DIR/.env"
     log_info "Wrote .env to $STATE_DIR"
 
-    # 4. Write MCP config JSON for --mcp-config
+    # 5. Write MCP config JSON for --mcp-config
     AGENT_NAME="${AGENT_NAME:-telegrammer}"
     MCP_DIR="$HOME/.scitex/agent-container/cache/mcp-configs"
     mkdir -p "$MCP_DIR"
-    # Find telegram-server.ts: check project root first, then relative to SCRIPT_DIR
-    TS_SERVER=""
-    for candidate in \
-      "$SCRIPT_DIR/../ts/telegram-server.ts" \
-      "$SCRIPT_DIR/ts/telegram-server.ts" \
-      "$(python3 -c 'import claude_code_telegrammer; import os; print(os.path.join(os.path.dirname(claude_code_telegrammer.__file__), "..", "..", "ts", "telegram-server.ts"))' 2>/dev/null)" \
-    ; do
-      if [[ -f "$candidate" ]]; then
-        TS_SERVER="$(cd "$(dirname "$candidate")" && pwd)/$(basename "$candidate")"
-        break
-      fi
-    done
-    if [[ -z "$TS_SERVER" ]]; then
-      log_warn "telegram-server.ts not found"
-      exit 1
+
+    # The state dir goes into the server's env ONLY when the operator set one
+    # explicitly, in any accepted spelling (ts/lib/env.ts). Otherwise it is
+    # left out and the server derives the same default itself, so config.ts
+    # stays the single source of truth. Never the renamed
+    # CLAUDE_CODE_TELEGRAMMER_STATE_DIR: startup refuses it (RENAMED_ENV in
+    # ts/lib/config.ts), which made every server this hook configured exit 1.
+    EXPLICIT_STATE_DIR=""
+    if [[ -n "${CCT_AGENT_STATE_DIR:-}${CLAUDE_CODE_TELEGRAMMER_AGENT_STATE_DIR:-}${CLAUDE_CODE_TELEGRAMMER_TELEGRAM_AGENT_STATE_DIR:-}" ]]; then
+      EXPLICIT_STATE_DIR="$STATE_DIR"
     fi
 
-    python3 -c "
+    EXPLICIT_STATE_DIR="$EXPLICIT_STATE_DIR" python3 -c "
 import yaml, json, os
 with open('$AGENT_CONFIG_PATH') as f:
     raw = yaml.safe_load(f)
 users = raw.get('spec',{}).get('telegram',{}).get('allowed_users',[]) or []
 users_str = ','.join(str(u) for u in users)
+env = {
+    'CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN': os.environ.get('CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN', ''),
+    'CLAUDE_CODE_TELEGRAMMER_ALLOWED_USERS': users_str
+}
+if os.environ.get('EXPLICIT_STATE_DIR'):
+    env['CLAUDE_CODE_TELEGRAMMER_AGENT_STATE_DIR'] = os.environ['EXPLICIT_STATE_DIR']
 config = {
     'mcpServers': {
         'claude-code-telegrammer': {
             'type': 'stdio',
             'command': 'bun',
             'args': ['run', '$TS_SERVER'],
-            'env': {
-                'CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN': os.environ.get('CLAUDE_CODE_TELEGRAMMER_BOT_TOKEN', ''),
-                'CLAUDE_CODE_TELEGRAMMER_STATE_DIR': '$STATE_DIR',
-                'CLAUDE_CODE_TELEGRAMMER_ALLOWED_USERS': users_str
-            }
+            'env': env
         }
     }
 }

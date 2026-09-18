@@ -16,9 +16,9 @@ import {
 } from "./telegram-api.js";
 import {
   saveOutbound,
-  markRead,
-  markAllRead,
-  searchMessages,
+  saveExplicitReply,
+  resolveInboundReplyTarget,
+  resolveInboundReplyTargetByRowId,
   getConversationContext,
 } from "./store.js";
 import { HOST_NAME, PROJECT, AGENT_ID, BOT_TOKEN_HASH } from "./config.js";
@@ -26,10 +26,24 @@ import { log } from "./log.js";
 import {
   handleGetHistory,
   handleGetUnread,
+  handleSearchMessages,
+  handleMarkRead,
   handleDownloadAttachment,
 } from "./tools-messages.js";
 import { runHealth, serializeHealthReport } from "./health-adapters.js";
 import { assertLabeledPrReferences } from "./outbound-style.js";
+import { errorDetail, toolErrorResult } from "./protocol-status.js";
+
+type ReplySender = typeof sendMessage;
+let replySender: ReplySender = sendMessage;
+
+export function setReplySender(sender: ReplySender): void {
+  replySender = sender;
+}
+
+export function resetReplySender(): void {
+  replySender = sendMessage;
+}
 
 export function registerTools(mcp: Server): void {
   mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -99,8 +113,12 @@ export function registerTools(mcp: Server): void {
         name: "get_history",
         description:
           "Get message history for a chat from the local DB. " +
-          "Returns {coverage, count, messages} — messages are inbound and " +
-          "outbound in chronological order, and `coverage` states whether " +
+          "Returns {coverage, count, total, messages}. messages is the " +
+          "LATEST page: the most recent `limit` messages, inbound and " +
+          "outbound, listed oldest-to-newest; `offset` pages further back. " +
+          "`count` is rows on this page and `total` is every stored message " +
+          "in the chat, so count < total means older history exists. " +
+          "`coverage` states whether " +
           "this store can VOUCH for that window: coverage.verdict is " +
           "'covered' (ingestion is live, so what you see is what arrived) or " +
           "'unverifiable' (the poller was not demonstrably alive, or a gap " +
@@ -119,7 +137,9 @@ export function registerTools(mcp: Server): void {
             },
             offset: {
               type: "number",
-              description: "Number of messages to skip. Default: 0.",
+              description:
+                "How many of the most recent messages to skip: 0 is the " +
+                "latest page, offset=limit the page before it. Default: 0.",
             },
           },
           required: ["chat_id"],
@@ -129,7 +149,8 @@ export function registerTools(mcp: Server): void {
         name: "get_unread",
         description:
           "Get unread inbound messages, optionally filtered by chat_id. " +
-          "Returns {coverage, count, messages}. An EMPTY messages array is " +
+          "Returns {coverage, count, total, messages}; nothing is paged, so " +
+          "total equals count. An EMPTY messages array is " +
           "only evidence that nothing was sent when coverage.verdict is " +
           "'covered'; when it is 'unverifiable' the store could not observe " +
           "that window at all, so treat the silence as UNKNOWN and act on " +
@@ -151,7 +172,10 @@ export function registerTools(mcp: Server): void {
         name: "mark_read",
         description:
           "Mark messages as read. Pass either chat_id (marks all unread in that chat) " +
-          "or message_ids (array of DB row IDs to mark individually).",
+          "or message_ids (array of DB row IDs to mark individually). The answer " +
+          "counts what was ACTUALLY marked and names ids that were not found or " +
+          "were already read / outbound; a row in a chat outside the allowlist " +
+          "refuses the whole call.",
         inputSchema: {
           type: "object" as const,
           properties: {
@@ -162,7 +186,9 @@ export function registerTools(mcp: Server): void {
             message_ids: {
               type: "array",
               items: { type: "number" },
-              description: "Array of DB row IDs to mark as read.",
+              description:
+                "DB row ids to mark as read: the row_id in the <channel> meta, " +
+                "NOT Telegram's message_id.",
             },
           },
         },
@@ -226,7 +252,12 @@ export function registerTools(mcp: Server): void {
         name: "search_messages",
         description:
           "Text search across stored messages using LIKE matching. " +
-          "Returns matching messages in reverse chronological order.",
+          "Returns {coverage, count, total, messages} — the same shape as " +
+          "get_history and get_unread — with matches in reverse " +
+          "chronological order; `total` is every match, so count < total " +
+          "means `limit` cut the results. An EMPTY messages array means nothing " +
+          "matched ONLY when coverage.verdict says this store can vouch " +
+          "for the window; otherwise treat it as UNKNOWN, not as absence.",
         inputSchema: {
           type: "object" as const,
           properties: {
@@ -325,23 +356,68 @@ export function registerTools(mcp: Server): void {
           const rowId = args.row_id != null ? Number(args.row_id) : undefined;
           const shouldMarkRead = args.mark_read !== false;
           assertAllowedChat(chatId);
-          const msgId = await sendMessage(chatId, text, replyTo);
+          let target;
           try {
-            await saveOutbound(chatId, text, String(msgId), rowId, {
+            const byMessage =
+              replyTo === undefined
+                ? undefined
+                : await resolveInboundReplyTarget(chatId, String(replyTo));
+            const byRow =
+              rowId === undefined
+                ? undefined
+                : await resolveInboundReplyTargetByRowId(chatId, rowId);
+            if (byMessage && byRow && byMessage.rowId !== byRow.rowId) {
+              throw new Error(
+                `reply_to message ${replyTo} resolves to row ${byMessage.rowId}, ` +
+                  `but row_id names ${byRow.rowId}`,
+              );
+            }
+            target = byMessage ?? byRow;
+          } catch (err) {
+            return toolErrorResult(
+              "reply",
+              err,
+              `Reply target correlation failed before Telegram delivery: ${errorDetail(err)}`,
+              "Use chat_id, reply_to, and row_id from the same inbound channel message.",
+            );
+          }
+          const msgId = await replySender(chatId, text, replyTo);
+          try {
+            const context = {
               host: HOST_NAME,
               project: PROJECT,
               agent_id: AGENT_ID,
               bot_token_hash: BOT_TOKEN_HASH,
-            });
-            // Mark the inbound as read if requested
-            if (shouldMarkRead && rowId) {
-              await markRead(rowId);
+            };
+            if (target) {
+              await saveExplicitReply(
+                target,
+                text,
+                String(msgId),
+                context,
+                shouldMarkRead,
+              );
+            } else {
+              await saveOutbound(
+                chatId,
+                text,
+                String(msgId),
+                undefined,
+                context,
+              );
             }
           } catch (err) {
-            const errMsg = err instanceof Error ? err.message : String(err);
+            const errMsg = errorDetail(err);
             log("tools", "failed to save outbound to store", {
               error: errMsg,
             });
+            return toolErrorResult(
+              "reply",
+              err,
+              `Telegram accepted the reply as message ${msgId}, but the durable outbound receipt was not recorded: ${errMsg}`,
+              "Do not resend blindly: Telegram already accepted this message. Restore the message store, then reconcile message_id " +
+                `${msgId} and retry only the missing receipt write.`,
+            );
           }
           return { content: [{ type: "text", text: `sent (id: ${msgId})` }] };
         }
@@ -377,42 +453,8 @@ export function registerTools(mcp: Server): void {
         case "get_unread":
           return handleGetUnread(args);
         case "mark_read": {
-          const chatId = args.chat_id as string | undefined;
-          const messageIds = args.message_ids as number[] | undefined;
-          if (chatId) {
-            assertAllowedChat(chatId);
-            await markAllRead(chatId);
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: `marked all unread in ${chatId} as read`,
-                },
-              ],
-            };
-          }
-          if (messageIds && messageIds.length > 0) {
-            for (const id of messageIds) {
-              await markRead(id);
-            }
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: `marked ${messageIds.length} message(s) as read`,
-                },
-              ],
-            };
-          }
-          return {
-            content: [
-              {
-                type: "text",
-                text: "provide chat_id or message_ids to mark as read",
-              },
-            ],
-            isError: true,
-          };
+          // Counts what it actually marked, and checks every row's chat.
+          return await handleMarkRead(args);
         }
         case "download_attachment":
           return await handleDownloadAttachment(args);
@@ -427,16 +469,11 @@ export function registerTools(mcp: Server): void {
             content: [{ type: "text", text: `document sent (id: ${msgId})` }],
           };
         }
-        case "search_messages": {
-          const query = args.query as string;
-          const chatId = args.chat_id as string | undefined;
-          const limit = (args.limit as number) ?? 20;
-          if (chatId) assertAllowedChat(chatId);
-          const rows = searchMessages(query, chatId, limit);
-          return {
-            content: [{ type: "text", text: JSON.stringify(rows, null, 2) }],
-          };
-        }
+        case "search_messages":
+          // Same declared {coverage, count, total, messages} shape as get_history
+          // and get_unread — see handleSearchMessages for why a bare array
+          // (and before #140, a bare {}) was not enough.
+          return await handleSearchMessages(args);
         case "health": {
           // Architecture fix (incident-cct-inbound-dies-silently-with-mcp-
           // server-20260711 follow-up, 2026-07): this server process is NO
@@ -459,7 +496,9 @@ export function registerTools(mcp: Server): void {
           const chatId = args.chat_id as string;
           const maxMessages = (args.max_messages as number) ?? 10;
           assertAllowedChat(chatId);
-          const context = getConversationContext(chatId, maxMessages);
+          // AWAITED: the store went async in #132. Un-awaited, a Promise
+          // reached the MCP content schema and every call failed validation.
+          const context = await getConversationContext(chatId, maxMessages);
           return {
             content: [{ type: "text", text: context }],
           };
@@ -473,11 +512,7 @@ export function registerTools(mcp: Server): void {
           };
       }
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return {
-        content: [{ type: "text", text: `${req.params.name} failed: ${msg}` }],
-        isError: true,
-      };
+      return toolErrorResult(req.params.name, err);
     }
   });
 }

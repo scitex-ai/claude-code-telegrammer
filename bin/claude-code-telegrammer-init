@@ -4,9 +4,11 @@
 #
 # Usage: claude-code-telegrammer-init --session cld-telegram --config telegram-master.yaml
 #
-# Requires: yq (or python3 with PyYAML as fallback)
+# Requires: yq (or python3 with PyYAML as fallback); bun to resolve where
+# access.json goes when the config asks for Telegram access.
 
 set -euo pipefail
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/lib/common.sh"
 
 SESSION=""
 CONFIG=""
@@ -64,7 +66,11 @@ AUTO_CONNECT=$(echo "$PARSED" | python3 -c "import sys,json; d=json.load(sys.std
 ALLOWED_USERS=$(echo "$PARSED" | python3 -c "import sys,json; d=json.load(sys.stdin); users=d.get('telegram',{}).get('allowed_users',[]); print(json.dumps(users))")
 
 if [[ "$AUTO_CONNECT" == "true" && "$ALLOWED_USERS" != "[]" ]]; then
-    ACCESS_DIR="${CLAUDE_CODE_TELEGRAMMER_STATE_DIR:-$HOME/.scitex/agent-container/telegram}"
+    # The state dir the MCP server reads access.json from, resolved by
+    # ts/lib/config.ts itself: CCT_AGENT_STATE_DIR / CLAUDE_CODE_TELEGRAMMER_AGENT_STATE_DIR,
+    # else ~/.scitex/claude-code-telegrammer/runtime/<agent id>. The renamed
+    # CLAUDE_CODE_TELEGRAMMER_STATE_DIR it used to read is refused at startup.
+    ACCESS_DIR="$(telegrammer_state_dir)"
     mkdir -p "$ACCESS_DIR"
     python3 -c "
 import json
