@@ -289,10 +289,23 @@ export function checkPollerAlive(probe: PollerProbe | null): CheckOutcome {
         ok: false,
         detail:
           `recorded poller pid ${probe.pidfilePid} (from ${probe.pidfilePath}) ` +
-          "is NOT alive (kill-0 failed)",
-        hint: restartHint,
+          "is NOT alive (kill-0 failed). This is a SUPERSEDED RECORD, not " +
+          "necessarily a dead rail: the per-token pidfile is written by a " +
+          "process that a restart replaces, and the successor does not always " +
+          "re-claim it. A recorded pid that is dead is WEAKER evidence than " +
+          "inbound recency - read inbound_recency before concluding anything.",
+        hint:
+          "Corroborate with the inbound_recency check. If recency is fresh, " +
+          "messages ARE being ingested and this entry is a stale record; " +
+          "restarting on it alone would interrupt a working rail.",
       },
-      warn: false,
+      // WARN, NOT FAIL. Measured 2026-09-19: a healthy rail with a live server
+      // and fresh inbound was reported as FAILING here, purely because the
+      // pidfile predated the successor by 65 seconds. A check that cries DOWN
+      // at a working rail is an auto-restart trigger, and acting on it would
+      // CREATE the outage it claims to detect. The real liveness signal is
+      // inbound recency; this entry is provenance about who claimed the file.
+      warn: true,
     };
   }
   if (probe.lockPid !== null) {
