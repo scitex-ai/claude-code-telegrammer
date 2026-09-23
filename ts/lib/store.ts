@@ -117,6 +117,22 @@ export async function initStore(): Promise<void> {
  */
 async function applySchema(schema: string): Promise<void> {
   const sql = getSql();
+  // Managed-store contract: the schema is project-owned and already exists
+  // with DML grants to the runtime role (lead-agent topology). CREATE SCHEMA
+  // / CREATE TABLE need ownership the role does not hold, so when the
+  // namespace is already usable, skip the DDL batch entirely. A plain
+  // SELECT the granted role CAN run decides — not a failed CREATE.
+  const usable = await sql.unsafe(
+    "SELECT 1 FROM information_schema.schemata WHERE schema_name = $1 LIMIT 1",
+    [schema],
+  );
+  if (usable.length > 0) {
+    const probe = await sql.unsafe(
+      "SELECT 1 FROM information_schema.tables WHERE table_schema = $1 AND table_name = 'messages' LIMIT 1",
+      [schema],
+    );
+    if (probe.length > 0) return;
+  }
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
       await sql.unsafe(schemaSql(schema)).simple();
