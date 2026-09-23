@@ -79,6 +79,17 @@ export async function ensureColumn(
   decl: string,
 ): Promise<void> {
   const target = `${quoteSchema(schema)}.${quoteIdent(table)}`;
+  // Managed-store contract: the runtime role may hold DML grants without
+  // table ownership (lead-agent schemas are owned by their project roles).
+  // ALTER TABLE always requires ownership, so check first with a plain
+  // SELECT the granted role CAN run; when the column is already there the
+  // DDL is skipped entirely. Only a genuinely missing column attempts the
+  // ALTER (and surfaces ownership errors loudly, as before).
+  const here = await getSql().unsafe(
+    "SELECT 1 FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2 AND column_name = $3 LIMIT 1",
+    [schema, table, column],
+  );
+  if (here.length > 0) return;
   try {
     await getSql().unsafe(
       `ALTER TABLE ${target} ADD COLUMN IF NOT EXISTS ${quoteIdent(column)} ${decl}`,
