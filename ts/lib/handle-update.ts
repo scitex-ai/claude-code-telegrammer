@@ -378,6 +378,24 @@ export async function handleUpdate(update: any): Promise<UpdateStatus> {
     deliveredText = `${replyDescriptor(replyCtx)}\n${deliveredText}`;
   }
 
+  // REPLY DIRECTIVE (operator order 2026-09-28).
+  //
+  // The operator must be answered over CCT/Telegram for every inbound
+  // message, and agents have repeatedly failed to do so on memory and
+  // spec prompts alone. The content string is the only carrier guaranteed
+  // to reach every harness (same reason attachmentDescriptor rides in the
+  // content), so the directive rides there, appended: it applies to the
+  // whole message, body included.
+  // Kill-switch: CLAUDE_CODE_TELEGRAMMER_REPLY_DIRECTIVE=0 (or CCT_REPLY_DIRECTIVE=0).
+  const _replyDirectiveOff =
+    process.env.CLAUDE_CODE_TELEGRAMMER_REPLY_DIRECTIVE === "0" ||
+    process.env.CCT_REPLY_DIRECTIVE === "0";
+  if (!_replyDirectiveOff) {
+    deliveredText =
+      `${deliveredText}\n\n必ずCCTで返事をしてください ` +
+      `(reply to the operator over CCT/Telegram).`;
+  }
+
   log("poller", `delivering message from ${userId} in ${chatId}`, {
     text: text.slice(0, 50),
     row_id: rowId,
