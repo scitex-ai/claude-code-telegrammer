@@ -304,7 +304,7 @@ const MCP_INSTRUCTIONS = [
   'carries reply_to_message_id="...", and the content line is prefixed with:',
   '  [in-reply-to message_id=8293 from=bot:@YourBot text="…which option, A or B?"]',
   "Read that FIRST — it is what a one-word reply refers to. A long target is",
-  "cut at 512 chars and marked truncated_from=<N>; call get_history for the",
+  "cut at 1024 chars and marked truncated_from=<N>; call get_history for the",
   "rest. text=UNRESOLVED means the reply target could not be recovered — say",
   "so rather than guessing which message was meant.",
   "",

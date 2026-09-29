@@ -378,7 +378,8 @@ export async function handleUpdate(update: any): Promise<UpdateStatus> {
     deliveredText = `${replyDescriptor(replyCtx)}\n${deliveredText}`;
   }
 
-  // REPLY DIRECTIVE (operator order 2026-09-28).
+  // REPLY DIRECTIVE (operator order 2026-09-28, softened 2026-09-29:
+  // keep it to one short clause — the long form confused readers).
   //
   // The operator must be answered over CCT/Telegram for every inbound
   // message, and agents have repeatedly failed to do so on memory and
@@ -391,9 +392,7 @@ export async function handleUpdate(update: any): Promise<UpdateStatus> {
     process.env.CLAUDE_CODE_TELEGRAMMER_REPLY_DIRECTIVE === "0" ||
     process.env.CCT_REPLY_DIRECTIVE === "0";
   if (!_replyDirectiveOff) {
-    deliveredText =
-      `${deliveredText}\n\n必ずCCTで返事をしてください ` +
-      `(reply to the operator over CCT/Telegram).`;
+    deliveredText = `${deliveredText}\n\n返信はCCTで。`;
   }
 
   log("poller", `delivering message from ${userId} in ${chatId}`, {

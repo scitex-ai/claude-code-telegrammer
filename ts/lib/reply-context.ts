@@ -56,11 +56,14 @@ import { mediaPlaceholders } from "./forward.js";
  * cutting below ~500 would have truncated the median bot message: exactly
  * the reply targets this feature exists to explain.
  *
- * The ceiling still matters: Telegram permits 4096 (config.MAX_TEXT), so an
- * unbounded excerpt could add 4096 characters to every delivered line. 512
- * caps that at one eighth, which is affordable per message.
+ * Relaxed to 1024 on 2026-09-29 (operator order): truncation at 512 was
+ * cutting real reply targets often enough to confuse. The ceiling still
+ * matters: Telegram permits 4096 (config.MAX_TEXT), so an unbounded
+ * excerpt could add 4096 characters to every delivered line. 1024
+ * caps that at one quarter, affordable per message and twice as
+ * forgiving as the original cap.
  */
-export const REPLY_EXCERPT_MAX = 512;
+export const REPLY_EXCERPT_MAX = 1024;
 
 /** How the excerpt was obtained — the "no reply" vs "unresolved reply" axis. */
 export type ReplyResolution =
