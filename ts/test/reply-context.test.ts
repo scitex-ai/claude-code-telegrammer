@@ -132,8 +132,16 @@ describe("the real incident: message 8303 replying to 8293", () => {
     expect(delivered).toContain("案 A: 環境の同一性");
     expect(delivered).toContain("案 B: バイト単位の同一性");
 
-    // 3. The operator's actual message is still there, and still last.
-    expect(delivered.trimEnd().endsWith("A\n</channel>")).toBe(true);
+    // 3. The operator's actual message is still there, and still last
+    //    inside the channel block. Since dfc5d76 every delivery carries a
+    //    reply-directive trailer AFTER </channel>, so "last" is scoped to
+    //    the block, not the whole string.
+    expect(delivered).toContain("A\n</channel>");
+    expect(
+      delivered
+        .trimEnd()
+        .endsWith("(reply to the operator over CCT/Telegram)."),
+    ).toBe(true);
 
     // What the agent used to receive: a body of exactly "A". Pin that this
     // can never come back.
