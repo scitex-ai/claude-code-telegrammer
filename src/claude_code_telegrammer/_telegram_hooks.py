@@ -63,7 +63,7 @@ def provide_hooks() -> tuple[HookRule, ...]:
         HookRule(
             id="telegrammer.long-target-truncation-512",
             rule=(
-                "Cut a long in-reply-to target at 512 chars, mark it "
+                "Cut a long in-reply-to target at 1024 chars, mark it "
                 "truncated_from=<N>, and direct the reader to get_history "
                 "for the rest."
             ),

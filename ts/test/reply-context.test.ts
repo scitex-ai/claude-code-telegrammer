@@ -136,12 +136,10 @@ describe("the real incident: message 8303 replying to 8293", () => {
     //    the reply-directive trailer INSIDE the closing tag (dfc5d76
     //    appends to deliveredText after </channel> was composed, so the
     //    trailer lands before it, not after).
-    expect(delivered).toContain("A\n\n必ずCCTで返事をしてください");
-    expect(
-      delivered
-        .trimEnd()
-        .endsWith("(reply to the operator over CCT/Telegram).\n</channel>"),
-    ).toBe(true);
+    expect(delivered).toContain("A\n\n返信はCCTで。");
+    expect(delivered.trimEnd().endsWith("返信はCCTで。\n</channel>")).toBe(
+      true,
+    );
 
     // What the agent used to receive: a body of exactly "A". Pin that this
     // can never come back.
@@ -169,8 +167,8 @@ describe("the real incident: message 8303 replying to 8293", () => {
 });
 
 describe("the excerpt limit", () => {
-  test("is 512 code points — above the 509-char maximum of the real corpus", () => {
-    expect(REPLY_EXCERPT_MAX).toBe(512);
+  test("is 1024 code points — relaxed from 512 on 2026-09-29 (operator order)", () => {
+    expect(REPLY_EXCERPT_MAX).toBe(1024);
     // The real reply target (416) is comfortably inside it.
     expect(REAL_TARGET_TEXT.length).toBeLessThan(REPLY_EXCERPT_MAX);
   });
@@ -186,21 +184,21 @@ describe("the excerpt limit", () => {
     };
   }
 
-  test("a longer target is cut at exactly 512 and the cut is MARKED", () => {
-    const ctx = parseReplyContext(replyTo("あ".repeat(600)))!;
+  test("a longer target is cut at exactly 1024 and the cut is MARKED", () => {
+    const ctx = parseReplyContext(replyTo("あ".repeat(1200)))!;
     expect(ctx.truncated).toBe(true);
-    expect(ctx.full_length).toBe(600);
-    expect(Array.from(ctx.excerpt!).length).toBe(512);
+    expect(ctx.full_length).toBe(1200);
+    expect(Array.from(ctx.excerpt!).length).toBe(1024);
 
     const line = replyDescriptor(ctx);
-    expect(line).toContain("truncated_from=600");
+    expect(line).toContain("truncated_from=1200");
     expect(line).toContain("— call get_history(chat_id) for the full text]");
     expect(line).toContain("あ…"); // the ellipsis marks where it was cut
   });
 
   test("truncation is code-point safe — an emoji is never split in half", () => {
-    const ctx = parseReplyContext(replyTo("🙂".repeat(600)))!;
-    expect(Array.from(ctx.excerpt!).length).toBe(512);
+    const ctx = parseReplyContext(replyTo("🙂".repeat(1200)))!;
+    expect(Array.from(ctx.excerpt!).length).toBe(1024);
     // A UTF-16 slice would have left a lone surrogate here.
     expect(ctx.excerpt).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
     expect(ctx.excerpt!.endsWith("🙂")).toBe(true);
