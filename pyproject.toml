@@ -57,6 +57,14 @@ packages = ["src/claude_code_telegrammer"]
 "ts/telegram-poller.ts" = "claude_code_telegrammer/ts/telegram-poller.ts"
 "ts/telegram-server.ts" = "claude_code_telegrammer/ts/telegram-server.ts"
 
+[project.entry-points."scitex_dev.hooks"]
+# Telegram guardrails CCT declares about its own delivery surface; CCT owns
+# the rules, scitex-dev discovers this provider and applies the rows
+# centrally. The provider imports scitex_dev.hooks LAZILY, so this entry
+# point ships and stays inert on a scitex-dev that predates the hooks
+# contract instead of breaking import-time metadata.
+claude-code-telegrammer = "claude_code_telegrammer._telegram_hooks:provide_hooks"
+
 [tool.hatch.build.targets.sdist]
 include = [
     "src/claude_code_telegrammer",
