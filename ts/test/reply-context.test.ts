@@ -136,12 +136,10 @@ describe("the real incident: message 8303 replying to 8293", () => {
     //    the reply-directive trailer INSIDE the closing tag (dfc5d76
     //    appends to deliveredText after </channel> was composed, so the
     //    trailer lands before it, not after).
-    expect(delivered).toContain("A\n\n必ずCCTで返事をしてください");
-    expect(
-      delivered
-        .trimEnd()
-        .endsWith("(reply to the operator over CCT/Telegram).\n</channel>"),
-    ).toBe(true);
+    expect(delivered).toContain("A\n\n返信はCCTで。");
+    expect(delivered.trimEnd().endsWith("返信はCCTで。\n</channel>")).toBe(
+      true,
+    );
 
     // What the agent used to receive: a body of exactly "A". Pin that this
     // can never come back.
