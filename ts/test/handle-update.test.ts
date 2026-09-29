@@ -199,6 +199,11 @@ describe("handleUpdate: a failed wake falls back to the notify relay", () => {
   }
 
   test("wake FAILURE still delivers via relay — no per-message loud-fail reply", async () => {
+    // Wake retry (CCT_WAKE_MAX_ATTEMPTS) would add attempts before the
+    // fallback this test pins; single attempt preserves the exact timing
+    // the test was written for, and the fallback path is unchanged.
+    const _savedAttempts = process.env.CCT_WAKE_MAX_ATTEMPTS;
+    process.env.CCT_WAKE_MAX_ATTEMPTS = "1";
     const loudFails: string[] = [];
     setLoudFailSender(async (_chatId, text) => {
       loudFails.push(text); // stubbed: a test must never post to real Telegram
@@ -224,6 +229,8 @@ describe("handleUpdate: a failed wake falls back to the notify relay", () => {
     expect(loudFails.length).toBe(0);
 
     _resetLoudFail();
+    if (_savedAttempts === undefined) delete process.env.CCT_WAKE_MAX_ATTEMPTS;
+    else process.env.CCT_WAKE_MAX_ATTEMPTS = _savedAttempts;
   });
 
   test("wake SUCCESS queues nothing (no 'sent twice' regression)", async () => {

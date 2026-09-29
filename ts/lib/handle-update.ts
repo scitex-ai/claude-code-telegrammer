@@ -478,8 +478,45 @@ export async function handleUpdate(update: any): Promise<UpdateStatus> {
   // is positively observed still pending, the reply instead says the agent
   // is busy and that CCT retained/queued the message for automatic retry; it
   // never asks the operator to resend a row the relay already owns.
+  // WAKE RETRY (operator order 2026-09-29). A busy session answers wake
+  // with 5xx while mid-tool-execution; a single attempt then drops the
+  // message to the pending path, and for Hermes harnesses the notify
+  // relay has no live MCP client to drain it with. Retry the wake itself
+  // first: up to WAKE_MAX_ATTEMPTS with WAKE_RETRY_DELAY_MS between,
+  // so a turn that frees within ~2 min still receives the message live.
+  // Env overrides: CCT_WAKE_MAX_ATTEMPTS / CCT_WAKE_RETRY_DELAY_MS.
+  // Kill-switch: CCT_WAKE_RETRY=0 restores single-attempt behaviour.
+  const _wakeRetryOff = process.env.CCT_WAKE_RETRY === "0";
+  const _wakeMaxAttempts = Math.max(
+    1,
+    parseInt(process.env.CCT_WAKE_MAX_ATTEMPTS ?? "3", 10) || 3,
+  );
+  const _wakeRetryDelayMs = Math.max(
+    0,
+    parseInt(process.env.CCT_WAKE_RETRY_DELAY_MS ?? "45000", 10) || 45000,
+  );
+  const _sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  async function _wakeWithRetry(
+    text: string,
+    meta: unknown,
+  ): Promise<Awaited<ReturnType<typeof wakeTurn>>> {
+    let last = await wakeTurn(text, meta);
+    for (let attempt = 1; !last.ok && attempt < _wakeMaxAttempts; attempt++) {
+      log(
+        "poller",
+        `wake attempt ${attempt + 1}/${_wakeMaxAttempts} after ${last.category}: ${last.reason}`,
+      );
+      await _sleep(_wakeRetryDelayMs);
+      last = await wakeTurn(text, meta);
+    }
+    return last;
+  }
+  const _doWake = _wakeRetryOff
+    ? (text: string, meta: unknown) => wakeTurn(text, meta)
+    : _wakeWithRetry;
+
   if (wakeEnabled()) {
-    void wakeTurn(deliveredText, meta).then(async (result) => {
+    void _doWake(deliveredText, meta).then(async (result) => {
       if (result.ok) {
         await recordWakeSuccess(String(rowId));
         void markDone(chatId, String(msg.message_id));
