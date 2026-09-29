@@ -298,6 +298,8 @@ const MCP_INSTRUCTIONS = [
   'Messages arrive as <channel source="cct" chat_id="..." ',
   'message_id="..." row_id="..." user="..." ts="...">.',
   "Reply with the reply tool — pass chat_id and row_id back.",
+  "Technical terms stay in katakana or English as the operator uses",
+  "them (ライブラリ, never 書庫) — do not invent kanji translations.",
   "Use reply_to only when replying to an earlier message.",
   "",
   "When the sender is REPLYING to a specific message, the channel tag also",
