@@ -56,6 +56,42 @@ const DEAD_POLLER = {
 };
 
 describe("ingestion_live", () => {
+  test("fresh durable poll coverage remains measurable when host PID is unobservable", () => {
+    const report = buildHealthReport(healthyInputs({
+      now: NOW,
+      poller: { ...DEAD_POLLER, pidfileAlive: null },
+      db: dbWithHeartbeat(20_000),
+    }));
+
+    expect(byName(report, "ingestion_live")).toMatchObject({
+      ok: true, hint: null,
+    });
+    expect(byName(report, "poller_alive").evaluated).toBe(false);
+    expect(report.summary).toContain("unknown: poller_alive");
+  });
+
+  test("stale durable coverage fails loudly despite unobservable host PID", () => {
+    const report = buildHealthReport(healthyInputs({
+      now: NOW,
+      poller: { ...DEAD_POLLER, pidfileAlive: null },
+      db: dbWithHeartbeat(240 * MINUTE),
+    }));
+
+    expect(byName(report, "ingestion_live").ok).toBe(false);
+    expect(byName(report, "ingestion_live").evaluated).not.toBe(false);
+    expect(report.ok).toBe(false);
+  });
+
+  test("unobservable host PID with no durable poll coverage stays unknown", () => {
+    const c = byName(buildHealthReport(healthyInputs({
+      now: NOW,
+      poller: { ...DEAD_POLLER, pidfileAlive: null },
+      db: dbWithHeartbeat(null),
+    })), "ingestion_live");
+
+    expect(c).toMatchObject({ ok: false, evaluated: false });
+  });
+
   test("THE OUTAGE: process alive, heartbeat frozen → LOUD failure", () => {
     // The exact shape of 2026-08-10: pid up, polls failing, nothing arriving.
     const report = buildHealthReport(

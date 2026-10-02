@@ -252,7 +252,7 @@ export function checkWebhookAbsent(probe: WebhookProbe | null): CheckOutcome {
   };
 }
 
-/** 6. poller_alive — recorded poller PID is alive (kill-0, PID-ns safe). */
+/** 6. poller_alive — namespace-local evidence about the recorded poller. */
 export function checkPollerAlive(probe: PollerProbe | null): CheckOutcome {
   if (probe === null) return skippedDisabled("poller_alive");
   if (probe.kind === "self") {
@@ -269,15 +269,24 @@ export function checkPollerAlive(probe: PollerProbe | null): CheckOutcome {
   const restartHint =
     "restart the agent/bridge (e.g. `sac agent restart <agent>` or relaunch " +
     "the MCP server) so a live poller re-claims the per-token pidfile.";
+  const unobservable = (pid: number) => unknownCheck(
+    "poller_alive",
+    `recorded pid ${pid} cannot be inspected in this process namespace; ` +
+      "this does not establish that the host poller is dead or the record stale",
+    "Read ingestion_live and inbound_recency for this bot namespace. " +
+      "Verify the canonical poller from its owning host before any restart; " +
+      "do not create a second poller on this observation alone.",
+  );
   // Prefer the per-token pidfile (the authoritative "newest wins" record,
   // lib/takeover.ts); fall back to the single-instance lock file.
   if (probe.pidfilePid !== null) {
+    if (probe.pidfileAlive === null) return unobservable(probe.pidfilePid);
     if (probe.pidfileAlive) {
       return {
         entry: {
           name: "poller_alive",
           ok: true,
-          detail: `poller pid ${probe.pidfilePid} (from ${probe.pidfilePath}) is alive (kill-0)`,
+          detail: `poller pid ${probe.pidfilePid} (from ${probe.pidfilePath}) matches this agent in the observer's namespace (kill-0 and process identity)`,
           hint: null,
         },
         warn: false,
@@ -289,14 +298,13 @@ export function checkPollerAlive(probe: PollerProbe | null): CheckOutcome {
         ok: false,
         detail:
           `recorded poller pid ${probe.pidfilePid} (from ${probe.pidfilePath}) ` +
-          "is NOT alive (kill-0 failed). This is a SUPERSEDED RECORD, not " +
-          "necessarily a dead rail: the per-token pidfile is written by a " +
-          "process that a restart replaces, and the successor does not always " +
-          "re-claim it. A recorded pid that is dead is WEAKER evidence than " +
-          "inbound recency - read inbound_recency before concluding anything.",
+          "does not match this agent's poller in the observer's namespace. " +
+          "This does not establish that a poller in another PID namespace " +
+          "is dead or that its claim is stale. Read ingestion_live and " +
+          "inbound_recency before concluding anything about the rail.",
         hint:
           "Corroborate with the inbound_recency check. If recency is fresh, " +
-          "messages ARE being ingested and this entry is a stale record; " +
+          "messages ARE being ingested despite this process observation; " +
           "restarting on it alone would interrupt a working rail.",
       },
       // WARN, NOT FAIL. Measured 2026-09-19: a healthy rail with a live server
@@ -309,13 +317,14 @@ export function checkPollerAlive(probe: PollerProbe | null): CheckOutcome {
     };
   }
   if (probe.lockPid !== null) {
+    if (probe.lockAlive === null) return unobservable(probe.lockPid);
     return {
       entry: {
         name: "poller_alive",
         ok: probe.lockAlive,
         detail: probe.lockAlive
-          ? `server pid ${probe.lockPid} (from the lock file) is alive (kill-0); no per-token pidfile yet`
-          : `recorded server pid ${probe.lockPid} (from the lock file) is NOT alive (kill-0 failed)`,
+          ? `server pid ${probe.lockPid} (from the lock file) matches this agent (kill-0 and process identity); no per-token pidfile yet`
+          : `recorded server pid ${probe.lockPid} (from the lock file) does not match this agent in the observer's namespace`,
         hint: probe.lockAlive ? null : restartHint,
       },
       warn: false,

@@ -121,18 +121,17 @@ export type WebhookProbe =
  * INSIDE the server process, and that process IS the poller — no pidfile
  * round-trip needed. "external" is the CLI variant: a fresh probe process
  * reads the state dir's lock file + per-token pidfile (lib/takeover.ts format)
- * and checks the recorded PID via process.kill(pid, 0) — NOT `ps -p`, because
- * PID-namespace boundaries (apptainer vs host) make `ps -p` lie while kill-0
- * survives them.
+ * and inspects the recorded PID in the observer's namespace. Host PIDs can be
+ * invisible to a container: null means unobservable, not dead or stale.
  */
 export type PollerProbe =
   | { kind: "self"; pid: number }
   | {
       kind: "external";
       lockPid: number | null;
-      lockAlive: boolean;
+      lockAlive: boolean | null;
       pidfilePid: number | null;
-      pidfileAlive: boolean;
+      pidfileAlive: boolean | null;
       pidfilePath: string;
     };
 

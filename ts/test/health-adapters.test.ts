@@ -128,6 +128,43 @@ describe("probePoller('external')", () => {
     }
   });
 
+  test("an exited child's recorded PID is unobservable, not proof of a dead host poller", async () => {
+    const child = Bun.spawn([process.execPath, "-e", "process.exit(0)"], {
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    await child.exited;
+    mkdirSync(STATE_DIR, { recursive: true });
+    writeFileSync(PIDFILE_PATH, `${child.pid}\n${Date.now()}\n`);
+
+    expect(probePoller("external")).toMatchObject({
+      pidfilePid: child.pid,
+      pidfileAlive: null,
+    });
+  });
+
+  test("a visible poller process belonging to a different agent is rejected", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cct-health-adapters-"));
+    const fixture = join(dir, "telegram-poller-marker-fixture.ts");
+    writeFileSync(fixture, "setTimeout(() => {}, 5000);\n");
+    const child = Bun.spawn([process.execPath, "run", fixture], {
+      env: { ...process.env, CCT_AGENT_ID: "foreign-agent" },
+      stdout: "ignore",
+      stderr: "ignore",
+    });
+    try {
+      await waitForCmdline(child.pid, "telegram-poller-marker-fixture");
+      mkdirSync(STATE_DIR, { recursive: true });
+      writeFileSync(PIDFILE_PATH, `${child.pid}\n${Date.now()}\n`);
+
+      expect(probePoller("external").pidfileAlive).toBe(false);
+    } finally {
+      child.kill();
+      await child.exited;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test("lock file records a real process whose cmdline DOES match the server marker -> lockAlive:true", async () => {
     const dir = mkdtempSync(join(tmpdir(), "cct-health-adapters-"));
     const fixture = join(dir, "telegram-server-marker-fixture.ts");
