@@ -12,13 +12,10 @@ scitex-dev that predates the hooks contract does not break the entry point's
 import-time metadata (same idiom as scitex-agent-container's
 ``_claude_hooks_plugin`` and its ``scitex_dev.jobs`` provider).
 
-DECLARE-THEN-MOVE. Rules 1-3 are enforced in-process by the TypeScript
-delivery path, which has no Python binding by construction, so they are
-declared with ``implemented_in`` naming the TS file that enforces them
-today. Rule 4's script lives at the repo-root ``hooks/`` tree, outside the
-Python package, so it is likewise declared with ``implemented_in``; moving
-the implementation under the package (the wheel already force-includes
-``ts/`` the same way) is the follow-on, deliberately not bundled here.
+The parenthetical-reference predicate is packaged Python SSOT, shared by
+its TypeScript adapter and import-based consumers. Other rows retain their
+existing DECLARE-THEN-MOVE implementation locators. Discovery remains lazy;
+installation belongs to the aggregator, never this provider.
 """
 
 from __future__ import annotations
@@ -86,7 +83,7 @@ def provide_hooks() -> tuple[HookRule, ...]:
             id="telegrammer.no-bare-issue-number",
             rule=(
                 "Every #NNN in an operator-facing message carries an "
-                "immediate label in the same clause; bare numbers are "
+                "parenthetical description immediately after the number; bare numbers are "
                 "rejected before Telegram delivery."
             ),
             reason=(
@@ -99,9 +96,8 @@ def provide_hooks() -> tuple[HookRule, ...]:
             severity="deny",
             matches=("cct-delivery",),
             provider=_PROVIDER,
-            implemented_in=(
-                "claude-code-telegrammer:ts/lib/outbound-style.ts"
-            ),
+            check="claude_code_telegrammer._telegram_rules:check_message",
+            bypass="CC_ALLOW_BARE_ISSUE",
         ),
         HookRule(
             id="telegrammer.background-subagents",

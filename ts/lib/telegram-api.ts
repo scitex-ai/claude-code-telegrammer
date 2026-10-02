@@ -4,6 +4,7 @@
 
 import { API_BASE, FILE_BASE, MAX_TEXT } from "./config.js";
 import { appendSignature } from "./signature.js";
+import { assertLabeledPrReferences } from "./outbound-style.js";
 import { mkdirSync, readFileSync } from "fs";
 import { join, basename, extname } from "path";
 
@@ -215,6 +216,8 @@ export async function sendMessage(
   text: string,
   replyTo?: number,
 ): Promise<number> {
+  // Validate the whole message so later chunks keep same-message inheritance.
+  assertLabeledPrReferences(text);
   // Sign BEFORE splitting: appendSignature is idempotent, and signing the
   // whole text first means the splitter naturally keeps the signature on
   // the tail chunk regardless of where the body cuts. This avoids the
@@ -271,6 +274,7 @@ export async function sendDocument(
   filePath: string,
   caption?: string,
 ): Promise<number> {
+  assertLabeledPrReferences(caption ?? "");
   const fileBytes = readFileSync(filePath);
   const fileName = basename(filePath);
 
@@ -323,6 +327,7 @@ export async function editMessageText(
   messageId: number,
   text: string,
 ): Promise<{ message_id: number }> {
+  assertLabeledPrReferences(text);
   const signed = appendSignature(text);
   return tgApi("editMessageText", {
     chat_id: chatId,

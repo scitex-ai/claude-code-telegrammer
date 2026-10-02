@@ -1,41 +1,61 @@
-/** Operator-facing outbound message style gates.
+/** Thin adapter to the operator's canonical Telegram rule.
  *
- * PR numbers are not useful on a phone without their meaning. Every `#123`
- * reference must therefore carry an immediate label in the same clause:
+ * The shell hook and every CCT send path must use the SAME rule and refusal
+ * wording. Keep policy in _telegram_rules.py; do not add a second regexp here.
+ * Its issue references, repeated-description inheritance, URL/code/colour
+ * exceptions and ASCII/fullwidth parentheses remain authoritative.
  *
- *   #123 — agentic ACK protocol
- *   #123: fix login redirect
- *   #123 (Landing V2)
- *
- * A URL may still be sent without a hash token. This validator rejects before
- * Telegram delivery; it does not rewrite text or guess a title.
+ * CCT ships the canonical predicate beside its packaged TypeScript runtime.
+ * The normal Python launcher supplies its own interpreter; HOME is irrelevant.
+ * An unavailable or malformed rule response is a validation failure, before
+ * delivery. This adapter never formats a PR title or rewrites message text.
  */
 
-const PR_REFERENCE = /#\d+\b/g;
-const LABELED_SUFFIX = /^\s*(?:—|–|-|:|\()\s*([^\n,#;/]{3,})/;
+import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 
-function hasMeaningfulText(label: string): boolean {
-  return label.replace(/[\s\d._()[\]{}:;,#/\\-]/g, "").length > 0;
+interface Verdict {
+  ok: boolean;
+  token?: string;
+  message?: string;
 }
 
-export function unlabeledPrReferences(text: string): string[] {
-  const failures: string[] = [];
-  const matcher = new RegExp(PR_REFERENCE.source, "g");
-  let match: RegExpExecArray | null;
-  while ((match = matcher.exec(text)) !== null) {
-    const suffix = text.slice(match.index + match[0].length);
-    const label = suffix.match(LABELED_SUFFIX)?.[1] ?? "";
-    if (!hasMeaningfulText(label)) failures.push(match[0]);
+function checkMessage(text: string): Verdict {
+  const python = process.env._CCT_PYTHON_EXECUTABLE;
+  if (!python) {
+    throw new Error("Cannot validate CCT message: use the packaged Python CLI launcher.");
   }
-  return failures;
+  const packaged = join(import.meta.dir, "..", "..", "_telegram_rules.py");
+  const source = join(import.meta.dir, "..", "..", "src", "claude_code_telegrammer", "_telegram_rules.py");
+  const rules = existsSync(packaged) ? packaged : source;
+  const result = spawnSync(python, [rules, "--text-stdin"], {
+    input: text,
+    encoding: "utf8",
+    timeout: 2000,
+    maxBuffer: 1024 * 1024,
+  });
+  if (result.error || result.status !== 0) {
+    throw new Error("Cannot validate CCT message: canonical Telegram rule is unavailable.");
+  }
+  let verdict: Verdict;
+  try {
+    verdict = JSON.parse(result.stdout);
+  } catch {
+    throw new Error("Cannot validate CCT message: canonical Telegram rule returned invalid JSON.");
+  }
+  if (verdict?.ok === true) return verdict;
+  if (verdict?.ok === false && typeof verdict.token === "string" && typeof verdict.message === "string" && verdict.message.length > 0) return verdict;
+  throw new Error("Cannot validate CCT message: canonical Telegram rule returned an invalid verdict.");
+}
+
+/** The canonical rule reports its first unreadable reference. */
+export function unlabeledPrReferences(text: string): string[] {
+  const verdict = checkMessage(text);
+  return verdict.ok ? [] : [verdict.token!];
 }
 
 export function assertLabeledPrReferences(text: string): void {
-  const failures = unlabeledPrReferences(text);
-  if (!failures.length) return;
-  throw new Error(
-    `unlabeled PR reference(s): ${failures.join(", ")}. ` +
-      "Write each as '#123 — what it changes' (or ': label' / '(label)'). " +
-      "Bare PR numbers are forbidden in operator-facing CCT messages.",
-  );
+  const verdict = checkMessage(text);
+  if (!verdict.ok) throw new Error(verdict.message);
 }
