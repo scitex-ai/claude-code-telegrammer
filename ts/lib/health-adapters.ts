@@ -184,12 +184,12 @@ export function probePoller(mode: "self" | "external"): PollerProbe {
     lockPid,
     lockAlive:
       lockPid !== null
-        ? observeHealthProcess(lockPid, SERVER_CMDLINE_MARKER, AGENT_ID)
+        ? observeHealthProcess(lockPid, SERVER_CMDLINE_MARKER)
         : false,
     pidfilePid,
     pidfileAlive:
       pidfilePid !== null
-        ? observeHealthProcess(pidfilePid, POLLER_CMDLINE_MARKER, AGENT_ID)
+        ? observeHealthProcess(pidfilePid, POLLER_CMDLINE_MARKER)
         : false,
     pidfilePath,
   };

@@ -11,7 +11,7 @@ import { matchesAgentIdentity } from "./takeover.js";
 export function observeHealthProcess(
   pid: number,
   marker: string,
-  expectedAgentId: string,
+  expectedAgentId: string = process.env.CCT_AGENT_ID || process.env.SAC_NAME || "",
 ): boolean | null {
   try {
     process.kill(pid, 0);

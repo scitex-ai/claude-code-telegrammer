@@ -165,6 +165,40 @@ describe("probePoller('external')", () => {
     }
   });
 
+  for (const identity of [
+    { label: "explicit CCT identity takes precedence", cct: "direct-agent", sac: "other-agent" },
+    { label: "SAC_NAME supplies identity when CCT identity is absent", cct: "", sac: "fallback-agent" },
+    { label: "no fleet identity preserves the marker-only development mode", cct: "", sac: "" },
+  ]) {
+    test(identity.label, async () => {
+      const savedCct = process.env.CCT_AGENT_ID;
+      const savedSac = process.env.SAC_NAME;
+      const dir = mkdtempSync(join(tmpdir(), "cct-health-identity-"));
+      const fixture = join(dir, "telegram-poller-marker-fixture.ts");
+      writeFileSync(fixture, "setTimeout(() => {}, 5000);\n");
+      process.env.CCT_AGENT_ID = identity.cct;
+      process.env.SAC_NAME = identity.sac;
+      const child = Bun.spawn([process.execPath, "run", fixture], {
+        env: { ...process.env }, stdout: "ignore", stderr: "ignore",
+      });
+      try {
+        await waitForCmdline(child.pid, "telegram-poller-marker-fixture");
+        mkdirSync(STATE_DIR, { recursive: true });
+        writeFileSync(PIDFILE_PATH, `${child.pid}\n${Date.now()}\n`);
+
+        expect(probePoller("external").pidfileAlive).toBe(true);
+      } finally {
+        if (savedCct === undefined) delete process.env.CCT_AGENT_ID;
+        else process.env.CCT_AGENT_ID = savedCct;
+        if (savedSac === undefined) delete process.env.SAC_NAME;
+        else process.env.SAC_NAME = savedSac;
+        child.kill();
+        await child.exited;
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  }
+
   test("lock file records a real process whose cmdline DOES match the server marker -> lockAlive:true", async () => {
     const dir = mkdtempSync(join(tmpdir(), "cct-health-adapters-"));
     const fixture = join(dir, "telegram-server-marker-fixture.ts");
