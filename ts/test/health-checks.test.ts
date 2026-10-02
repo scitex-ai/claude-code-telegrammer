@@ -13,6 +13,19 @@ import { SCHEMA_VERSION } from "../lib/store.js";
 import { FAKE_TOKEN, healthyInputs, byName } from "./health-fixtures.js";
 
 describe("poller_alive", () => {
+  test("unobservable external PID stays unknown and carries no dead/stale claim", () => {
+    const c = byName(buildHealthReport(healthyInputs({ poller: {
+      kind: "external", lockPid: null, lockAlive: false,
+      pidfilePid: 495394, pidfileAlive: null,
+      pidfilePath: "/synthetic/poller-test.pid",
+    } })), "poller_alive");
+
+    expect(c).toMatchObject({ ok: false, evaluated: false });
+    expect(c.detail).toContain("cannot be inspected");
+    expect(c.detail).not.toContain("SUPERSEDED RECORD");
+    expect(c.hint).toContain("do not create a second poller");
+  });
+
   test("self mode (MCP tool inside the server) → ok with own pid", () => {
     const c = byName(
       buildHealthReport(healthyInputs({ poller: { kind: "self", pid: 777 } })),

@@ -11,7 +11,7 @@
  * an outage go undetected while the doctor reported every other check ok
  * (incident incident-cct-inbound-dies-silently-with-mcp-server-20260711).
  * These two checks close it: one probes reachability live, the other
- * exposes the durable backlog signal so a health check run AFTER the fact
+ * exposes the durable failure signal so a health check run AFTER the fact
  * can still see it, even if the operator missed the per-message loud-fail
  * reply (lib/loudfail.ts).
  */
@@ -87,11 +87,11 @@ export function checkWakeTargetReachable(
 }
 
 /**
- * 12. wake_delivery_backlog — consecutive wake failures since the last
- * success. The durable signal a health check run AFTER the fact can still
+ * 12. wake_delivery_backlog — unresolved per-message wake failures. The
+ * durable signal a health check run AFTER the fact can still
  * see: even if the operator missed the per-message loud-fail reply, this
  * check makes it impossible for the doctor to report ok while messages
- * sit accepted-but-never-delivered.
+ * lack proven admission. This counter is not a bridge/CCT queue probe.
  */
 export function checkWakeDeliveryBacklog(
   state: WakeFailureState | null,
@@ -102,7 +102,7 @@ export function checkWakeDeliveryBacklog(
       entry: {
         name: "wake_delivery_backlog",
         ok: true,
-        detail: "no undelivered messages — the last wake attempt succeeded",
+        detail: "no unresolved wake failures recorded; this counter alone does not prove delivery or queue state",
         hint: null,
       },
       warn: false,
@@ -115,14 +115,16 @@ export function checkWakeDeliveryBacklog(
       name: "wake_delivery_backlog",
       ok: false,
       detail:
-        `${state.count} consecutive wake failure(s) since ${since} ` +
+        `${state.count} unresolved wake failure(s); latest at ${since} ` +
         `(most recent: ${state.lastCategory ?? "unknown"} — ` +
-        `${state.lastReason ?? "no detail"}). Every one of these inbound ` +
-        "messages was accepted by the bridge but never reached the agent.",
+        `${state.lastReason ?? "no detail"}). These wakes did not prove agent ` +
+        "admission. The failure counter does not establish bridge acceptance " +
+        "or queue state; a busy refusal can mean NOTHING WAS QUEUED at the bridge.",
       hint:
         "check wake_target_reachable for the likely cause. The operator " +
-        "already received a per-message loud-fail reply for each of these, " +
-        "but this is the signal a health check run afterwards can still see.",
+        "may have received a per-message loud-fail reply. Inspect the exact " +
+        "delivery's retained CCT notification/receipt before retrying it; " +
+        "the bridge's refusal and CCT's durable retry queue are separate.",
     },
     warn: false,
   };

@@ -144,7 +144,7 @@ function checkFromBody(body: string | undefined): ProtocolCheck | undefined {
         : parsed;
     if (
       typeof candidate.name === "string" &&
-      candidate.ok === false &&
+      (candidate.ok === false || candidate.ok === null) &&
       typeof candidate.detail === "string" &&
       typeof candidate.hint === "string"
     ) {
@@ -327,7 +327,9 @@ export async function wakeTurn(
     const status = typeof posted === "number" ? posted : posted.status;
     const check =
       typeof posted === "number" ? undefined : checkFromBody(posted.body);
-    if (status >= 200 && status < 300) return { ok: true, status };
+    // A structured refusal/unknown admission is not delivery, even when an
+    // upstream proxy wraps it in a successful transport status.
+    if (status >= 200 && status < 300 && !check) return { ok: true, status };
     log("wake", `WARNING: /v1/turn returned ${status}`, {
       level: "warning",
       turn_url: TURN_URL,

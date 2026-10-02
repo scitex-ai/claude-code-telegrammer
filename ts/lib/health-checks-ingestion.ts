@@ -29,6 +29,7 @@ import { unknownCheck } from "./health-checks.js";
 
 import type { DbProbe, PollerProbe } from "./health.js";
 import { skippedDisabled, type CheckOutcome } from "./health-checks.js";
+import { buildCoverage } from "./ingestion-coverage.js";
 
 /**
  * How stale the poll heartbeat may get before inbound counts as dead.
@@ -60,13 +61,16 @@ export function checkIngestionLive(
     return skippedDisabled("ingestion_live");
   }
 
-  // A dead poller is poller_alive's failure, not this one's. Double-failing
-  // makes one fault look like two and buries which one to fix.
-  const pollerAlive = poller.kind === "self" || poller.pidfileAlive;
-  if (!pollerAlive) {
+  // Follow poller_alive's preference for the per-token claim, then the lock.
+  // A known identity mismatch belongs to that check; unknown process scope
+  // does not prevent evaluation of independently persisted rail coverage.
+  const pollerAlive = poller.kind === "self" ? true :
+    poller.pidfilePid !== null ? poller.pidfileAlive : poller.lockAlive;
+  const unobservable = pollerAlive === null;
+  if (!pollerAlive && !unobservable) {
     return unknownCheck(
       "ingestion_live",
-      "the poller process is not running (poller_alive reports that failure)",
+      "the recorded process does not identify this agent's poller (see poller_alive)",
     );
   }
 
@@ -75,6 +79,33 @@ export function checkIngestionLive(
       "ingestion_live",
       "the store could not be read (see db_schema_current)",
     );
+  }
+
+  if (unobservable) {
+    // Existing durable getUpdates coverage is independent of PID visibility.
+    // It cannot establish host process ownership, but it can vouch for this
+    // bot namespace's ingestion without an extra poller or a host RPC.
+    const coverage = buildCoverage({
+      lastPollTs: db.lastPollTs ?? null,
+      lastGapAt: null,
+      lastGapMissedUpdates: null,
+      now,
+      stalenessThresholdMs: INGESTION_STALE_MS,
+    });
+    if (coverage.lastPollTs === null) {
+      return unknownCheck("ingestion_live", coverage.reason);
+    }
+    return {
+      entry: {
+        name: "ingestion_live",
+        ok: coverage.verdict === "covered",
+        detail: coverage.reason + " Host poller process identity remains unobserved.",
+        hint: coverage.verdict === "covered" ? null :
+          "Inspect the canonical host poller's routing logs and bot namespace; " +
+          "PID invisibility in this container alone is not a restart instruction.",
+      },
+      warn: false,
+    };
   }
 
   // Three-valued: "never stamped" is a first run, not a fault.

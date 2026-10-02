@@ -52,10 +52,10 @@ import type { CodeCurrencyProbe } from "./health-checks-code.js";
 import {
   pollerPidfilePath,
   readPidfile,
-  isProcessMatching,
   POLLER_CMDLINE_MARKER,
   SERVER_CMDLINE_MARKER,
 } from "./takeover.js";
+import { observeHealthProcess } from "./health-process.js";
 import { getSql, resolveSchema } from "./pg.js";
 import { statements } from "./store-schema.js";
 import { wakeEnabled } from "./wake.js";
@@ -126,11 +126,9 @@ export async function probeWebhook(): Promise<WebhookProbe> {
  * variant runs inside the server process, which IS the poller). "external"
  * reads the single-instance lock file + the per-token pidfile
  * (poller-<hash>.pid, lib/takeover.ts format) and verifies the recorded PIDs
- * via isProcessMatching (kill-0 PLUS a cmdline identity check — not `ps -p`,
- * because it survives PID-namespace boundaries; not a bare kill-0 either,
- * because a stale PID can be reused by the OS for an unrelated process,
- * which would otherwise read as a healthy poller — adversarial-review
- * finding #2).
+ * via namespace-local process and agent identity evidence. An invisible
+ * host PID is unknown, never proof that the external poller is dead. A visible
+ * unrelated or wrong-agent process remains a negative identity observation.
  */
 /**
  * Gather the inputs for the code_current check — "am I running the code that is
@@ -185,11 +183,14 @@ export function probePoller(mode: "self" | "external"): PollerProbe {
     kind: "external",
     lockPid,
     lockAlive:
-      lockPid !== null && isProcessMatching(lockPid, SERVER_CMDLINE_MARKER),
+      lockPid !== null
+        ? observeHealthProcess(lockPid, SERVER_CMDLINE_MARKER)
+        : false,
     pidfilePid,
     pidfileAlive:
-      pidfilePid !== null &&
-      isProcessMatching(pidfilePid, POLLER_CMDLINE_MARKER),
+      pidfilePid !== null
+        ? observeHealthProcess(pidfilePid, POLLER_CMDLINE_MARKER)
+        : false,
     pidfilePath,
   };
 }
