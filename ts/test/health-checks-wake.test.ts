@@ -96,7 +96,8 @@ describe("wake_delivery_backlog", () => {
       "wake_delivery_backlog",
     );
     expect(c.ok).toBe(true);
-    expect(c.detail).toContain("no undelivered messages");
+    expect(c.detail).toContain("no unresolved wake failures");
+    expect(c.detail).toContain("does not prove delivery");
   });
 
   test("count>0 → fail, detail names the count + category + reason; never silent", () => {
@@ -114,10 +115,12 @@ describe("wake_delivery_backlog", () => {
       "wake_delivery_backlog",
     );
     expect(c.ok).toBe(false);
-    expect(c.detail).toContain("3 consecutive wake failure");
+    expect(c.detail).toContain("3 unresolved wake failure");
     expect(c.detail).toContain("connection_refused");
     expect(c.detail).toContain("ECONNREFUSED");
     expect(c.hint).toContain("wake_target_reachable");
+    expect(c.detail).not.toContain("was accepted by the bridge");
+    expect(c.detail).toContain("NOTHING WAS QUEUED");
   });
 
   test("this check alone flips the top-level report ok to false", () => {

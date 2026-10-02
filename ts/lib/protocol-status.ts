@@ -8,10 +8,10 @@ export interface NativeStatusCode {
 
 export interface ProtocolCheck {
   name: string;
-  ok: false;
+  ok: false | null;
   detail: string;
   hint: string;
-  cause?: NativeStatusCode;
+  cause?: NativeStatusCode | { kind: "http"; code: number; message: string };
 }
 
 /**
@@ -72,4 +72,3 @@ export function toolErrorResult(
     isError: true,
   };
 }
-
