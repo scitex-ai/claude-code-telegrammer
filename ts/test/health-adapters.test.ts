@@ -144,23 +144,32 @@ describe("probePoller('external')", () => {
   });
 
   test("a visible poller process belonging to a different agent is rejected", async () => {
+    const savedCct = process.env.CCT_AGENT_ID;
     const dir = mkdtempSync(join(tmpdir(), "cct-health-adapters-"));
     const fixture = join(dir, "telegram-poller-marker-fixture.ts");
     writeFileSync(fixture, "setTimeout(() => {}, 5000);\n");
-    const child = Bun.spawn([process.execPath, "run", fixture], {
-      env: { ...process.env, CCT_AGENT_ID: "foreign-agent" },
-      stdout: "ignore",
-      stderr: "ignore",
-    });
+    let child: ReturnType<typeof Bun.spawn> | undefined;
     try {
+      // A blank observer identity intentionally enables marker-only development
+      // mode. This negative fixture must declare the identity it is protecting.
+      process.env.CCT_AGENT_ID = "expected-agent";
+      child = Bun.spawn([process.execPath, "run", fixture], {
+        env: { ...process.env, CCT_AGENT_ID: "foreign-agent" },
+        stdout: "ignore",
+        stderr: "ignore",
+      });
       await waitForCmdline(child.pid, "telegram-poller-marker-fixture");
       mkdirSync(STATE_DIR, { recursive: true });
       writeFileSync(PIDFILE_PATH, `${child.pid}\n${Date.now()}\n`);
 
       expect(probePoller("external").pidfileAlive).toBe(false);
     } finally {
-      child.kill();
-      await child.exited;
+      if (savedCct === undefined) delete process.env.CCT_AGENT_ID;
+      else process.env.CCT_AGENT_ID = savedCct;
+      if (child) {
+        child.kill();
+        await child.exited;
+      }
       rmSync(dir, { recursive: true, force: true });
     }
   });
