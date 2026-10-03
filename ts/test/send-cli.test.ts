@@ -196,6 +196,18 @@ describe("executeDurableSend", () => {
     });
   });
 
+  test("malformed PR body fails before store init or any side effect", async () => {
+    const events: string[] = [];
+    await expect(
+      executeDurableSend(
+        { chatId: "42", text: "#409 fix it" },
+        context,
+        fakeDeps(events),
+      ),
+    ).rejects.toThrow("unlabeled PR reference");
+    expect(events).toEqual([]);
+  });
+
   test("missing correlation fails before Telegram is called", async () => {
     const events: string[] = [];
     const deps = fakeDeps(events);

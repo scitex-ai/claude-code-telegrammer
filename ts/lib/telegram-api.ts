@@ -4,6 +4,10 @@
 
 import { API_BASE, FILE_BASE, MAX_TEXT } from "./config.js";
 import { appendSignature } from "./signature.js";
+import {
+  assertLabeledPrReferences,
+  hasNoLineTerminator,
+} from "./outbound-style.js";
 import { mkdirSync, readFileSync } from "fs";
 import { join, basename, extname } from "path";
 
@@ -210,18 +214,56 @@ export function splitText(text: string, limit: number = MAX_TEXT): string[] {
   return out;
 }
 
+/**
+ * Rejoin PR parentheticals stranded by a chunk split.
+ *
+ * splitText cuts at spaces with no knowledge of the style contract, so
+ * `... #1` can end one chunk while `(desc)` starts the next — sending a bare
+ * reference and its description as two messages. When a chunk ends with a
+ * bare token (or a token plus an unclosed paren) whose parenthetical opens
+ * at the head of the next chunk, move the tail forward — but only when the
+ * receiving chunk stays within MAX_TEXT. Otherwise fail closed: emitting a
+ * partial accepted prefix is worse than refusing. Never rewrites
+ * descriptions and never touches chunk order beyond the moved tail.
+ */
+export function keepPrParentheticalTogether(chunks: string[]): string[] {
+  const out = [...chunks];
+  for (let i = 0; i < out.length - 1; i++) {
+    const tail = out[i].match(/(#\d+[ \t]*\(?[^()\n\r]*)$/)?.[1] ?? "";
+    if (!tail || !hasNoLineTerminator(tail)) continue;
+    if (!tail.includes("(") && !/^[ \t]*\(/.test(out[i + 1])) continue;
+    if (out[i + 1].length + tail.length > MAX_TEXT) {
+      throw new Error(
+        "PR parenthetical straddles a chunk boundary that cannot be rejoined " +
+          `within ${MAX_TEXT} characters; shorten the message instead of ` +
+          "sending a bare reference.",
+      );
+    }
+    out[i] = out[i].slice(0, -tail.length).trimEnd();
+    out[i + 1] = tail + out[i + 1];
+  }
+  return out.filter((chunk, index) => chunk.length > 0 || index === out.length - 1);
+}
+
 export async function sendMessage(
   chatId: string,
   text: string,
   replyTo?: number,
 ): Promise<number> {
+  // Style gate on the RAW text: malformed operator-facing bodies fail before
+  // signing, splitting, or any API call.
+  assertLabeledPrReferences(text);
   // Sign BEFORE splitting: appendSignature is idempotent, and signing the
   // whole text first means the splitter naturally keeps the signature on
   // the tail chunk regardless of where the body cuts. This avoids the
   // "double-sign on a split message" failure mode the operator called out
   // (we never sign per-chunk).
   const signed = appendSignature(text);
-  const chunks = splitText(signed);
+  const chunks = keepPrParentheticalTogether(splitText(signed));
+  // Every chunk must independently satisfy the style gate BEFORE the first
+  // API call: a split must never strand a bare reference in one chunk and
+  // its description in the next.
+  for (const chunk of chunks) assertLabeledPrReferences(chunk);
   let lastMsgId = 0;
   for (let i = 0; i < chunks.length; i++) {
     const params: Record<string, unknown> = {
@@ -271,6 +313,9 @@ export async function sendDocument(
   filePath: string,
   caption?: string,
 ): Promise<number> {
+  // Style gate on the raw caption BEFORE file read or API delivery. An empty
+  // caption carries no PR reference and passes trivially.
+  assertLabeledPrReferences(caption ?? "");
   const fileBytes = readFileSync(filePath);
   const fileName = basename(filePath);
 
@@ -323,6 +368,8 @@ export async function editMessageText(
   messageId: number,
   text: string,
 ): Promise<{ message_id: number }> {
+  // Style gate on the RAW text: malformed bodies fail before signing or delivery.
+  assertLabeledPrReferences(text);
   const signed = appendSignature(text);
   return tgApi("editMessageText", {
     chat_id: chatId,

@@ -30,6 +30,8 @@
  * lib/ uses.
  */
 
+import { assertLabeledPrReferences } from "./outbound-style.js";
+
 export interface SendArgs {
   chatId: string;
   text: string;
@@ -202,6 +204,9 @@ export async function executeDurableSend(
   ctx: DurableSendContext,
   deps: DurableSendDeps,
 ): Promise<DurableSendResult> {
+  // Style gate FIRST: malformed operator-facing text fails before store init,
+  // reply-target resolution, send, or save — no durable side effect at all.
+  assertLabeledPrReferences(args.text);
   await deps.initStore();
   const target =
     args.replyTo === undefined
