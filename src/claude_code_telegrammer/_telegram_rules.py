@@ -58,8 +58,12 @@
 # ASCII ``(`` and the full-width ``（`` are accepted — the operator
 # writes Japanese and a Japanese IME produces the full-width form. A
 # single run of spaces/tabs/ideographic-space between the number and the
-# paren is allowed, and the parenthetical must hold at least one
-# non-space character (``#970 ()`` describes nothing).
+# paren is allowed, and the parenthetical must be COMPLETE on the same
+# clause — matching delimiters, closed before any line terminator — holding
+# at least one non-space, non-numeric character (``#970 ()`` describes
+# nothing, and neither does ``#970 (970)``). Dash/colon substitutes,
+# unclosed parentheses and newline-split descriptions are refused
+# (tightened 2026-10-03; prior revisions accepted unclosed/numeric-only).
 #
 #   #970（グループ判定がスペックを読む）    accept
 #   #970 (group authority reads the spec)   accept
@@ -145,9 +149,21 @@ _CODE_SPAN = re.compile(r"`[^`\n]*`")
 # alphanumeric (decision 4 — hex colours).
 _REFERENCE = re.compile(r"(?<!&)#(\d+)(?![0-9A-Za-z])")
 
-# ...immediately followed by (optional horizontal space then) an opening
-# paren, ASCII or full-width, holding at least one non-space character.
-_DESCRIBED = re.compile(r"[ \t　]*[(（][ \t　]*[^\s)）]")
+# Line terminators that must never split a number from its description.
+# Named (never literal) so no invisible character enters this source file.
+_LS = chr(0x2028)
+_PS = chr(0x2029)
+_CLAUSE_BREAKS = ("\n", "\r", _LS, _PS)
+
+# ...immediately followed by (optional horizontal space then) a COMPLETE
+# same-clause parenthetical: matching ASCII or full-width delimiters, closed
+# before any line terminator, holding at least one non-space, non-numeric
+# character (full-width digits carry no meaning either; ``\d`` already
+# covers them). Dash/colon substitutes, unclosed or empty parentheses and
+# newline-split descriptions are refused by construction below.
+_OPEN = re.compile(r"[ \t　]*(\(|（)")
+_CLOSE_FOR = {"(": ")", "（": "）"}
+_CONTENTLESS = re.compile(r"[\s\d._()[\]{}:;,#/\\-]")
 
 
 class Verdict:
@@ -181,6 +197,33 @@ class Verdict:
 
 
 _OK = Verdict(True)
+
+
+def _strict_span(scan, pos):
+    """(inner_text, end_index) of a complete same-clause parenthetical at pos.
+
+    None when no opening paren follows, when any line terminator or a
+    mismatched paren precedes the matching close, when the close never
+    comes, or when the content is empty or numeric-only. Never invents or
+    rewrites text; it only measures what is there.
+    """
+    opened = _OPEN.match(scan, pos)
+    if not opened:
+        return None
+    close = _CLOSE_FOR[opened.group(1)]
+    chars = []
+    for char in scan[opened.end():]:
+        if char in _CLAUSE_BREAKS:
+            return None
+        if char == close:
+            inner = "".join(chars)
+            if _CONTENTLESS.sub("", inner) == "":
+                return None
+            return inner, opened.end() + len("".join(chars)) + 1
+        if char in "()（）":
+            return None
+        chars.append(char)
+    return None
 
 
 def _blank(text):
@@ -240,7 +283,7 @@ def check_message(text):
     offender = None
     for match in _REFERENCE.finditer(scan):
         number = match.group(1)
-        if _DESCRIBED.match(scan, match.end()):
+        if _strict_span(scan, match.end()) is not None:
             described.add(number)  # this occurrence carries its description
             continue
         if number in described:
