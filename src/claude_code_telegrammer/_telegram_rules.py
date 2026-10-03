@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 # Timestamp: "2026-08-12 (OP-PRIO-FMT rule 2 — extracted to one place)"
-# File: ~/.claude/hooks/pre-tool-use/_telegram_rules.py
+# Owner: claude_code_telegrammer._telegram_rules (packaged canonical predicate)
 #
 # THE RULE, IN ONE PLACE. Operator 2026-08-12:
 #
@@ -126,7 +125,9 @@ import os
 import re
 import sys
 
-__all__ = ["Verdict", "check_message", "ESCAPE_ENV"]
+__all__ = ["ESCAPE_ENV", "HOOK_INPUT_VERSION", "Verdict", "check_message"]
+
+HOOK_INPUT_VERSION = "cct.telegram-hook-input/v1"
 
 #: Rare one-off override, honoured by every adapter.
 ESCAPE_ENV = "CC_ALLOW_BARE_ISSUE"
@@ -157,7 +158,7 @@ class Verdict:
     the MCP filter cannot drift in what they tell the sender to do.
     """
 
-    __slots__ = ("ok", "token", "excerpt", "message")
+    __slots__ = ("excerpt", "message", "ok", "token")
 
     def __init__(self, ok, token="", excerpt="", message=""):
         self.ok = ok
@@ -176,7 +177,7 @@ class Verdict:
         }
 
     def __repr__(self):  # pragma: no cover - debugging aid
-        return "Verdict(ok=%r, token=%r)" % (self.ok, self.token)
+        return f"Verdict(ok={self.ok!r}, token={self.token!r})"
 
 
 _OK = Verdict(True)
@@ -205,13 +206,13 @@ def _refusal(token, excerpt):
         f"  required:  {token}(what it is)   or   {token}（中身の説明）\n"
         f"  you wrote: {token}\n"
         f"  fix it to: {token}（グループ判定がスペックを読む問題を修正）\n\n"
-        "  Bad : \"#589\"                        (no description)\n"
-        "  Bad : \"scitex-dev #589\"             (a repo name is not one)\n"
-        "  Bad : \"PR #589\"                     (a label is not one)\n"
-        "  Bad : \"#589 - auditd rules declared\" (a dash is not the form "
+        '  Bad : "#589"                        (no description)\n'
+        '  Bad : "scitex-dev #589"             (a repo name is not one)\n'
+        '  Bad : "PR #589"                     (a label is not one)\n'
+        '  Bad : "#589 - auditd rules declared" (a dash is not the form '
         "he asked for)\n"
-        "  Good: \"#589 (auditd rules declared)\"\n"
-        "  Good: \"#589（auditd ルールを宣言）\"\n\n"
+        '  Good: "#589 (auditd rules declared)"\n'
+        '  Good: "#589（auditd ルールを宣言）"\n\n'
         "The PARENTHESIS is the required form — his words, 2026-08-11: "
         "「ナンバーの後に ( をつけて説明する、っていうのをルールにして"
         "ください」. A dash or a colon does NOT pass. Both ( and （ are "
@@ -258,27 +259,49 @@ def check_message(text):
         excerpt = "..." + excerpt
     if end < len(text):
         excerpt = excerpt + "..."
-    return Verdict(False, token=token, excerpt=excerpt, message=_refusal(token, excerpt))
+    return Verdict(
+        False, token=token, excerpt=excerpt, message=_refusal(token, excerpt)
+    )
 
 
 # --- adapters -------------------------------------------------------
 # Both are three lines of glue. All judgement lives in check_message.
 
+
 def _main_hook_json(stream):
     """Claude Code PreToolUse adapter: hook JSON in, rc 0/2 out."""
     try:
         data = json.load(stream)
-    except Exception:
-        return 0  # FAIL-OPEN
-    tool = data.get("tool_name", "")
-    if "claude-code-telegrammer__reply" not in tool:
+    except (OSError, TypeError, UnicodeError, ValueError):
+        sys.stderr.write(
+            "UNKNOWN Telegram hook input: unreadable JSON; outbound guard remains required.\n"
+        )
         return 0
-    text = (data.get("tool_input", {}) or {}).get("text", "") or ""
-    verdict = check_message(text)
-    if verdict.ok:
+    # Text-stdin stays a standalone stdlib predicate. Only hook mode loads
+    # the adjacent packaged input adapter, including when invoked by file path.
+    if not __package__:
+        from pathlib import Path
+
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    try:
+        from claude_code_telegrammer._hook_input import normalize_hook_input
+    except ImportError:
+        sys.stderr.write(
+            "UNKNOWN Telegram hook input: matched package unavailable; outbound guard remains required.\n"
+        )
         return 0
-    sys.stderr.write(verdict.message)
-    return 2
+
+    normalized = normalize_hook_input(data)
+    for text in normalized.texts:
+        verdict = check_message(text)
+        if not verdict.ok:
+            sys.stderr.write(verdict.message)
+            return 2
+    if normalized.state == "unknown":
+        sys.stderr.write(
+            "UNKNOWN Telegram hook input: not statically resolved; outbound guard remains required.\n"
+        )
+    return 0
 
 
 def _main_text_stdin(stream):
