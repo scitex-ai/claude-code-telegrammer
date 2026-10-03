@@ -8,6 +8,13 @@ import { assertLabeledPrReferences } from "./outbound-style.js";
 import { mkdirSync, readFileSync } from "fs";
 import { join, basename, extname } from "path";
 
+// U+2028/U+2029 built from code points so no invisible character enters source.
+const WIDE_TERMINATORS = String.fromCharCode(0x2028, 0x2029);
+
+function hasNoWideTerminator(s: string): boolean {
+  return !s.includes(WIDE_TERMINATORS[0]) && !s.includes(WIDE_TERMINATORS[1]);
+}
+
 /**
  * Wall-clock bound for the STARTUP token check.
  *
@@ -211,6 +218,39 @@ export function splitText(text: string, limit: number = MAX_TEXT): string[] {
   return out;
 }
 
+/**
+ * Rejoin PR parentheticals stranded by a chunk split.
+ *
+ * splitText cuts at spaces with no knowledge of the style contract, so
+ * `... #1` can end one chunk while `(desc)` starts the next — sending a bare
+ * reference and its description as two messages. When a chunk ends with a
+ * bare token (or a token plus an unclosed paren) whose parenthetical opens
+ * at the head of the next chunk on the same clause, move the tail forward —
+ * but only when the receiving chunk stays within MAX_TEXT. Otherwise fail
+ * closed: emitting a partial accepted prefix is worse than refusing. Never
+ * rewrites descriptions and never touches chunk order beyond the moved tail.
+ */
+export function keepPrParentheticalTogether(chunks: string[]): string[] {
+  const out = [...chunks];
+  for (let i = 0; i < out.length - 1; i++) {
+    const tail = out[i].match(/(#\d+[ \t]*\(?[^()\n\r]*)$/)?.[1] ?? "";
+    if (!tail || !hasNoWideTerminator(tail)) continue;
+    if (!tail.includes("(") && !/^[ \t]*\(/.test(out[i + 1])) continue;
+    if (out[i + 1].length + tail.length > MAX_TEXT) {
+      throw new Error(
+        "PR parenthetical straddles a chunk boundary that cannot be rejoined " +
+          `within ${MAX_TEXT} characters; shorten the message instead of ` +
+          "sending a bare reference.",
+      );
+    }
+    out[i] = out[i].slice(0, -tail.length).trimEnd();
+    out[i + 1] = tail + out[i + 1];
+  }
+  return out.filter(
+    (chunk, index) => chunk.length > 0 || index === out.length - 1,
+  );
+}
+
 export async function sendMessage(
   chatId: string,
   text: string,
@@ -224,7 +264,21 @@ export async function sendMessage(
   // "double-sign on a split message" failure mode the operator called out
   // (we never sign per-chunk).
   const signed = appendSignature(text);
-  const chunks = splitText(signed);
+  const chunks = keepPrParentheticalTogether(splitText(signed));
+  // Every cumulative prefix must satisfy the style gate BEFORE the first API
+  // call: a split must never strand a bare reference in one chunk and its
+  // description in the next, while inheritance still flows forward — a chunk
+  // whose bare token was described in an EARLIER chunk of the same message
+  // stays deliverable, exactly as the whole message is. (Equivalent to the
+  // whole-text gate outcome: the canonical rule refuses a bare occurrence
+  // unless described strictly earlier, so a passing whole implies passing
+  // prefixes and any failing prefix fails the whole. The loop form additionally
+  // refuses before sending anything when a LATER chunk breaks the contract.)
+  let prefix = "";
+  for (const chunk of chunks) {
+    prefix += chunk;
+    assertLabeledPrReferences(prefix);
+  }
   let lastMsgId = 0;
   for (let i = 0; i < chunks.length; i++) {
     const params: Record<string, unknown> = {

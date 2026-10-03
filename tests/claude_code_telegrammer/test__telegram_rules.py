@@ -23,6 +23,45 @@ RULE = (
         ("#106(Description) then #106", True),
         ("#106 then #106(Description)", False),
         ("Literal `#106` and https://example.test/#107", True),
+        ("PR #106 - dash is not the form", False),
+        ("PR #106: colon is not the form", False),
+        ("PR #106 (unclosed", False),
+        ("PR #106 ()", False),
+        ("PR #106 (106)", False),
+        (
+            "PR #106"
+            + chr(0xFF08)
+            + chr(0xFF11)
+            + chr(0xFF12)
+            + chr(0xFF13)
+            + chr(0xFF09),
+            False,
+        ),
+        ("PR #106\n(Storage quota response)", False),
+        ("PR #106\r(Storage quota response)", False),
+        ("PR #106 (a\rb)", False),
+        (
+            "PR #106" + chr(0x2028) + "(Storage quota response)",
+            False,
+        ),
+        (
+            "PR #106 (a" + chr(0x2028) + "b)",
+            False,
+        ),
+        (
+            "PR #106 (a" + chr(0x2029) + "b)",
+            False,
+        ),
+        (
+            "PR #106 (see ```\ncode\n``` here)",
+            False,
+        ),
+        (
+            "PR #106 (see `cmd` here)",
+            True,
+        ),
+        ("PR #106（日本語の説明）", True),
+        ("PR #106 (Storage quota response) then PR #107", False),
     ],
 )
 def test_standalone_packaged_predicate(tmp_path, text, allowed):
