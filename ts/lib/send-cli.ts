@@ -30,6 +30,8 @@
  * lib/ uses.
  */
 
+import { assertLabeledPrReferences } from "./outbound-style.js";
+
 export interface SendArgs {
   chatId: string;
   text: string;
@@ -202,6 +204,7 @@ export async function executeDurableSend(
   ctx: DurableSendContext,
   deps: DurableSendDeps,
 ): Promise<DurableSendResult> {
+  assertLabeledPrReferences(args.text);
   await deps.initStore();
   const target =
     args.replyTo === undefined

@@ -5,7 +5,7 @@ This Python CLI is a thin launcher that forwards to the canonical TypeScript
 server (``ts/telegram-server.ts``). All real logic — env-var precedence,
 BOT_TOKEN_HASH, STATE_DIR/AGENT_ID/CHANNEL_SOURCE/TURN_URL resolution, the MCP
 server, and the Telegram poller — lives in TS. The single source of truth is
-the TS server; Python never reimplements env/hash logic, it only ``execv``s
+the TS server; Python never reimplements env/hash logic, it only ``execve``s
 ``bun``.
 
 Subcommands::
@@ -97,11 +97,13 @@ def _require_server() -> str:
 
 
 def _exec_server(*server_args: str) -> int:
-    """``execv`` bun on the TS server with the given args (does not return)."""
+    """Launch TS with this Python interpreter for the packaged rule binding."""
     bun = _resolve_bun()
     server = _require_server()
-    os.execv(bun, [bun, "run", server, *server_args])
-    # os.execv replaces the process image; unreachable on success.
+    env = os.environ.copy()
+    env["_CCT_PYTHON_EXECUTABLE"] = sys.executable
+    os.execve(bun, [bun, "run", server, *server_args], env)
+    # os.execve replaces the process image; unreachable on success.
     return 0
 
 

@@ -93,10 +93,17 @@ jobs:
             await sql.close();
           '
 
+      - name: Install uv for the canonical Python predicate
+        uses: astral-sh/setup-uv@v3
+      - name: Set up the predicate interpreter
+        run: uv python install 3.12
+
       - name: Run TypeScript tests
         # The credential here is the throwaway one this workflow just created
         # for its own service container; it exists for the length of the job.
         env:
           SCITEX_STORE_DSN: postgresql://cct:cct@127.0.0.1:5432/cct
-        run: bun test
+        run: |
+          CCT_TEST_PYTHON=$(uv python find 3.12)
+          "$CCT_TEST_PYTHON" -c 'import os, sys; os.environ["_CCT_PYTHON_EXECUTABLE"] = sys.executable; os.execvp("bun", ["bun", "test"])'
         working-directory: ts
