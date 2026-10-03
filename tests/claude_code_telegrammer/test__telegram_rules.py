@@ -52,6 +52,14 @@ RULE = (
             "PR #106 (a" + chr(0x2029) + "b)",
             False,
         ),
+        (
+            "PR #106 (see ```\ncode\n``` here)",
+            False,
+        ),
+        (
+            "PR #106 (see `cmd` here)",
+            True,
+        ),
         ("PR #106（日本語の説明）", True),
         ("PR #106 (Storage quota response) then PR #107", False),
     ],

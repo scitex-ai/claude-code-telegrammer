@@ -199,31 +199,42 @@ class Verdict:
 _OK = Verdict(True)
 
 
-def _strict_span(scan, pos):
+def _strict_span(scan, original, pos):
     """(inner_text, end_index) of a complete same-clause parenthetical at pos.
 
     None when no opening paren follows, when any line terminator or a
     mismatched paren precedes the matching close, when the close never
-    comes, or when the content is empty or numeric-only. Never invents or
-    rewrites text; it only measures what is there.
+    comes, or when the content is empty or numeric-only. The span is found
+    on the masked scan (URLs/code blanked, offsets preserved) but the RAW
+    original over the same indices must also be break-free: masking must
+    never launder a line break inside fenced code into a clean bill.
+    Never invents or rewrites text; it only measures what is there.
     """
     opened = _OPEN.match(scan, pos)
     if not opened:
         return None
     close = _CLOSE_FOR[opened.group(1)]
     chars = []
-    for char in scan[opened.end():]:
+    end = None
+    for offset, char in enumerate(scan[opened.end():]):
         if char in _CLAUSE_BREAKS:
             return None
         if char == close:
-            inner = "".join(chars)
-            if _CONTENTLESS.sub("", inner) == "":
-                return None
-            return inner, opened.end() + len("".join(chars)) + 1
+            end = opened.end() + offset + 1
+            break
         if char in "()（）":
             return None
         chars.append(char)
-    return None
+    if end is None:
+        return None
+    inner = "".join(chars)
+    if _CONTENTLESS.sub("", inner) == "":
+        return None
+    raw = original[opened.start():end]
+    for break_char in _CLAUSE_BREAKS:
+        if break_char in raw:
+            return None
+    return inner, end
 
 
 def _blank(text):
@@ -283,7 +294,7 @@ def check_message(text):
     offender = None
     for match in _REFERENCE.finditer(scan):
         number = match.group(1)
-        if _strict_span(scan, match.end()) is not None:
+        if _strict_span(scan, text, match.end()) is not None:
             described.add(number)  # this occurrence carries its description
             continue
         if number in described:
