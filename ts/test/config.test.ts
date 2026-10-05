@@ -29,6 +29,8 @@ import {
   findUnexpandedEnv,
   findRenamedEnv,
   isCodexHarness,
+  isHermesHarness,
+  resolveRelayDeliveryMode,
 } from "../lib/config.js";
 
 describe("config", () => {
@@ -36,6 +38,20 @@ describe("config", () => {
     expect(isCodexHarness("codex-tui")).toBe(true);
     expect(isCodexHarness("codex")).toBe(true);
     expect(isCodexHarness("hermes-tui")).toBe(false);
+  });
+  test("recognizes the Hermes harness identity (re-wake redelivery, not mcp push)", () => {
+    expect(isHermesHarness("hermes-tui")).toBe(true);
+    expect(isHermesHarness("hermes")).toBe(true);
+    expect(isHermesHarness("codex-tui")).toBe(false);
+    expect(isHermesHarness("")).toBe(false);
+  });
+  test("resolveRelayDeliveryMode: harnesses without channel admission re-wake", () => {
+    expect(resolveRelayDeliveryMode("codex")).toBe("wake");
+    expect(resolveRelayDeliveryMode("codex-tui")).toBe("wake");
+    expect(resolveRelayDeliveryMode("hermes")).toBe("wake");
+    expect(resolveRelayDeliveryMode("hermes-tui")).toBe("wake");
+    expect(resolveRelayDeliveryMode("")).toBe("mcp");
+    expect(resolveRelayDeliveryMode("claude-code")).toBe("mcp");
   });
   test("STATE_DIR reads from env var", () => {
     // preload.ts sets CLAUDE_CODE_TELEGRAMMER_AGENT_STATE_DIR to a tmp dir

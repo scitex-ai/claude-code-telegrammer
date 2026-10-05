@@ -90,11 +90,31 @@ export const CHANNEL_SOURCE = "cct";
 // Harness identity is supplied by SAC.  Codex does not implement Claude's
 // notifications/claude/channel semantic-admission contract, so delivery
 // fallback must retry the agent's /v1/turn endpoint instead of treating an
-// MCP notification write as visibility.
+// MCP notification write as visibility. The Hermes harness is in the same
+// position: its TUI session is frequently mid-tool-execution (no live Claude
+// Code client to push to), so its redelivery path is re-wake, not
+// mcp.notification (card cct-wake-retry-hermes-relay-20260929).
 export const AGENT_HARNESS = (getenv("HARNESS") ?? "").trim().toLowerCase();
 
 export function isCodexHarness(value: string = AGENT_HARNESS): boolean {
   return value === "codex" || value === "codex-tui";
+}
+
+export function isHermesHarness(value: string = AGENT_HARNESS): boolean {
+  return value === "hermes" || value === "hermes-tui";
+}
+
+/**
+ * Which notify-relay delivery mode a harness needs. Harnesses without
+ * Claude channel-notification admission ("codex*", "hermes*") get "wake"
+ * (re-POST the durable payload to /v1/turn until the turn is admitted);
+ * everything else (interactive Claude Code CLI default, HARNESS unset)
+ * keeps the original "mcp" live-push.
+ */
+export function resolveRelayDeliveryMode(
+  value: string = AGENT_HARNESS,
+): "wake" | "mcp" {
+  return isCodexHarness(value) || isHermesHarness(value) ? "wake" : "mcp";
 }
 export const INBOX_DIR = join(STATE_DIR, "inbox");
 export const ATTACHMENT_DIR =
