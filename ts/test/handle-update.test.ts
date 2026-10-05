@@ -248,4 +248,64 @@ describe("handleUpdate: a failed wake falls back to the notify relay", () => {
     // (his 2026-06-18 report), which is why the relay must stay failure-only.
     expect(JSON.stringify(delivered)).not.toContain(text);
   });
+
+  test("auth failure fails fast — a 401 never rides the retry backoff", async () => {
+    // Attempts left at 3 with the production 45s delay: if the 401 retried,
+    // the 10ms settle would observe zero settled POSTs and no fallback.
+    // Fail-fast means exactly one POST, straight to the pending fallback.
+    const _savedAttempts = process.env.CCT_WAKE_MAX_ATTEMPTS;
+    const _savedDelay = process.env.CCT_WAKE_RETRY_DELAY_MS;
+    process.env.CCT_WAKE_MAX_ATTEMPTS = "3";
+    process.env.CCT_WAKE_RETRY_DELAY_MS = "45000";
+    setLoudFailSender(async () => {}); // stubbed: never post to real Telegram
+    const calls = captureTurnCalls(401); // invalid token
+
+    const text = "sent with a bad token";
+    expect(await handleUpdate(textUpdate(5, 103, text))).toBe("ok");
+    await settleWake();
+
+    expect(calls.length).toBe(1);
+
+    // Falls through to the pending fallback exactly as before.
+    const { delivered, mcp } = collectRelayed();
+    expect(await relayPendingNotificationsOnce({ mcp })).toBe(1);
+    expect(JSON.stringify(delivered)).toContain(text);
+
+    _resetLoudFail();
+    if (_savedAttempts === undefined) delete process.env.CCT_WAKE_MAX_ATTEMPTS;
+    else process.env.CCT_WAKE_MAX_ATTEMPTS = _savedAttempts;
+    if (_savedDelay === undefined) delete process.env.CCT_WAKE_RETRY_DELAY_MS;
+    else process.env.CCT_WAKE_RETRY_DELAY_MS = _savedDelay;
+  });
+
+  test("transient 502 still retries — busy-window recovery is preserved", async () => {
+    const _savedAttempts = process.env.CCT_WAKE_MAX_ATTEMPTS;
+    const _savedDelay = process.env.CCT_WAKE_RETRY_DELAY_MS;
+    process.env.CCT_WAKE_MAX_ATTEMPTS = "3";
+    process.env.CCT_WAKE_RETRY_DELAY_MS = "1"; // "0" folds to the 45s default
+    setLoudFailSender(async () => {}); // stubbed: never post to real Telegram
+    let posts = 0;
+    const calls: TurnCall[] = [];
+    setTurnPoster(async (url, body, bearer) => {
+      calls.push({ url, body, bearer });
+      posts += 1;
+      return posts === 1 ? 502 : 200; // busy, then freed
+    });
+
+    const text = "sent into the busy window";
+    expect(await handleUpdate(textUpdate(6, 104, text))).toBe("ok");
+    await new Promise((r) => setTimeout(r, 100));
+
+    // Retried once and admitted — no pending fallback queued.
+    expect(calls.length).toBe(2);
+    const { delivered, mcp } = collectRelayed();
+    expect(await relayPendingNotificationsOnce({ mcp })).toBe(0);
+    expect(JSON.stringify(delivered)).not.toContain(text);
+
+    _resetLoudFail();
+    if (_savedAttempts === undefined) delete process.env.CCT_WAKE_MAX_ATTEMPTS;
+    else process.env.CCT_WAKE_MAX_ATTEMPTS = _savedAttempts;
+    if (_savedDelay === undefined) delete process.env.CCT_WAKE_RETRY_DELAY_MS;
+    else process.env.CCT_WAKE_RETRY_DELAY_MS = _savedDelay;
+  });
 });

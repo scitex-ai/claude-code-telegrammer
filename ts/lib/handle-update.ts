@@ -31,7 +31,7 @@ import {
   markDone,
   markFailed,
 } from "./receipts.js";
-import { wakeTurn, wakeEnabled } from "./wake.js";
+import { wakeTurn, wakeEnabled, type WakeFailCategory } from "./wake.js";
 import {
   parseForward,
   buildInboundText,
@@ -495,12 +495,25 @@ export async function handleUpdate(update: any): Promise<UpdateStatus> {
     parseInt(process.env.CCT_WAKE_RETRY_DELAY_MS ?? "45000", 10) || 45000,
   );
   const _sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  // Transient-only retry (cct-wake-live-session-20260930 direction): a busy
+  // session answers 502/timeout and frees seconds later, so only those ride
+  // the backoff. Auth/client/quota/refused/resource failures will not clear
+  // on a timescale that matters — retrying them only delays the loud-fail
+  // reply (401/403/invalid-token must fail fast, never sleep 45s first).
+  const _retryableWake: ReadonlySet<WakeFailCategory> = new Set([
+    "timeout",
+    "server_error",
+  ]);
   async function _wakeWithRetry(
     text: string,
     meta: unknown,
   ): Promise<Awaited<ReturnType<typeof wakeTurn>>> {
     let last = await wakeTurn(text, meta);
-    for (let attempt = 1; !last.ok && attempt < _wakeMaxAttempts; attempt++) {
+    for (
+      let attempt = 1;
+      !last.ok && _retryableWake.has(last.category) && attempt < _wakeMaxAttempts;
+      attempt++
+    ) {
       log(
         "poller",
         `wake attempt ${attempt + 1}/${_wakeMaxAttempts} after ${last.category}: ${last.reason}`,
