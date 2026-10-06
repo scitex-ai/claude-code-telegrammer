@@ -56,3 +56,29 @@ test("the packaged predicate ignores an unrelated HOME hook", () => {
     expect(JSON.parse(new TextDecoder().decode(result.stdout)).allowed).toBe(false);
   } finally { rmSync(dir,{recursive:true,force:true}); }
 });
+
+/**
+ * 2026-10-06 regression: the MCP server launched directly (Hermes MCP stdio,
+ * `bun run`) has NO _CCT_PYTHON_EXECUTABLE, so every send path failed
+ * validation and months-long working file attach read as dead. The adapter
+ * must fall back to a PATH python3 with the same rules file — validation
+ * unchanged, only interpreter lookup gains a second chance.
+ */
+test("unset launcher variable falls back to PATH python3", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cct-rule-fallback-"));
+  const interpreter = process.env._CCT_PYTHON_EXECUTABLE;
+  if (!interpreter) throw new Error("Test launcher must supply its Python interpreter");
+  const adapter = join(import.meta.dir, "..", "lib", "outbound-style.ts");
+  const child = join(dir, "probe.ts");
+  writeFileSync(child, `import {assertLabeledPrReferences} from ${JSON.stringify(adapter)};\nlet allowed=true; try {assertLabeledPrReferences('PR #106(Description)');} catch(e) {allowed=false; console.error(String(e));} console.log(JSON.stringify({allowed}));`);
+  try {
+    const result = Bun.spawnSync([process.execPath, child], {
+      env: { HOME: dir, PATH: `/usr/bin:/bin:${join(interpreter, "..")}`, TMPDIR: dir },
+      stdout: "pipe", stderr: "pipe", timeout: 4000,
+    });
+    if (result.exitCode !== 0) throw new Error(new TextDecoder().decode(result.stderr));
+    expect(JSON.parse(new TextDecoder().decode(result.stdout)).allowed).toBe(true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

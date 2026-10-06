@@ -101,6 +101,52 @@ describe("parseSendArgs", () => {
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.args.text).toBe("done - all green");
   });
+
+  test("parses document mode with caption", () => {
+    const r = parseSendArgs([
+      "--chat-id",
+      "1",
+      "--file",
+      "/tmp/api_keys.md",
+      "--caption",
+      "keys",
+    ]);
+    expect(r).toEqual({
+      ok: true,
+      args: {
+        chatId: "1",
+        text: "keys",
+        file: "/tmp/api_keys.md",
+        caption: "keys",
+      },
+    });
+  });
+
+  test("document mode works without caption", () => {
+    const r = parseSendArgs(["--chat-id", "1", "--file", "/tmp/a.md"]);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.args.file).toBe("/tmp/a.md");
+  });
+
+  test("refuses --file with --text", () => {
+    const r = parseSendArgs([
+      "--chat-id",
+      "1",
+      "--file",
+      "/tmp/a.md",
+      "--text",
+      "hi",
+    ]);
+    expect(r).toEqual({
+      ok: false,
+      error: "--file and --text are mutually exclusive",
+    });
+  });
+
+  test("refuses --caption without --file", () => {
+    const r = parseSendArgs(["--chat-id", "1", "--caption", "x"]);
+    expect(r).toEqual({ ok: false, error: "--caption requires --file" });
+  });
 });
 
 /**
@@ -153,6 +199,10 @@ function fakeDeps(events: string[]): DurableSendDeps {
     async sendMessage(chatId, text, replyTo) {
       events.push(`telegram:${chatId}:${text}:${replyTo ?? "none"}`);
       return 9001;
+    },
+    async sendDocument(chatId, filePath, caption) {
+      events.push(`telegram-doc:${chatId}:${filePath}:${caption ?? "none"}`);
+      return 9002;
     },
     async saveExplicitReply(target, _text, messageId) {
       events.push(`store:reply:${target.rowId}:${messageId}`);
@@ -232,6 +282,27 @@ describe("executeDurableSend", () => {
       "store:resolve:42:123",
       "telegram:failed",
     ]);
+  });
+
+  test("document mode sends the file and records its name", async () => {
+    const events: string[] = [];
+    const result = await executeDurableSend(
+      { chatId: "42", text: "", file: "/tmp/api_keys.md", caption: "keys" },
+      context,
+      fakeDeps(events),
+    );
+    expect({ events, result }).toEqual({
+      events: [
+        "store:init",
+        "telegram-doc:42:/tmp/api_keys.md:keys",
+        "store:outbound:9002",
+      ],
+      result: {
+        messageId: 9002,
+        rowId: 73,
+        semanticState: "outbound_recorded",
+      },
+    });
   });
 
   test("post-delivery persistence failure reports accepted message id", async () => {

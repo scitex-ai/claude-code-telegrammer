@@ -63,7 +63,7 @@ import { startNotifyRelay } from "./lib/notify-relay.js";
 import { wakeEnabled } from "./lib/wake.js";
 import { resolveConfigProbe, wantsGetMe } from "./lib/config-probe.js";
 import { runHealth, serializeHealthReport } from "./lib/health-adapters.js";
-import { tgApi, getMeRaw, sendMessage } from "./lib/telegram-api.js";
+import { tgApi, getMeRaw, sendMessage, sendDocument } from "./lib/telegram-api.js";
 import {
   parseSendArgs,
   SEND_USAGE,
@@ -191,6 +191,7 @@ if (process.argv.slice(2)[0] === "send") {
       {
         initStore,
         sendMessage,
+        sendDocument,
         resolveInboundReplyTarget,
         saveExplicitReply,
         saveOutbound,
