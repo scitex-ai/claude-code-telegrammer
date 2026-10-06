@@ -35,6 +35,8 @@ import { assertLabeledPrReferences } from "./outbound-style.js";
 export interface SendArgs {
   chatId: string;
   text: string;
+  file?: string;
+  caption?: string;
   replyTo?: number;
 }
 
@@ -60,7 +62,7 @@ function flagPresentButEmpty(argv: string[], flag: string): boolean {
 }
 
 export function parseSendArgs(argv: string[]): SendArgsResult {
-  for (const required of ["--chat-id", "--text"]) {
+  for (const required of ["--chat-id", "--file", "--text", "--caption"]) {
     if (flagPresentButEmpty(argv, required)) {
       return { ok: false, error: `${required} requires a value` };
     }
@@ -68,11 +70,25 @@ export function parseSendArgs(argv: string[]): SendArgsResult {
 
   const chatId = flagValue(argv, "--chat-id");
   const text = flagValue(argv, "--text");
+  const file = flagValue(argv, "--file");
+  const caption = flagValue(argv, "--caption");
 
   if (!chatId) return { ok: false, error: "--chat-id is required" };
-  if (!text) return { ok: false, error: "--text is required" };
+  // Document mode (--file) replaces --text; --caption is its optional label.
+  // --text and --file together is ambiguous (which is the message?) — refuse.
+  if (file && text) {
+    return { ok: false, error: "--file and --text are mutually exclusive" };
+  }
+  if (caption !== undefined && !file) {
+    return { ok: false, error: "--caption requires --file" };
+  }
+  if (!text && !file) return { ok: false, error: "--text is required" };
 
-  const args: SendArgs = { chatId, text };
+  const args: SendArgs = { chatId, text: text ?? caption ?? "" };
+  if (file) {
+    args.file = file;
+    if (caption !== undefined) args.caption = caption;
+  }
 
   if (argv.includes("--reply-to")) {
     const raw = flagValue(argv, "--reply-to");
@@ -130,6 +146,8 @@ export function emptyTokenError(token: string): string | null {
 export const SEND_USAGE =
   "usage: claude-code-telegrammer send --chat-id <id> --text <message> " +
   "[--reply-to <message_id>]\n" +
+  "   or: claude-code-telegrammer send --chat-id <id> --file <path> " +
+  "[--caption <text>] [--reply-to <message_id>]\n" +
   "\n" +
   "Send one outbound Telegram message and exit. Does NOT start the MCP\n" +
   "server or the poller.\n" +
@@ -159,6 +177,11 @@ export interface ReplyTarget {
 export interface DurableSendDeps {
   initStore(): Promise<void>;
   sendMessage(chatId: string, text: string, replyTo?: number): Promise<number>;
+  sendDocument(
+    chatId: string,
+    filePath: string,
+    caption?: string,
+  ): Promise<number>;
   resolveInboundReplyTarget(
     chatId: string,
     messageId: string,
@@ -204,19 +227,29 @@ export async function executeDurableSend(
   ctx: DurableSendContext,
   deps: DurableSendDeps,
 ): Promise<DurableSendResult> {
-  assertLabeledPrReferences(args.text);
+  // Document mode: the persisted record names the file so the receipt is
+  // auditable without the bytes. A missing file fails HERE via readFileSync
+  // inside sendDocument — loud, non-zero, never a phantom success.
+  const recordText =
+    args.file !== undefined
+      ? `[document ${args.file.split("/").pop()}] ${args.caption ?? ""}`.trim()
+      : args.text;
+  assertLabeledPrReferences(recordText);
   await deps.initStore();
   const target =
     args.replyTo === undefined
       ? undefined
       : await deps.resolveInboundReplyTarget(args.chatId, String(args.replyTo));
 
-  const messageId = await deps.sendMessage(args.chatId, args.text, args.replyTo);
+  const messageId =
+    args.file !== undefined
+      ? await deps.sendDocument(args.chatId, args.file, args.caption)
+      : await deps.sendMessage(args.chatId, args.text, args.replyTo);
   try {
     if (target) {
       const rowId = await deps.saveExplicitReply(
         target,
-        args.text,
+        recordText,
         String(messageId),
         ctx,
       );
@@ -229,7 +262,7 @@ export async function executeDurableSend(
     }
     const rowId = await deps.saveOutbound(
       args.chatId,
-      args.text,
+      recordText,
       String(messageId),
       undefined,
       ctx,
