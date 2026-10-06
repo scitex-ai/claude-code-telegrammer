@@ -43,8 +43,7 @@ import {
   AGENT_ID,
   HOST_NAME,
   PROJECT,
-  AGENT_HARNESS,
-  isCodexHarness,
+  resolveRelayDeliveryMode,
   findUnexpandedEnv,
   findRenamedEnv,
 } from "./lib/config.js";
@@ -510,6 +509,6 @@ if (shouldStartInternalPoller(TELEGRAM_ENABLED, EXTERNAL_POLLER)) {
 if (TELEGRAM_ENABLED) {
   startNotifyRelay({
     mcp,
-    deliveryMode: isCodexHarness(AGENT_HARNESS) ? "wake" : "mcp",
+    deliveryMode: resolveRelayDeliveryMode(),
   });
 }

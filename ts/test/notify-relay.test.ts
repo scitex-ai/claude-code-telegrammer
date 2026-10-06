@@ -25,6 +25,11 @@ import {
   startNotifyRelay,
   type PendingNotificationPayload,
 } from "../lib/notify-relay.js";
+import {
+  recordWakeFailure,
+  getWakeFailureState,
+  _resetWakeFailureState,
+} from "../lib/wake-health.js";
 
 const CHAT = "notify-relay-test-chat";
 
@@ -228,6 +233,55 @@ describe("relayPendingNotificationsOnce: injected deps (no real store)", () => {
     });
     expect(delivered).toBe(0);
     expect(calls.length).toBe(0);
+  });
+});
+
+describe("wake-health reconcile-on-clear (cct-wake-live-session-20260930 residual)", () => {
+  test("an MCP-relay drain clears the key a wake failure recorded — backlog does not freeze", async () => {
+    await _resetWakeFailureState();
+    await recordWakeFailure("server_error", "HTTP 502", Date.now(), "9101");
+    expect((await getWakeFailureState()).count).toBe(1);
+
+    const rows = [{
+      id: 9101,
+      pending_notification: JSON.stringify({
+        content: "storm message, now drained via mcp",
+        meta: { row_id: "9101" },
+      }),
+    }];
+    const cleared: number[] = [];
+    const { mcp, calls } = fakeMcp();
+    const delivered = await relayPendingNotificationsOnce({
+      mcp,
+      getPending: () => rows,
+      clearPending: (id) => cleared.push(id),
+    });
+
+    expect(delivered).toBe(1);
+    expect(cleared).toEqual([9101]);
+    expect(calls.length).toBe(1);
+    expect((await getWakeFailureState()).count).toBe(0);
+    await _resetWakeFailureState();
+  });
+
+  test("an MCP-relay drain of a never-failed row leaves the backlog at zero", async () => {
+    await _resetWakeFailureState();
+    const rows = [{
+      id: 9102,
+      pending_notification: JSON.stringify({
+        content: "ordinary message",
+        meta: { row_id: "9102" },
+      }),
+    }];
+    const { mcp } = fakeMcp();
+    const delivered = await relayPendingNotificationsOnce({
+      mcp,
+      getPending: () => rows,
+      clearPending: async () => {},
+    });
+
+    expect(delivered).toBe(1);
+    expect((await getWakeFailureState()).count).toBe(0);
   });
 });
 

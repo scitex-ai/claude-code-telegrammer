@@ -190,9 +190,10 @@ async function clearPendingRow(id: number): Promise<void> {
 
 export interface NotifyRelayDeps {
   mcp: Server;
-  /** Codex cannot semantically admit Claude channel notifications.  In that
-   * harness retry the durable payload through /v1/turn and clear it only on
-   * the bridge's positive admission response. */
+  /** Harnesses without Claude channel-notification admission (Codex, Hermes)
+   * cannot see an mcp.notification push. In that harness retry the durable
+   * payload through /v1/turn and clear it only on the bridge's positive
+   * admission response. */
   deliveryMode?: "mcp" | "wake";
   wake?: (content: string, meta: Record<string, string>) => Promise<WakeResult>;
   /** Injectable for tests; defaults to a real readPendingRows() call. */
@@ -235,12 +236,16 @@ export async function relayPendingNotificationsOnce(
       const payload = JSON.parse(
         row.pending_notification,
       ) as PendingNotificationPayload;
+      // Reconcile key for the wake-health backlog (cct-wake-live-session-20260930
+      // residual): the counter is per-message-keyed, so EVERY path that drains a
+      // row must clear that row's key — otherwise the health signal freezes at
+      // the storm count while deliveries work again.
+      const messageKey = payload.meta.row_id ?? String(row.id);
       if (deps.deliveryMode === "wake") {
         const result = await (deps.wake ?? wakeTurn)(payload.content, payload.meta);
-        const messageKey = payload.meta.row_id ?? String(row.id);
         if (!result.ok) {
           await recordWakeFailure(result.category, result.reason, Date.now(), messageKey);
-          logFn("notify-relay", "Codex wake retry not admitted; leaving message pending", {
+          logFn("notify-relay", "wake retry not admitted; leaving message pending", {
             row_id: row.id,
             check: result.check,
             reason: result.reason,
@@ -253,6 +258,9 @@ export async function relayPendingNotificationsOnce(
           method: "notifications/claude/channel",
           params: payload,
         });
+        // An MCP-relay drain proves this message got out: clear the key the
+        // wake-failure path recorded, or it stays in the unresolved map forever.
+        await recordWakeSuccess(messageKey);
       }
       await clearPending(row.id);
       delivered += 1;
