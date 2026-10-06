@@ -11,7 +11,7 @@
  * delivery. This adapter never formats a PR title or rewrites message text.
  */
 
-import { spawnSync } from "node:child_process";
+import { spawnSync, execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
@@ -21,8 +21,35 @@ interface Verdict {
   message?: string;
 }
 
+/** PATH lookup for a system python3. Null when none — caller fails loud. */
+function resolveSystemPython(): string | null {
+  try {
+    const found = execFileSync("which", ["python3"], {
+      encoding: "utf8",
+      timeout: 2000,
+    }).trim();
+    return found.length > 0 ? found : null;
+  } catch {
+    return null;
+  }
+}
+
 function checkMessage(text: string): Verdict {
-  const python = process.env._CCT_PYTHON_EXECUTABLE;
+  // The packaged Python CLI launcher supplies its own interpreter via
+  // _CCT_PYTHON_EXECUTABLE. But the MCP server is also launched directly
+  // (Hermes MCP stdio, `bun run`), where that variable is absent — and then
+  // EVERY send path (reply, send_document) fails validation, which reads to
+  // the operator as "file attach / reply is broken" (2026-10-06: months-long
+  // working feature reported dead). Fall back to PATH python3 with the SAME
+  // rules file and verdict — validation is unchanged, only the interpreter
+  // lookup gains a second chance. Still loud when neither exists. A SET-but-
+  // absent path is NOT fallen back (fail closed — a misconfigured launcher
+  // must stay loud); only unset-or-empty gains the PATH lookup.
+  const configured = process.env._CCT_PYTHON_EXECUTABLE;
+  const python =
+    configured !== undefined && configured.length > 0
+      ? configured
+      : resolveSystemPython();
   if (!python) {
     throw new Error("Cannot validate CCT message: use the packaged Python CLI launcher.");
   }
