@@ -247,7 +247,51 @@ export function resolveSchema(
 ): string {
   const explicit = getenv("STORE_SCHEMA", undefined, env);
   if (explicit) return explicit;
-  return schemaForAgent(getenv("AGENT_ID", undefined, env) ?? "telegram");
+  return schemaForAgent(resolveAgentId(env) ?? "telegram");
+}
+
+/**
+ * The agent identity for store resolution, across every spelling the
+ * fleet actually sets.
+ *
+ * Precedence: the canonical AGENT_ID spellings first (conflict-checked
+ * by {@link getenv}, so two disagreeing spellings throw rather than
+ * pick silently), then the bare `AGENT_ID` that getenv() deliberately
+ * ignores, then the fleet's established agent-id variables. A bare
+ * environment yields undefined and the caller falls back — see
+ * {@link hasStoreIdentity} for why polling must refuse that case.
+ */
+export function resolveAgentId(
+  env: Record<string, string | undefined> = process.env,
+): string | undefined {
+  return (
+    getenv("AGENT_ID", undefined, env) ||
+    env["AGENT_ID"] ||
+    env["CLAUDE_AGENT_ID"] ||
+    env["SAC_NAME"] ||
+    undefined
+  );
+}
+
+/**
+ * Whether this environment names the store identity outright.
+ *
+ * Fail-closed companion to {@link resolveSchema}: when neither an explicit
+ * schema override nor any AGENT_ID spelling is set, resolution silently
+ * falls back to the shared schema, where the runtime role typically has
+ * NO write grant — so every inbound persist fails and the batch is
+ * SKIPPED as lost. Measured 2026-10-09: a supervisor-spawned poller with
+ * a bare environment lost 23 consecutive updates this way. Callers that
+ * would poll (or supervise polling) must refuse to start when this is
+ * false, the same way they already refuse an empty allowlist.
+ */
+export function hasStoreIdentity(
+  env: Record<string, string | undefined> = process.env,
+): boolean {
+  return (
+    getenv("STORE_SCHEMA", undefined, env) !== undefined ||
+    resolveAgentId(env) !== undefined
+  );
 }
 
 /**

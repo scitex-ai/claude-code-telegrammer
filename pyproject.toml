@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "claude-code-telegrammer"
-version = "0.6.6"
+version = "0.7.0"
 description = "Custom Telegram MCP server + TUI auto-responder for running Claude Code as an autonomous Telegram agent"
 readme = "README.md"
 license = "AGPL-3.0"
@@ -31,6 +31,7 @@ classifiers = [
 
 [project.scripts]
 claude-code-telegrammer = "claude_code_telegrammer._cli:main"
+cct-gateway = "claude_code_telegrammer._gateway:main"
 
 [project.optional-dependencies]
 docs = [
@@ -56,6 +57,7 @@ packages = ["src/claude_code_telegrammer"]
 "ts/package.json" = "claude_code_telegrammer/ts/package.json"
 "ts/telegram-poller.ts" = "claude_code_telegrammer/ts/telegram-poller.ts"
 "ts/telegram-server.ts" = "claude_code_telegrammer/ts/telegram-server.ts"
+"ts/gateway-supervisor.ts" = "claude_code_telegrammer/ts/gateway-supervisor.ts"
 
 [project.entry-points."scitex_dev.hooks"]
 # Telegram guardrails CCT declares about its own delivery surface; CCT owns
@@ -74,4 +76,7 @@ include = [
     "ts/package.json",
     "ts/telegram-poller.ts",
     "ts/telegram-server.ts",
+    "ts/gateway-supervisor.ts",
+    "bin/cct-gateway",
+    "systemd/cct-gateway.service",
 ]
