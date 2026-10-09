@@ -1,0 +1,34 @@
+#!/bin/bash
+# cct-gateway — Host-level entry point for the CCT gateway supervisor.
+#
+# Resolves the LEAD-slot bot token (CCT_BOT_TOKEN precedence per
+# ts/lib/config.ts, else CCT_BOT_TOKEN_<SLOT> from the environment /
+# SAC_SECRETS_ENVRC pool files) and owns one detached ts/telegram-poller.ts
+# for it, restarting on crash with backoff. Normally run as
+# cct-gateway.service (systemd user unit), not by hand.
+#
+# Usage:
+#   cct-gateway           supervise the gateway poller (foreground)
+#   cct-gateway status    print gateway-status.json and exit
+#   cct-gateway --help    supervisor help
+#
+# Requires: bun (PATH or $BUN_BIN). Secrets: slot NAMES and pool PATHS may
+# appear in logs; token VALUES never do (supervisor contract).
+
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$SCRIPT_DIR/lib/common.sh"
+
+BUN="${BUN_BIN:-$(command -v bun || true)}"
+if [[ -z "$BUN" ]]; then
+    log_error "bun was not found. Set \$BUN_BIN or install bun (https://bun.sh)."
+    exit 127
+fi
+
+SUPERVISOR="$SCRIPT_DIR/ts/gateway-supervisor.ts"
+if [[ ! -f "$SUPERVISOR" ]]; then
+    log_error "supervisor entry missing: $SUPERVISOR"
+    exit 2
+fi
+
+exec "$BUN" run "$SUPERVISOR" "$@"

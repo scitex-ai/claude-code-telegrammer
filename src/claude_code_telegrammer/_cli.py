@@ -63,7 +63,7 @@ _USAGE = (
 )
 
 
-def _resolve_bun() -> str:
+def _resolve_bun(prog: str = "claude-code-telegrammer") -> str:
     """Return the path to the ``bun`` executable, or exit with a clear error."""
     candidates = [
         os.environ.get("BUN_BIN"),
@@ -74,7 +74,7 @@ def _resolve_bun() -> str:
         if candidate and os.path.exists(candidate):
             return candidate
     sys.stderr.write(
-        "claude-code-telegrammer: `bun` was not found.\n"
+        f"{prog}: `bun` was not found.\n"
         "  Set $BUN_BIN or install bun (https://bun.sh) — the server runs on bun.\n"
     )
     raise SystemExit(127)

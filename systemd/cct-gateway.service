@@ -1,0 +1,51 @@
+# cct-gateway.service — host-level CCT gateway poller supervisor (user unit).
+#
+# WHAT: owns ONE Telegram poller for ONE bot (the LEAD slot) OUTSIDE any
+# agent lifecycle, so inbound delivery survives zero-agents-up. It is outside
+# apptainer and outside `sac agents start/stop`: SAC never starts, stops, or
+# restarts this unit — `sac doctor --pollers` / `cct-audit` only OBSERVE it
+# via the status file the supervisor writes
+# (~/.scitex/claude-code-telegrammer/runtime/<agent>/gateway-status.json).
+#
+# INSTALL (gateway host, today scitex-compute-04), as the service user:
+#   pip install --user claude-code-telegrammer   # provides `cct-gateway`
+#   mkdir -p ~/.config/systemd/user
+#   cp systemd/cct-gateway.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now cct-gateway.service
+#   loginctl enable-linger "$USER"               # keep it up after logout
+#
+# SECRETS WIRING (names only — values never appear in unit files or logs):
+# The supervisor resolves CCT_BOT_TOKEN_<SLOT> (default SLOT=LEAD) from, in
+# order: (1) its own environment, (2) the colon-separated secret files in
+# $SAC_SECRETS_ENVRC, (3) the canonical fallback
+# $HOME/.bash.d/secrets/010_scitex/*.src (same read order as SAC's
+# _cct_token_pool/_envrc). A direct CCT_BOT_TOKEN (any alias spelling per
+# ts/lib/config.ts) always wins. To pin the pool explicitly, uncomment:
+#   Environment=SAC_SECRETS_ENVRC=/home/%u/.bash.d/secrets/010_scitex/020_telegram.src
+# To supervise a non-LEAD slot instead:
+#   Environment=CCT_BOT_TOKEN_SLOT=CARDS
+# To run a repo checkout instead of the pip-installed entrypoint:
+#   ExecStart=/home/%u/proj/claude-code-telegrammer/bin/cct-gateway
+# bun lookup: PATH first, else $BUN_BIN (same rule as the Python launcher).
+#
+# RESTARTS: Restart=on-failure (with RestartSec) is the OUTER supervision
+# loop: the supervisor itself bounds inner poller respawns (5, then a loud
+# fatal alarm) and exits non-zero, and systemd restarts it with a fresh
+# counter. A deliberate `systemctl stop` is not a failure — no restart.
+
+[Unit]
+Description=CCT gateway poller supervisor (LEAD bot, host-level)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/cct-gateway
+Restart=on-failure
+RestartSec=60
+# See SECRETS WIRING above to pin the pool or slot:
+# Environment=SAC_SECRETS_ENVRC=%h/.bash.d/secrets/010_scitex/020_telegram.src
+
+[Install]
+WantedBy=default.target
