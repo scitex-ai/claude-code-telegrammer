@@ -27,6 +27,8 @@ import {
   lookupPasswordFile,
   schemaForAgent,
   resolveSchema,
+  resolveAgentId,
+  hasStoreIdentity,
   quoteSchema,
   FLEET_DSN_ENV,
   SCHEMA_PREFIX,
@@ -236,6 +238,66 @@ describe("resolveSchema", () => {
 
   test("the default agent id is 'telegram'", () => {
     expect(resolveSchema({})).toBe(`${SCHEMA_PREFIX}telegram`);
+  });
+});
+
+describe("hasStoreIdentity", () => {
+  // Fail-closed companion to resolveSchema: an identity-less poller
+  // resolves the shared fallback schema and loses every inbound message
+  // (2026-10-09: 23 consecutive updates), so callers must refuse instead.
+  test("an explicit schema override counts as identity", () => {
+    expect(hasStoreIdentity({ CCT_STORE_SCHEMA: "cct_test_explicit" })).toBe(
+      true,
+    );
+  });
+
+  test("any AGENT_ID spelling counts as identity", () => {
+    expect(hasStoreIdentity({ AGENT_ID: "orochi" })).toBe(true);
+    expect(hasStoreIdentity({ CCT_AGENT_ID: "orochi" })).toBe(true);
+    expect(
+      hasStoreIdentity({
+        CLAUDE_CODE_TELEGRAMMER_AGENT_ID: "orochi",
+      }),
+    ).toBe(true);
+  });
+
+  test("fleet agent-id variables count as identity", () => {
+    expect(hasStoreIdentity({ CLAUDE_AGENT_ID: "orochi" })).toBe(true);
+    expect(hasStoreIdentity({ SAC_NAME: "orochi" })).toBe(true);
+  });
+
+  test("a bare environment has no identity — the poller must refuse", () => {
+    expect(hasStoreIdentity({})).toBe(false);
+  });
+});
+
+describe("resolveAgentId", () => {
+  test("canonical spellings win, conflict-checked by getenv", () => {
+    expect(resolveAgentId({ CCT_AGENT_ID: "orochi" })).toBe("orochi");
+    expect(
+      resolveAgentId({ CCT_AGENT_ID: "orochi", SAC_NAME: "other" }),
+    ).toBe("orochi");
+  });
+
+  test("bare and fleet spellings fill in", () => {
+    expect(resolveAgentId({ AGENT_ID: "bare" })).toBe("bare");
+    expect(resolveAgentId({ CLAUDE_AGENT_ID: "claude" })).toBe("claude");
+    expect(resolveAgentId({ SAC_NAME: "sac" })).toBe("sac");
+  });
+
+  test("conflicting canonical spellings throw rather than pick", () => {
+    expect(() =>
+      resolveAgentId({ CCT_AGENT_ID: "a", CLAUDE_CODE_TELEGRAMMER_AGENT_ID: "b" }),
+    ).toThrow();
+  });
+
+  test("a bare environment yields undefined", () => {
+    expect(resolveAgentId({})).toBeUndefined();
+  });
+
+  test("empty strings are absent, not identity", () => {
+    expect(resolveAgentId({ CCT_AGENT_ID: "" })).toBeUndefined();
+    expect(hasStoreIdentity({ CCT_AGENT_ID: "" })).toBe(false);
   });
 });
 

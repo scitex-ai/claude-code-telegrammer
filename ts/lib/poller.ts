@@ -26,6 +26,7 @@ import { processBatch } from "./poller-batch.js";
 import { recordSuccessfulPoll, startStallWatchdog } from "./poll-watchdog.js";
 import { getenv } from "./env.js";
 import { broadcastSystemAlert } from "./loudfail.js";
+import { hasStoreIdentity } from "./pg.js";
 import {
   startupConflictVerdict,
   STARTUP_409_LIMIT,
@@ -53,6 +54,33 @@ export function stopPolling(): void {
 
 export async function startPolling(): Promise<void> {
   log("poller", "starting getUpdates polling...");
+
+  // ── Store-identity preflight ──────────────────────────────────────
+  //
+  // Without an explicit schema override or any AGENT_ID spelling, the
+  // store resolves to the shared fallback schema, where the runtime role
+  // typically has NO write grant: every inbound persist then fails and
+  // the batch is SKIPPED as permanently lost. Measured 2026-10-09: a
+  // supervisor-spawned poller with a bare environment lost 23 consecutive
+  // updates this way, each announced only in its own log. An identity-less
+  // poller can only destroy mail, so — like the empty allowlist below —
+  // it must never start. This mirrors resolveSchema() exactly (override
+  // or AGENT_ID in any spelling); anything else would pass the gate and
+  // still resolve the wrong schema.
+  if (!hasStoreIdentity()) {
+    const refusal =
+      "REFUSING TO START: no store identity in this environment — " +
+      "CCT_STORE_SCHEMA, AGENT_ID (any spelling), CLAUDE_AGENT_ID and " +
+      "SAC_NAME are all unset, so the store would resolve to the shared " +
+      "fallback schema where this role cannot write, and every polled " +
+      "update would fail to persist and be SKIPPED as lost. Set " +
+      "CCT_AGENT_ID to the owning agent's id and restart. No Telegram " +
+      "call was made and no offset advanced.";
+    log("poller", refusal);
+    void broadcastSystemAlert(refusal);
+    process.exitCode = 1;
+    return;
+  }
 
   const access = loadAccess();
   if (!allowlistIsUsable(access)) {

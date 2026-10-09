@@ -66,6 +66,8 @@ import { openSync, closeSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
 import { log } from "./lib/log.js";
+import { getenv } from "./lib/env.js";
+import { hasStoreIdentity } from "./lib/pg.js";
 import { STALL_EXIT_CODE, SIGTERM_EXIT } from "./lib/exit-codes.js";
 import {
   plannedRestartNote,
@@ -212,6 +214,28 @@ async function main(): Promise<number> {
     process.env["CCT_BOT_TOKEN"] = resolved.token;
   }
   const tokenFp = tokenFingerprint(resolved.token);
+
+  // ── Store identity (names only in logs) ────────────────────────────
+  //
+  // The poller child inherits this process's environment wholesale, and
+  // its store resolves the agent schema from AGENT_ID (any spelling) or
+  // an explicit schema override. A supervisor started without either
+  // would spawn a poller that resolves the shared fallback schema, where
+  // the runtime role has no write grant — every inbound persist then
+  // fails and the batch is SKIPPED as permanently lost (measured
+  // 2026-10-09: 23 consecutive updates). Identity is deliberately NOT
+  // derived from the slot here: inventing an agent id from a slot name
+  // risks the same cross-wiring. Refuse to run degraded instead.
+  if (!hasStoreIdentity(process.env)) {
+    process.stderr.write(
+      `${SELF}: FATAL no store identity — CCT_STORE_SCHEMA and AGENT_ID ` +
+        `(in any spelling) are all unset. A poller started without identity ` +
+        `would resolve the shared fallback store schema and lose every ` +
+        `inbound message. Set CCT_AGENT_ID to the owning agent's id. ` +
+        `Refusing to run degraded; not starting a poller.\n`,
+    );
+    return 1;
+  }
 
   // ── Config-dependent imports AFTER the token is fixed ─────────────────
   const { STATE_DIR, BOT_TOKEN_HASH } = await import("./lib/config.js");

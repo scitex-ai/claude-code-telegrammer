@@ -25,6 +25,11 @@
 #   Environment=SAC_SECRETS_ENVRC=/home/%u/.bash.d/secrets/010_scitex/020_telegram.src
 # To supervise a non-LEAD slot instead:
 #   Environment=CCT_BOT_TOKEN_SLOT=CARDS
+# REQUIRED: the owning agent's id. The poller resolves its store schema
+# from this (any AGENT_ID spelling works); without it the supervisor
+# refuses to start rather than spawn a poller that would silently lose
+# every inbound message. Must match the bot slot's owner:
+#   Environment=CCT_AGENT_ID=scitex-infrastructure-lead
 # To run a repo checkout instead of the pip-installed entrypoint:
 #   ExecStart=/home/%u/proj/claude-code-telegrammer/bin/cct-gateway
 # bun lookup: PATH first, else $BUN_BIN (same rule as the Python launcher).
