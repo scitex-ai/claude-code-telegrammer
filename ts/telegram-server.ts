@@ -480,10 +480,21 @@ if (shouldStartInternalPoller(TELEGRAM_ENABLED, EXTERNAL_POLLER)) {
     "telegram disabled (CCT_BOT_TOKEN empty) — MCP connected, poller not started",
   );
 } else {
+  // External mode names a supervisor, but nothing guarantees one is
+  // running (measured 2026-10-09: apps-lead inbound dead all day with
+  // external mode set and zero supervisors alive). Supervision here is
+  // adopt-if-live: a healthy external poller is left alone (newest-wins
+  // takeover only fires on stale code), a missing one is spawned. This
+  // makes MCP-invoked self-start hold in every mode.
   log(
     "server",
-    "external poller mode enabled; MCP server will not spawn or supervise a poller",
+    "external poller mode enabled; verifying a live poller via supervision (adopt-if-live)",
   );
+  startPollerSupervision({
+    stateDir: STATE_DIR,
+    tokenHash: BOT_TOKEN_HASH,
+    pollerScriptPath: join(import.meta.dir, "telegram-poller.ts"),
+  });
 }
 
 // Cross-process inbound-notification relay (adversarial-review finding #3):
