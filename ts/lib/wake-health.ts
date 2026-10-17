@@ -43,6 +43,7 @@ import { getSql } from "./pg.js";
 import { storeSchema } from "./store.js";
 import { statements } from "./store-schema.js";
 import { log } from "./log.js";
+import { getenv } from "./env.js";
 import { broadcastSystemAlert } from "./loudfail.js";
 import type { WakeFailCategory } from "./wake.js";
 
@@ -61,11 +62,106 @@ const META_KEY = "wake_failure_state";
 const PERSIST_MAX_ATTEMPTS = 2;
 const PERSIST_RETRY_DELAY_MS = 50;
 
+/**
+ * Default TTL for per-message unresolved wake-failure entries
+ * (card cct-wake-backlog-20261017): 24h.
+ *
+ * WHY A TTL. The unresolved map used to clear entries only on a
+ * per-message success, so entries nobody ever retried (row drained by
+ * another path, relay down for the night, quota wall outlasting the
+ * pending row) pinned wake_delivery_backlog red FOREVER — 415 stale
+ * failures 9/19–10/16 while the live path was green. Every entry an
+ * active retry loop touches gets its atMs refreshed on each attempt
+ * (recordWakeFailure below), so a TTL only ever evicts entries nobody
+ * is retrying — exactly the stale ones.
+ *
+ * TRADE-OFF (documented, not hidden): if the relay is down for longer
+ * than the TTL with genuinely undelivered messages pending, health goes
+ * green on age alone. That is bounded staleness replacing unbounded
+ * staleness; wake_target_reachable still probes the live target, and the
+ * pending rows themselves still retry on relay restart.
+ *
+ * Override: CCT_WAKE_UNRESOLVED_TTL_MS (ms; non-numeric/non-positive
+ * values fall back to the default rather than failing the hot path).
+ */
+export const UNRESOLVED_ENTRY_TTL_MS_DEFAULT = 24 * 60 * 60 * 1000;
+
+export function unresolvedEntryTtlMs(
+  env: Record<string, string | undefined> = process.env,
+): number {
+  const raw = getenv("WAKE_UNRESOLVED_TTL_MS", undefined, env);
+  if (raw === undefined) return UNRESOLVED_ENTRY_TTL_MS_DEFAULT;
+  const ms = Number(raw);
+  if (!Number.isFinite(ms) || ms <= 0) return UNRESOLVED_ENTRY_TTL_MS_DEFAULT;
+  return Math.floor(ms);
+}
+
+type UnresolvedMap = NonNullable<WakeFailureState["unresolved"]>;
+
+/**
+ * Drop entries older than ttlMs (evidence-based eviction: an entry whose
+ * age cannot be established — missing/non-numeric atMs — is dropped too,
+ * since unbounded age is exactly what this TTL exists to bound).
+ * Future-dated entries (clock skew) are kept.
+ */
+function pruneStaleEntries(
+  map: UnresolvedMap,
+  now: number,
+  ttlMs: number,
+): UnresolvedMap {
+  const out: UnresolvedMap = {};
+  for (const [key, entry] of Object.entries(map)) {
+    if (
+      typeof entry?.atMs === "number" &&
+      Number.isFinite(entry.atMs) &&
+      now - entry.atMs <= ttlMs
+    ) {
+      out[key] = entry;
+    }
+  }
+  return out;
+}
+
+/**
+ * Present a state for the health doctor: prune TTL-expired entries and
+ * recompute count/last* from the survivors, so the check answers "is the
+ * wake path stuck failing RIGHT NOW". States with no unresolved map (the
+ * legacy bare counter) pass through untouched. Deliberately VIEW-ONLY —
+ * never persists: the reader (MCP-server process) must not do a
+ * read-modify-write against the writer (poller process); writer-side
+ * record* calls clean the persisted row on their next write.
+ */
+function presentState(
+  state: WakeFailureState,
+  now: number,
+  ttlMs: number,
+): WakeFailureState {
+  const map = state.unresolved;
+  if (map === undefined || Object.keys(map).length === 0) return state;
+  const pruned = pruneStaleEntries(map, now, ttlMs);
+  const keys = Object.keys(pruned);
+  if (keys.length === 0) {
+    return { count: 0, lastCategory: null, lastReason: null, lastAtMs: null };
+  }
+  let latestKey = keys[0];
+  for (const key of keys) {
+    if (pruned[key].atMs > pruned[latestKey].atMs) latestKey = key;
+  }
+  const latest = pruned[latestKey];
+  return {
+    count: keys.length,
+    lastCategory: latest.category,
+    lastReason: latest.reason,
+    lastAtMs: latest.atMs,
+    unresolved: pruned,
+  };
+}
+
 let count = 0;
 let lastCategory: WakeFailCategory | null = null;
 let lastReason: string | null = null;
 let lastAtMs: number | null = null;
-let unresolved: NonNullable<WakeFailureState["unresolved"]> = {};
+let unresolved: UnresolvedMap = {};
 
 async function realPersistAttempt(): Promise<void> {
   const state: WakeFailureState = { count, lastCategory, lastReason, lastAtMs };
@@ -167,6 +263,12 @@ export async function recordWakeFailure(
       atMs: now,
       attempts: (previous?.attempts ?? 0) + 1,
     };
+    // Writer-side TTL sweep (card cct-wake-backlog-20261017): the merge
+    // above can resurrect entries the persisted row has carried for weeks;
+    // evict the expired ones here so the row converges back to live state
+    // on the next write. The just-recorded entry (atMs === now) always
+    // survives its own sweep.
+    unresolved = pruneStaleEntries(unresolved, now, unresolvedEntryTtlMs());
     count = Object.keys(unresolved).length;
   } else {
     count += 1;
@@ -183,6 +285,13 @@ export async function recordWakeSuccess(messageKey?: string): Promise<void> {
     const persisted = await readPersisted();
     unresolved = { ...(persisted?.unresolved ?? {}), ...unresolved };
     delete unresolved[messageKey];
+    // Same writer-side TTL sweep as the failure path: a success for one
+    // message also retires every OTHER entry nobody has retried in TTL.
+    unresolved = pruneStaleEntries(
+      unresolved,
+      Date.now(),
+      unresolvedEntryTtlMs(),
+    );
     count = Object.keys(unresolved).length;
     if (count === 0) {
       lastCategory = null;
@@ -209,9 +318,18 @@ export async function recordWakeSuccess(messageKey?: string): Promise<void> {
  * `health` doctor mode, which never starts the store at all).
  */
 export async function getWakeFailureState(): Promise<WakeFailureState> {
+  const ttlMs = unresolvedEntryTtlMs();
+  const now = Date.now();
   const persisted = await readPersisted();
-  if (persisted !== null) return persisted;
-  return { count, lastCategory, lastReason, lastAtMs, unresolved };
+  // TTL-expired entries are hidden here (view-only — see presentState),
+  // so health reflects the current path state even when no writer has run
+  // since the failures (e.g. relay idle, rows drained by another path).
+  if (persisted !== null) return presentState(persisted, now, ttlMs);
+  return presentState(
+    { count, lastCategory, lastReason, lastAtMs, unresolved },
+    now,
+    ttlMs,
+  );
 }
 
 /** Test-only: reset all state, in-process AND persisted. */
