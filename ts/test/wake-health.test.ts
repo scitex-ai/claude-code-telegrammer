@@ -30,6 +30,8 @@ import {
   _resetWakeFailureState,
   _setPersistAttempt,
   _resetPersistAttempt,
+  unresolvedEntryTtlMs,
+  UNRESOLVED_ENTRY_TTL_MS_DEFAULT,
 } from "../lib/wake-health.js";
 import { initStore } from "../lib/store.js";
 import { query } from "./helpers/store-access.js";
@@ -94,8 +96,9 @@ describe("wake failure tracker", () => {
   });
 
   test("success for another message does not clear an unresolved message", async () => {
-    await recordWakeFailure("server_error", "HTTP 502", 1000, "row-1665");
-    await recordWakeFailure("timeout", "later message", 2000, "row-1666");
+    const now = Date.now();
+    await recordWakeFailure("server_error", "HTTP 502", now - 1000, "row-1665");
+    await recordWakeFailure("timeout", "later message", now, "row-1666");
     await recordWakeSuccess("row-1666");
     const s = await getWakeFailureState();
     expect(s.count).toBe(1);
@@ -111,6 +114,121 @@ describe("wake failure tracker", () => {
     expect(s.lastAtMs).not.toBeNull();
     expect(s.lastAtMs!).toBeGreaterThanOrEqual(before);
     expect(s.lastAtMs!).toBeLessThanOrEqual(after);
+  });
+});
+
+describe("unresolved entry TTL (card cct-wake-backlog-20261017)", () => {
+  beforeEach(async () => {
+    await _resetWakeFailureState();
+  });
+
+  test("default TTL is 24h", () => {
+    expect(UNRESOLVED_ENTRY_TTL_MS_DEFAULT).toBe(24 * 60 * 60 * 1000);
+  });
+
+  test("unresolvedEntryTtlMs honours CCT_WAKE_UNRESOLVED_TTL_MS; garbage falls back", () => {
+    expect(
+      unresolvedEntryTtlMs({ CCT_WAKE_UNRESOLVED_TTL_MS: "60000" }),
+    ).toBe(60000);
+    expect(unresolvedEntryTtlMs({})).toBe(UNRESOLVED_ENTRY_TTL_MS_DEFAULT);
+    expect(unresolvedEntryTtlMs({ CCT_WAKE_UNRESOLVED_TTL_MS: "" })).toBe(
+      UNRESOLVED_ENTRY_TTL_MS_DEFAULT,
+    );
+    expect(unresolvedEntryTtlMs({ CCT_WAKE_UNRESOLVED_TTL_MS: "banana" })).toBe(
+      UNRESOLVED_ENTRY_TTL_MS_DEFAULT,
+    );
+    expect(unresolvedEntryTtlMs({ CCT_WAKE_UNRESOLVED_TTL_MS: "-5" })).toBe(
+      UNRESOLVED_ENTRY_TTL_MS_DEFAULT,
+    );
+    expect(unresolvedEntryTtlMs({ CCT_WAKE_UNRESOLVED_TTL_MS: "0" })).toBe(
+      UNRESOLVED_ENTRY_TTL_MS_DEFAULT,
+    );
+  });
+
+  test("getWakeFailureState hides entries older than the TTL — health reflects the live path, not history", async () => {
+    const now = Date.now();
+    const ttl = unresolvedEntryTtlMs();
+    await recordWakeFailure(
+      "quota_capped",
+      "HTTP 429 from September",
+      now - ttl - 1000,
+      "row-stale",
+    );
+    await recordWakeFailure("timeout", "fresh failure", now, "row-fresh");
+    const s = await getWakeFailureState();
+    expect(s.count).toBe(1);
+    expect(s.unresolved?.["row-stale"]).toBeUndefined();
+    expect(s.unresolved?.["row-fresh"]?.attempts).toBe(1);
+    expect(s.lastCategory).toBe("timeout");
+    expect(s.lastReason).toBe("fresh failure");
+    expect(s.lastAtMs).toBe(now);
+  });
+
+  test("when every entry is stale the state reads fully clear (count 0, last* null)", async () => {
+    const now = Date.now();
+    const ttl = unresolvedEntryTtlMs();
+    await recordWakeFailure(
+      "server_error",
+      "HTTP 502 weeks ago",
+      now - ttl - 1000,
+      "row-old",
+    );
+    const s = await getWakeFailureState();
+    expect(s.count).toBe(0);
+    expect(s.lastCategory).toBeNull();
+    expect(s.lastReason).toBeNull();
+    expect(s.lastAtMs).toBeNull();
+  });
+
+  test("an actively-retried entry stays fresh: each attempt refreshes atMs", async () => {
+    const now = Date.now();
+    const ttl = unresolvedEntryTtlMs();
+    // First attempt long ago...
+    await recordWakeFailure("quota_capped", "HTTP 429", now - ttl - 1000, "row-1");
+    // ...but a retry just now refreshes it back into the live window.
+    await recordWakeFailure("quota_capped", "HTTP 429", now, "row-1");
+    const s = await getWakeFailureState();
+    expect(s.count).toBe(1);
+    expect(s.unresolved?.["row-1"]?.attempts).toBe(2);
+  });
+
+  test("a new failure write sweeps entries the persisted row carried past TTL", async () => {
+    const now = Date.now();
+    const ttl = unresolvedEntryTtlMs();
+    await recordWakeFailure(
+      "quota_capped",
+      "stale 429",
+      now - ttl - 1000,
+      "row-stale",
+    );
+    // A fresh failure for another message sweeps the stale one writer-side.
+    await recordWakeFailure("timeout", "fresh", now, "row-fresh");
+    const s = await getWakeFailureState();
+    expect(s.count).toBe(1);
+    expect(s.unresolved?.["row-stale"]).toBeUndefined();
+  });
+
+  test("a success for one message also retires every other stale entry", async () => {
+    const now = Date.now();
+    const ttl = unresolvedEntryTtlMs();
+    await recordWakeFailure(
+      "quota_capped",
+      "stale 429",
+      now - ttl - 1000,
+      "row-stale",
+    );
+    await recordWakeFailure("timeout", "fresh", now, "row-fresh");
+    await recordWakeSuccess("row-fresh");
+    const s = await getWakeFailureState();
+    expect(s.count).toBe(0);
+    expect(s.lastCategory).toBeNull();
+  });
+
+  test("legacy bare-counter states (no unresolved map) pass through untouched", async () => {
+    await recordWakeFailure("connection_refused", "connect ECONNREFUSED", 1000);
+    const s = await getWakeFailureState();
+    expect(s.count).toBe(1);
+    expect(s.lastCategory).toBe("connection_refused");
   });
 });
 

@@ -23,6 +23,12 @@ import {
   savePendingNotification,
   relayPendingNotificationsOnce,
   startNotifyRelay,
+  wakeDeferMs,
+  WAKE_DEFER_BASE_MS,
+  WAKE_DEFER_CAP_MS,
+  wakeRowBudgetMs,
+  WAKE_ROW_BUDGET_MS_DEFAULT,
+  _resetWakeInFlight,
   type PendingNotificationPayload,
 } from "../lib/notify-relay.js";
 import {
@@ -282,6 +288,239 @@ describe("wake-health reconcile-on-clear (cct-wake-live-session-20260930 residua
 
     expect(delivered).toBe(1);
     expect((await getWakeFailureState()).count).toBe(0);
+  });
+});
+
+describe("wake retry deferral for non-transient failures (cct-wake-backlog-20261017)", () => {
+  test("wakeDeferMs: 60s base, doubling per attempt, capped at 30min", () => {
+    expect(WAKE_DEFER_BASE_MS).toBe(60_000);
+    expect(WAKE_DEFER_CAP_MS).toBe(30 * 60_000);
+    expect(wakeDeferMs(1)).toBe(60_000);
+    expect(wakeDeferMs(2)).toBe(120_000);
+    expect(wakeDeferMs(3)).toBe(240_000);
+    expect(wakeDeferMs(100)).toBe(WAKE_DEFER_CAP_MS);
+    expect(wakeDeferMs(NaN)).toBe(60_000);
+    expect(wakeDeferMs(0)).toBe(60_000);
+  });
+
+  test("a quota_capped wake failure defers the next tick — no per-second 429 hammering", async () => {
+    await _resetWakeFailureState();
+    const rows = [{
+      id: 1667,
+      pending_notification: JSON.stringify({
+        content: "operator request during quota wall",
+        meta: { row_id: "1667" },
+      }),
+    }];
+    let wakes = 0;
+    const { mcp } = fakeMcp();
+    const deps = {
+      mcp,
+      deliveryMode: "wake" as const,
+      getPending: () => rows,
+      clearPending: async () => {},
+      wake: async () => {
+        wakes += 1;
+        return { ok: false, category: "quota_capped", reason: "HTTP 429" };
+      },
+    };
+    expect(await relayPendingNotificationsOnce(deps)).toBe(0);
+    expect(wakes).toBe(1);
+    expect((await getWakeFailureState()).count).toBe(1);
+
+    // Immediate second tick: deferred — wake NOT called again, row pending.
+    expect(await relayPendingNotificationsOnce(deps)).toBe(0);
+    expect(wakes).toBe(1);
+    expect((await getWakeFailureState()).count).toBe(1);
+    await _resetWakeFailureState();
+  });
+
+  test("backoff expiry resumes the wake retry and a success clears the key", async () => {
+    await _resetWakeFailureState();
+    await recordWakeFailure(
+      "quota_capped",
+      "HTTP 429",
+      Date.now() - wakeDeferMs(1) - 1000,
+      "1668",
+    );
+    const rows = [{
+      id: 1668,
+      pending_notification: JSON.stringify({
+        content: "quota wall just lifted",
+        meta: { row_id: "1668" },
+      }),
+    }];
+    let wakes = 0;
+    const cleared: number[] = [];
+    const { mcp } = fakeMcp();
+    const delivered = await relayPendingNotificationsOnce({
+      mcp,
+      deliveryMode: "wake",
+      getPending: () => rows,
+      clearPending: (id: number) => cleared.push(id),
+      wake: async () => {
+        wakes += 1;
+        return { ok: true, status: 200 };
+      },
+    });
+    expect(wakes).toBe(1);
+    expect(delivered).toBe(1);
+    expect(cleared).toEqual([1668]);
+    expect((await getWakeFailureState()).count).toBe(0);
+    await _resetWakeFailureState();
+  });
+
+  test("transient server_error keeps the every-tick retry (no deferral)", async () => {
+    await _resetWakeFailureState();
+    const rows = [{
+      id: 1669,
+      pending_notification: JSON.stringify({
+        content: "transient 502",
+        meta: { row_id: "1669" },
+      }),
+    }];
+    let wakes = 0;
+    const { mcp } = fakeMcp();
+    const deps = {
+      mcp,
+      deliveryMode: "wake" as const,
+      getPending: () => rows,
+      clearPending: async () => {},
+      wake: async () => {
+        wakes += 1;
+        return { ok: false, category: "server_error", reason: "HTTP 502" };
+      },
+    };
+    expect(await relayPendingNotificationsOnce(deps)).toBe(0);
+    expect(await relayPendingNotificationsOnce(deps)).toBe(0);
+    expect(wakes).toBe(2);
+    await _resetWakeFailureState();
+  });
+});
+
+describe("burst tolerance: 4-message busy-502 bursts (cct-wake-backlog-20261017)", () => {
+  test("wakeRowBudgetMs defaults to 120s; env override parses, garbage falls back", () => {
+    expect(WAKE_ROW_BUDGET_MS_DEFAULT).toBe(120_000);
+    expect(wakeRowBudgetMs({})).toBe(WAKE_ROW_BUDGET_MS_DEFAULT);
+    expect(wakeRowBudgetMs({ CCT_WAKE_RELAY_ROW_BUDGET_MS: "5000" })).toBe(5000);
+    expect(wakeRowBudgetMs({ CCT_WAKE_RELAY_ROW_BUDGET_MS: "0" })).toBe(0);
+    expect(wakeRowBudgetMs({ CCT_WAKE_RELAY_ROW_BUDGET_MS: "" })).toBe(
+      WAKE_ROW_BUDGET_MS_DEFAULT,
+    );
+    expect(wakeRowBudgetMs({ CCT_WAKE_RELAY_ROW_BUDGET_MS: "banana" })).toBe(
+      WAKE_ROW_BUDGET_MS_DEFAULT,
+    );
+    expect(wakeRowBudgetMs({ CCT_WAKE_RELAY_ROW_BUDGET_MS: "-3" })).toBe(
+      WAKE_ROW_BUDGET_MS_DEFAULT,
+    );
+  });
+
+  function burstRows(ids: number[]) {
+    return ids.map((id) => ({
+      id,
+      pending_notification: JSON.stringify({
+        content: `burst message ${id}`,
+        meta: { row_id: String(id) },
+      }),
+    }));
+  }
+
+  test("a 4-burst of fast 502s is fully attempted in one tick — nothing stalls, backlog records all four", async () => {
+    await _resetWakeFailureState();
+    const rows = burstRows([1671, 1672, 1673, 1674]);
+    const attempted: number[] = [];
+    const { mcp } = fakeMcp();
+    const delivered = await relayPendingNotificationsOnce({
+      mcp,
+      deliveryMode: "wake",
+      getPending: () => rows,
+      clearPending: async () => {},
+      wake: async (_content, meta) => {
+        attempted.push(Number(meta.row_id));
+        return { ok: false, category: "server_error", reason: "HTTP 502" };
+      },
+    });
+    expect(delivered).toBe(0);
+    expect(attempted.sort()).toEqual([1671, 1672, 1673, 1674]);
+    expect((await getWakeFailureState()).count).toBe(4);
+    await _resetWakeFailureState();
+  });
+
+  test("one hung 502 attempt does not freeze the tick: the other three still attempt, the hung row detaches without a second POST", async () => {
+    await _resetWakeFailureState();
+    _resetWakeInFlight();
+    const prev = process.env.CCT_WAKE_RELAY_ROW_BUDGET_MS;
+    process.env.CCT_WAKE_RELAY_ROW_BUDGET_MS = "50";
+    try {
+      const rows = burstRows([1681, 1682, 1683, 1684]);
+      const attempted: number[] = [];
+      const { mcp } = fakeMcp();
+      const deps = {
+        mcp,
+        deliveryMode: "wake" as const,
+        getPending: () => rows,
+        clearPending: async () => {},
+        wake: (_content: string, meta: Record<string, string>) => {
+          attempted.push(Number(meta.row_id));
+          if (meta.row_id === "1681") return new Promise<any>(() => {}); // wedged sidecar: never settles
+          return Promise.resolve({ ok: false, category: "server_error", reason: "HTTP 502" });
+        },
+      };
+      const started = Date.now();
+      // Would hang forever pre-fix (sequential await + settle-gated reschedule).
+      expect(await relayPendingNotificationsOnce(deps)).toBe(0);
+      expect(Date.now() - started).toBeLessThan(4000);
+      expect(attempted.sort()).toEqual([1681, 1682, 1683, 1684]);
+
+      // Immediate second tick: the hung row is guarded (no second POST),
+      // the 502 rows retry as designed.
+      const hungAttempts = attempted.filter((id) => id === 1681).length;
+      expect(await relayPendingNotificationsOnce(deps)).toBe(0);
+      expect(attempted.filter((id) => id === 1681).length).toBe(hungAttempts);
+      expect(attempted.filter((id) => id !== 1681).length).toBeGreaterThan(3);
+    } finally {
+      if (prev === undefined) delete process.env.CCT_WAKE_RELAY_ROW_BUDGET_MS;
+      else process.env.CCT_WAKE_RELAY_ROW_BUDGET_MS = prev;
+      _resetWakeInFlight();
+      await _resetWakeFailureState();
+    }
+  });
+
+  test("a detached attempt that succeeds late still clears its row and its backlog key", async () => {
+    await _resetWakeFailureState();
+    _resetWakeInFlight();
+    const prev = process.env.CCT_WAKE_RELAY_ROW_BUDGET_MS;
+    process.env.CCT_WAKE_RELAY_ROW_BUDGET_MS = "25";
+    try {
+      const rows = burstRows([1691]);
+      const cleared: number[] = [];
+      let wakes = 0;
+      const { mcp } = fakeMcp();
+      const delivered = await relayPendingNotificationsOnce({
+        mcp,
+        deliveryMode: "wake",
+        getPending: () => rows,
+        clearPending: (id: number) => cleared.push(id),
+        wake: async () => {
+          wakes += 1;
+          await new Promise((r) => setTimeout(r, 100)); // settles after the 25ms budget
+          return { ok: true, status: 200 };
+        },
+      });
+      // Tick moved on without waiting: nothing counted delivered yet.
+      expect(wakes).toBe(1);
+      expect(delivered).toBe(0);
+      expect(cleared).toEqual([]);
+      // Late settlement finishes the bookkeeping: row cleared, key resolved.
+      await new Promise((r) => setTimeout(r, 300));
+      expect(cleared).toEqual([1691]);
+      expect((await getWakeFailureState()).count).toBe(0);
+    } finally {
+      if (prev === undefined) delete process.env.CCT_WAKE_RELAY_ROW_BUDGET_MS;
+      else process.env.CCT_WAKE_RELAY_ROW_BUDGET_MS = prev;
+      _resetWakeInFlight();
+      await _resetWakeFailureState();
+    }
   });
 });
 
